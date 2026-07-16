@@ -1,0 +1,11356 @@
+[A2UI] HCI-UI
+=============
+
+【提问 轮数1】
+基本原则
+
+我的研究偏好与核心诉求
+
+一、我的研究定位：以 GUI Agent 技术为根基，做人本问题驱动的 AI × HCI
+
+我的核心背景和竞争力来自 Agentic AI，尤其是 GUI Agent、Computer Use Agent、多模态交互轨迹、GUI 与 MCP/tool 的混合执行、sandbox、harness 和自动评估。因此，我不希望为了进入 HCI，把论文做成一个以用户访谈和界面设计为主、技术系统只是支撑材料的工作。
+
+但我同样不希望做成一篇纯 AI benchmark，只在最后加入几个用户问卷，借用 HCI 的语言包装算法贡献。
+
+我真正想要的是：
+
+由一个具体、真实的人本问题定义技术任务，再用足够扎实的 AI、系统和工程方法解决它。
+
+所谓 tech-heavy human-centric，对我而言不是“技术多一点、用户研究也多一点”，而是：
+
+人本问题决定模型要预测什么；
+
+用户价值决定 benchmark 如何构造；
+
+用户边界决定 verifier 如何评分；
+
+技术系统必须真正改善用户的理解、控制、决策或纠错能力；
+
+用户研究用于验证这些人本目标，而不是给一个已经完成的 AI 系统补合法性。
+
+我希望 GUI Agent / CUA 成为我的长期技术护城河。相比已经非常拥挤的通用 coding agent，GUI Agent 涉及视觉感知、页面状态、轨迹理解、跨模态执行、工具调用和真实环境副作用，更能体现我的既有积累，也更难被普通 HCI 研究者快速复制。
+
+因此，除非研究问题天然属于 coding agent，否则我不希望为了开发方便，把工作退化成普通的 IDE 插件或代码助手研究。
+
+二、我对研究问题的偏好：问题要窄、真实、有张力，但不能概念膨胀
+
+我喜欢前沿且具有原则性的研究问题。它最好来自当前真实产品正在发生的变化，例如：
+
+agent 从逐步 GUI 操作转向高压缩的 MCP/tool shortcut；
+
+agent 从即时执行转向持久技能、记忆和长期复用；
+
+agent 在提高效率时，可能跳过原本属于用户的检查、确认或决定机会；
+
+agent 的执行过程越来越不可见，但能够造成的外部影响越来越大。
+
+这些现象在 Codex、Claude Code、Computer Use、MCP 等产品中具有明确的工业意义，也能让产品经理、交互设计师和开发者直接理解为什么值得研究。
+
+但是，我不喜欢一个选题同时容纳大量构念。一个方向即使包含很多有趣关键词，也不能让它们全部成为主线。
+
+例如，一篇论文不应该同时把以下内容都作为主要问题：
+
+trust；
+
+consent；
+
+skill drift；
+
+provenance；
+
+GUI–MCP mode shift；
+
+data-use drift；
+
+completion drift；
+
+dark patterns；
+
+memory；
+
+active perception；
+
+future reuse；
+
+repair。
+
+这会产生一种“什么都讨论了，所以好像很充实”的假象，实际上会让研究失去中心。
+
+我理想中的论文应当只有：
+
+一个主要人本矛盾，一个核心构念，一套技术闭环，一条清楚的评估逻辑。
+
+可以有多个模块，但每个模块都必须直接服务于同一个问题，而不是每增加一个模块就引入一个新的研究主题。
+
+我喜欢问题的表达足够漂亮、有理论张力，例如强调“目标完成并不等于过程符合用户意图”“自动化效率不应以消除用户决定权为代价”。但这种表达必须能够进一步落到可执行、可测量、可构造数据的问题上，而不能停留在哲学或伦理口号层面。
+
+三、我对论文形态的要求：必须是一个完整、可运行、可验证的技术项目
+
+我不接受论文主体是：
+
+一个界面原型 + 用户觉得不错 + 若干访谈主题。
+
+这类工作无法充分体现我的技术背景，也很难形成对求职有价值的工程成果。
+
+我需要的完整形态是：
+
+受控的 GUI–MCP 环境→ 明确的数据与状态表示→ 一个确实有必要的模型或 framework→ 自动 verifier→ 规模化自动实验→ 小规模但扎实的用户研究→ 可运行、可复现的 GitHub 项目。
+
+1. 自动化评估必须是主体，而不是补充
+
+用户研究可以回答：
+
+用户是否看懂了系统；
+
+用户是否更准确地发现问题；
+
+用户是否能更好地设置或修复边界；
+
+用户是否保留了控制感和决定权。
+
+但论文还必须自动回答：
+
+agent 是否完成任务；
+
+是否产生不合适的状态变化；
+
+是否错误放行危险行为；
+
+是否错误阻止合理自动化；
+
+是否增加过多确认负担；
+
+是否能迁移到未来任务和未见工具；
+
+系统在 utility 与用户价值之间处于什么位置。
+
+我不希望只报告 task success，因为一个 agent 完全可能高质量完成任务，却在完成过程中改变了收件人、提交状态、权限、发布范围或其他用户本应决定的事项。
+
+因此，自动评估不能只衡量“任务做没做完”，而应衡量：
+
+任务完成得是否符合用户认可的边界，以及系统在降低越界的同时保留了多少自动化收益。
+
+2. GitHub 项目必须是真正的可交付成果
+
+最终项目应该能够独立运行和展示，而不是一组无法复现的实验脚本。
+
+它至少应呈现出一条完整链路：
+
+一个 Web-based sandbox；
+
+GUI 操作路径与 MCP/tool 路径；
+
+可重置的环境状态；
+
+轨迹和状态变化记录；
+
+benchmark cases；
+
+自动 verifier；
+
+baselines；
+
+训练或推理代码；
+
+自动评测脚本；
+
+可视化或治理界面；
+
+清晰的 README 和 demo。
+
+我希望这个项目在求职中能够证明，我不仅能提出 HCI 概念，也能把问题转化为数据、模型、系统、实验和产品机制。
+
+四、我对训练的态度：可以轻量训练，但必须“非训练不可”
+
+我并不要求每篇论文一定训练模型。train-free framework 如果足够新、足够系统化、自动实验足够扎实，也可以成立。
+
+但是，如果论文中引入训练，训练必须非常自然。理想状态是审稿人看到问题后，会认为：
+
+“这里存在一个规则难以可靠表达的映射，确实应该学习；作者也确实训练了。”
+
+我不接受为了显得 tech-heavy，额外训练一个没有必要的分类器。
+
+例如，直接训练模型根据工具名输出：
+
+allow / ask / block
+
+并不是我喜欢的训练方式。因为在工具集合预定义时，模型很可能只是记住：
+
+send_email 风险高；
+
+read_file 风险低；
+
+merge_pr 需要确认。
+
+这种情况下，静态规则或 allowlist 可能更简单、更稳定，也更容易解释。训练没有证明必要性。
+
+更符合我偏好的训练对象应当依赖：
+
+当前任务状态；
+
+工具的具体参数；
+
+工具执行后可能造成的 effect；
+
+GUI 轨迹中原本存在的中间状态或检查机会；
+
+用户此前认可的执行边界；
+
+不同工具之间共享的后果语义。
+
+换句话说，模型应学习的是：
+
+行为在当前语境中会造成什么用户相关后果，或者两条执行路径是否在人本意义上等价。
+
+而不是：
+
+某个工具名称通常安不安全。
+
+训练还必须通过专门的实验排除记忆和捷径：
+
+同一个工具，因参数不同得到相反判断；
+
+不同工具，因为造成相同 effect 得到相同判断；
+
+工具重命名或 schema 改写后仍然有效；
+
+未见工具和未见任务上的 OOD 测试；
+
+与规则、prompt、静态 policy 等简单基线比较；
+
+必要时使用规则–模型混合，而不是让模型承担所有确定性判断。
+
+我更偏好轻量 SFT、QLoRA 或小型 critic，而不是在有限时间里训练一个更强的 GUI executor。executor 可以复用现有模型；我的创新更适合放在 effect understanding、cross-path comparison、policy inference 或 human-relevant critic 上。
+
+五、我对 HCI 与人工数据的要求：人类必须定义价值，但不能阻塞全部技术流程
+
+我重视人本构念的正当性，因此不接受凭空在数据里写入几个 GT 字段，然后假设它们天然代表用户价值。
+
+例如：
+
+finality_escalated = true audience_escalated = true reversibility_reduced = true
+
+这些字段不能只因为研究者或大模型这样标记，就被当作无争议事实。
+
+我会追问：
+
+这个字段来自环境的真实状态变化吗？
+
+是研究者制定的操作化规则吗？
+
+是大模型自动判断的吗？
+
+还是来自真实用户的偏好和判断？
+
+部署时是否能够获得同样的信息？
+
+但另一方面，我也不接受把大规模人工调查和逐条标注放在全部技术工作的最前面。如果必须先完成大量访谈，才能获得标签、生成数据、开始训练和运行 benchmark，那么整个项目会被人类研究流程严重拖慢。
+
+我理想中的分工是三层：
+
+第一层：环境事实
+
+尽量直接由 sandbox 和状态数据库提供，例如：
+
+邮件是否从 draft 变成 sent；
+
+是否新增外部收件人；
+
+是否提交表单；
+
+是否发布内容；
+
+是否更改权限；
+
+是否删除对象；
+
+是否写入长期存储；
+
+操作是否可以回滚。
+
+这些是可重复、可自动获取的事实，不需要人逐条标注。
+
+第二层：研究操作化
+
+研究者明确说明：
+
+哪些状态变化代表一种用户相关边界；
+
+为什么这样定义；
+
+哪些情况规则能够确定；
+
+哪些情况存在歧义；
+
+规则变化时结果是否稳健。
+
+这一层不是“绝对真理”，但必须透明、可审计、能做 sensitivity analysis。
+
+第三层：有限的人类 grounding
+
+人类用于验证：
+
+这些边界是否真的对用户重要；
+
+不同用户是否存在系统性差异；
+
+哪些情况不能用统一规则判断；
+
+系统的解释是否符合用户理解；
+
+用户能否使用系统修正和表达自己的边界。
+
+因此，我并不是不要人工数据，而是希望：
+
+人类负责定义、校准和个性化价值；环境负责规模化生成事实；模型只学习规则难以覆盖的语义部分。
+
+用户研究最好是后置、增量、非阻塞的。在用户实验开始之前，sandbox、benchmark、verifier、baselines 和主要自动实验应当已经能够独立跑通。
+
+六、这一个 GUI–MCP 工作中，我希望兼顾的核心元素
+
+这篇工作的技术对象应继续围绕 GUI Agent，而不是泛化到任意 agent。
+
+我关心的核心关系是：
+
+用户通过 GUI 所看到、检查或参与的执行过程，与 agent 通过 MCP/tool shortcut 实际造成的状态变化之间，是否存在重要差异。
+
+因此，适合保留的关键词包括：
+
+hybrid GUI–MCP execution；
+
+multimodal GUI trajectory；
+
+DOM / screenshot / action / state；
+
+GUI path 与 tool path；
+
+tool schema 与参数；
+
+before/after state diff；
+
+dry-run、shadow state 或 transactional execution；
+
+deterministic verifier；
+
+cross-mode comparison；
+
+unseen tools 与 tool OOD；
+
+automation utility；
+
+用户决定权、控制、纠错和后果理解。
+
+其中，active perception 可以复用已有 infra，但不应自动成为这篇 CHI 的主问题。主动感知是另一篇 AI 能力评估工作的核心；当前工作只应复用它的日志、DOM、截图和 harness，除非感知选择直接服务于唯一的人本问题。
+
+环境方面，我更偏好：
+
+受控、简单、可验证的 Web sandbox，而不是复杂、脆弱的真实桌面系统。
+
+任务本身不必难。可以是邮件、表单、任务管理、文件分享、项目协作等小应用。操作难度可以简单，但人本矛盾不能简单，评估也不能只做 toy demonstration。
+
+Web 环境必须支持：
+
+reset；
+
+replay；
+
+读取内部状态；
+
+捕获副作用；
+
+分离 executor failure 与 governance failure；
+
+GUI 与 tool 两种路径完成相同或相近任务。
+
+大型 OS benchmark 可以作为外部验证，但不应该成为九周项目的主要工程风险。
+
+我明确不喜欢的过往方向
+
+以下方向不一定完全错误，但它们可以作为负样本，帮助以后迅速排除不符合我偏好的方案。
+
+负样本一：研究“GUI 是否比 MCP 更值得信任”
+
+这个问题建立在过度简化的假设上。
+
+GUI 操作同样可能：
+
+删除数据；
+
+发送邮件；
+
+改变权限；
+
+完成付款。
+
+MCP 操作也可能：
+
+只读；
+
+可撤销；
+
+被严格限制；
+
+比人工 GUI 操作更可靠。
+
+如果研究只比较两种媒介带来的主观信任，最后很容易变成：
+
+让参与者观看 GUI 操作和 MCP 日志，然后填写 trust scale。
+
+这既缺少扎实的自动评估，也无法产生自然的训练任务，更难形成具有技术深度的 GitHub 项目。
+
+我真正关心的不是 GUI 和 MCP 谁更可信，而是：
+
+两条执行路径是否保留了相同的用户相关后果和决定机会。
+
+负样本二：把 Skill Drift 做成包罗万象的治理系统
+
+过去讨论过同时研究：
+
+scope drift；
+
+mode shift；
+
+data-use drift；
+
+completion drift；
+
+provenance；
+
+future reuse；
+
+repair；
+
+policy editing。
+
+这些内容各自都有意义，但放在一篇论文里会导致系统不断增加模块：
+
+version diff；
+
+provenance viewer；
+
+timeline；
+
+receipt；
+
+policy editor；
+
+future probe；
+
+repair compiler。
+
+最终看起来内容很多，却没有一个足够深的中心问题。自动 benchmark 也很难用一套统一 GT 支撑所有 drift 类型。
+
+因此，我不希望继续发展一个“治理所有 agent 演化问题”的大框架。应当从中选择一种最重要、最可验证的矛盾，把它做透。
+
+负样本三：宽泛的 Procedural Consent
+
+“用户同意 agent 完成目标，是否等于同意它采用任意执行方式”是一个有启发性的 motivation，但如果直接把 procedural consent 作为模型标签，会产生严重问题：
+
+consent 太抽象；
+
+不同用户边界不同；
+
+很难自动得到 GT；
+
+容易依赖大量前置人工标注；
+
+论文可能滑向伦理讨论；
+
+系统容易退化成权限弹窗、receipt 和 policy editor。
+
+因此，procedural consent 可以作为高层解释，但不能直接成为一个未经操作化的万能标签。
+
+更好的方向必须把它压缩成：
+
+一类可以通过环境状态观察、又确实代表用户决定权的具体差异。
+
+负样本四：训练 allow / ask / block 分类器
+
+如果工具是预定义的，直接预测三分类很可能只是在学习工具名风险。
+
+这类工作只有在以下条件成立时才有说服力：
+
+相同工具在不同参数下需要不同决策；
+
+不同工具产生相同 effect 时应得到相同决策；
+
+模型在工具重命名和未见工具上仍然有效；
+
+明确证明规则和静态 policy 无法覆盖问题；
+
+模型输入包含状态、参数、轨迹和 effect，而不是只有 tool name。
+
+否则，训练只是装饰，并不符合我对“这里就该训练”的要求。
+
+负样本五：只在工具执行后发现 violation
+
+执行 MCP 后再查看 state diff，适合 benchmark verifier，却不足以成为真实治理系统。
+
+如果行为不可撤销，事后发现错误已经太晚。实际系统至少需要一种执行前或安全执行机制：
+
+dry-run；
+
+shadow state；
+
+transactional execution；
+
+rollback；
+
+effect manifest；
+
+高风险操作回退 GUI；
+
+先生成候选 action，再由 checker 决策。
+
+因此，必须区分：
+
+评估时的真实执行后 verifier；
+
+部署时的执行前治理机制。
+
+负样本六：全用户访谈，或者让用户研究成为全部工作的前置条件
+
+这类方案不符合我的时间、技术和职业目标。
+
+如果研究流程是：
+
+先访谈和人工标注→ 定义所有 GT→ 才能生成数据→ 才能训练→ 才能做自动实验，
+
+那么项目风险过高，也会削弱技术主体。
+
+用户研究必须有意义，但它应该验证已经成形的系统，而不是成为整个系统能否开始开发的先决条件。
+
+负样本七：把所有已有 infra 都硬塞进同一篇论文
+
+已有主动感知、成本统计、多模态轨迹和 harness，并不意味着这些都必须成为 CHI 论文的贡献。
+
+复用基础设施是优势，但强行复用研究问题会使论文失焦。
+
+我的原则应该是：
+
+复用代码和环境，但只保留直接服务于当前人本问题的模块。
+
+最终核心诉求
+
+我想做的是一篇真正属于 AI × HCI 交叉地带的 GUI Agent 工作：
+
+它围绕一个极窄但真实的人本问题展开；这个问题必须能够被清楚地操作化，而不是依赖宽泛的 trust 或 consent 概念。技术上要有受控 Web sandbox、GUI–MCP 双路径、状态与轨迹表示、自动 verifier、扎实的自动实验，以及一个规则无法完全解决、因而自然需要轻量训练的模块。用户研究用于 grounding、校准和验证，而不是逐条制造全部 GT，也不能阻塞前期开发。最终成果必须是一个可运行、可开源、可演示的 GitHub 项目，既能被 CHI 审稿人认可其人本价值，也能体现我在 GUI Agent、模型、系统和工程上的技术壁垒，并直接服务于大厂产品、设计、算法和开发岗位的求职。
+
+以后判断一个方向是否值得继续，只需要抓住四个问题：
+
+它是否只有一个清楚、真实的人本矛盾？
+
+技术模块是否都是解决这个矛盾所必需的？
+
+自动评估和训练是否自然成立，而不是为了显得复杂？
+
+最终是否能形成一套真正可运行、可展示的项目？
+
+只要其中一个问题回答不清楚，就不应该继续增加概念和模块。八、你的核心诉求最终版
+
+我要在有限时间内完成一篇真正属于 AI+HCI 交叉地带的 GUI Agent 论文。它必须从一个清晰、真实的人类问题出发，但不能依赖大规模前置人工标注或全用户访谈；必须能够先搭出 Web-based GUI–MCP sandbox、自动 verifier、benchmark、轻量模型和完整自动实验，再用后置的小规模任务型用户研究验证构念、解释和个性化修正。训练必须发生在规则确实不够、审稿人自然期待模型学习的地方，并通过 OOD 与反记忆实验证明不是背工具名。最终必须形成一个可复现、可开源、可演示的 GitHub 项目，既让 CHI 审稿人看到真正的用户控制与人本价值，也让 AI 研究者看到技术深度，并能成为我申请大厂产品、设计和开发岗位时的强项目证明。
+
+再压缩成最短的一句：
+
+一个人本问题驱动、自动评估为主体、轻量训练自然成立、用户研究后置不阻塞、Web 工程完全可落地、能开源也能求职展示的 tech-heavy GUI Agent HCI 项目。
+
+
+
+
+
+我对于 AI 回答方式的偏好
+
+这一部分与研究方向无关，描述的是我希望 AI 如何呈现和解释复杂概念。
+
+一、先讲主线，再讲细节
+
+我不喜欢回答一开始就罗列大量术语、模块、字段和指标。即使每项都正确，平铺在一起也会让我看不出重点。
+
+回答应先说明：
+
+核心问题是什么，为什么存在，准备通过什么关键机制解决，以及如何验证。
+
+理想顺序是：
+
+问题 → 核心矛盾 → 解决思路 → 具体例子 → 完整流程 → 必要细节。
+
+不要先给我一张零件清单，最后才解释这些零件要做什么。
+
+二、抽象概念必须结合一条具体任务讲
+
+涉及模型输入、标签、训练、验证或用户行为时，应先选一条具体任务，从头走一遍。
+
+例如：
+
+用户要求 agent 根据会议记录创建任务并起草邮件，但不要发送；GUI 路径停留在草稿页面，而 MCP shortcut 准备直接发送。
+
+然后依次说明：
+
+系统观察到什么；
+
+信息分别来自 GUI、工具还是环境状态；
+
+模型输入和标签是什么；
+
+标签由谁、通过什么方式得到；
+
+训练阶段学习什么；
+
+验证阶段如何判断对错；
+
+人类在哪一步参与。
+
+先讲清“一条数据怎么走”，再抽象成通用框架。
+
+三、字段和术语出现时必须立即解释
+
+我不反对 JSON、公式或结构化表示，但每个关键字段第一次出现时都要说明：
+
+它是什么意思、从哪里来、在哪个阶段使用、部署时是否可获得。
+
+例如，出现：
+
+{   "audience_changed": true }
+
+需要立刻解释：
+
+它表示影响对象是否从内部扩展到了外部；这里由执行前后的收件人状态自动计算，不是大模型主观打标；它用于 verifier，而不是模型输入。
+
+不要默认字段名本身已经完成了解释，也不要创造术语后让我从后文猜它的含义。
+
+四、明确区分不同性质的内容
+
+回答应区分：
+
+环境事实：可以直接观察，例如邮件由 draft 变成 sent。
+
+操作化定义：研究者把该变化定义为 finality 提高。
+
+待验证假设：用户可能认为草稿页提供了重要检查机会。
+
+研究目标或预期主张：希望验证模型能否识别这种差异。
+
+不能把设计选择、假设和已经验证的事实写成同一种肯定语气。
+
+五、信息要有层级，不能全部平铺
+
+详细不等于把所有内容列成同一级别。回答应主动区分：
+
+必须解决的核心问题；
+
+完成闭环所需的关键模块；
+
+有时间再做的增强项；
+
+虽然相关但当前应删除的内容。
+
+重点不是靠加粗产生的，而是靠明确取舍产生的。
+
+我需要的是保留足够信息密度，同时删除重复内容、次要分支和不影响判断的实现细节。
+
+六、必须通过负样本说明边界
+
+只告诉我“应该怎么做”还不够，还要指出哪些看似合理的做法其实不合适，以及具体错在哪里。
+
+例如：
+
+不好的方式
+
+同时研究 trust、consent、skill drift、provenance 和 future reuse，并设计 inspector、receipt、policy editor 和 repair module。
+
+问题是概念和模块不断扩张，没有唯一主线。
+
+更好的方式
+
+只研究 GUI 路径中的一种用户检查机会是否被 MCP shortcut 跳过，其余概念只有在服务该问题时才出现。
+
+负样本要具体，不能只说“不要太散”。
+
+七、不要频繁换名字包装同一个问题
+
+当我指出一个方案有问题时，不要只是更换系统名、概念名或论文标题，然后重新表达同一套逻辑。
+
+在研究问题稳定前，系统叫什么并不重要。应该优先稳定：
+
+研究对象；
+
+输入与输出；
+
+数据和 GT 来源；
+
+训练必要性；
+
+评估闭环；
+
+人类参与的位置。
+
+这些没有讲清楚时，不要急着创造新的 acronym。
+
+八、流程要体现依赖关系
+
+我希望看到的不只是“系统包含什么”，而是：
+
+前一步为什么必须先做，它会为下一步提供什么。
+
+例如：
+
+环境产生可验证的状态变化 → 研究者定义透明的操作化规则 → 自动生成规模化数据 → 模型学习规则难覆盖的语义映射 → 独立 verifier 在测试集上评分 → 用户研究验证这些规则是否符合真实理解
+
+这比单纯列出“数据模块、模型、verifier、用户实验”更容易理解。
+
+九、训练和验证必须分开讲
+
+涉及模型时，需要分别说明：
+
+训练阶段
+
+输入是什么；
+
+标签是什么；
+
+标签如何获得；
+
+正负样本如何构造；
+
+哪些信息仅训练时可见。
+
+验证阶段
+
+测试时模型能看到什么；
+
+测试的是未见任务、未见工具还是未见参数；
+
+独立 GT 来自哪里；
+
+verifier 如何评分；
+
+如何排除工具名记忆和数据泄漏。
+
+尤其不能让同一个模型生成标签，再用这些标签证明自己有效。
+
+十、回答应主动做判断，而不是不断增加选项
+
+我不希望每次收到五个方向、四种模型和三套实验，然后由我重新完成全部筛选。
+
+信息足够时，AI 应直接判断：
+
+最推荐 A，原因是什么；B 为什么暂时放弃；C 为什么不符合时间或技术约束。
+
+可以保留一个备选，但回答的作用应是减少决策负担，而不是扩大选择空间。
+
+总结
+
+我希望 AI：
+
+先给出核心判断，再用一个具体任务建立理解；按照因果和依赖关系讲清完整流程；字段和标签出现时立即解释来源与作用；明确区分事实、假设和设计选择；保留必要的信息密度，同时主动删掉重复概念、平级模块和无关扩展；并通过具体负样本说明边界。
+
+最直白地说：
+
+先告诉我这台机器为什么存在，再用一个任务展示它如何运行，最后才介绍每个零件。
+
+
+
+了解我的以上所有个人偏好，然后启动你最好的调研能力ICML/NIPS/ICLR/CHI/UIST/UBICOMP/CSCW/IUI/CVPR/AAAI/ECCV/ICCV/ACMMM/AAAI/ACL/EMNLP，告诉我2026年期间，目标投稿CHI27的话，还有什么是符合以上要求能做的相关GUI agent、CUA方向，可以森罗万象，因为满足以上要求的其实比较严苛
+
+务必让我的优势成为我和其他投稿之间短时间难以逾越的技术壁垒
+
+【回答内容 轮数1】
+I’ll align 2025–2026 frontiers, HCI gaps, and engineering constraints, then recommend one primary direction, one backup, and clear exclusions that maximize your GUI-agent moat.
+
+【回答内容 轮数1】
+The clearest gap is executable alignment between GUI-visible inspection opportunities and MCP effects, using trajectories, DOM, state diffs, schemas, and verifiers—not generic trust or risk blocking.
+
+【回答内容 轮数1】
+# 核心判断
+
+**最值得押注的 CHI 2027 方向，是研究：混合 GUI–MCP Agent 如何保留用户的“最终提交边界”。**
+
+更具体地说：
+
+> 当 GUI 路径原本会把用户带到一个可检查、可修改、尚未对外生效的暂存状态时，MCP/tool shortcut 不应因为更高效，就直接跨越到已发送、已提交、已发布或已共享的状态。
+
+这不是研究“GUI 比 MCP 更可信”，也不是泛化的 consent、trust 或 safety。它只研究一个窄而可测的人本矛盾：
+
+> **目标完成正确，不代表 agent 有权替用户完成最后一次对外生效的决定。**
+
+我建议把论文暂时描述为：
+
+## Preserving User Commitment Boundaries in Hybrid GUI–MCP Agents
+
+中文可以理解为：
+
+## 在混合 GUI–MCP Agent 中保留用户的最终提交边界
+
+这条线最符合你的全部约束，而且能把你的 GUI trajectory、DOM、截图、MCP、sandbox、shadow execution、自动 verifier 和 OOD 训练能力组合成一个普通 HCI 团队短时间很难复制的技术闭环。
+
+截至 **2026 年 7 月 15 日**，CHI 2027 论文截止日期为 **2026 年 9 月 10 日 AoE**。也就是说，这更适合被控制为“三个应用、一个构念、一个模型、一个 verifier”，而不是建设一个面向所有 agent 风险的治理平台。
+
+---
+
+# 一条具体任务：先看这篇论文究竟在解决什么
+
+用户对 agent 说：
+
+> “根据会议记录给 Alice 和 Bob 起草一封跟进邮件，我发之前要再看一遍。”
+
+## GUI 路径
+
+Agent 在邮件 Web 应用中：
+
+1. 打开写邮件页面；
+2. 填写 Alice 和 Bob；
+3. 填写标题与正文；
+4. 停留在草稿编辑页。
+
+此时环境中的事实是：
+
+```text
+message.status = draft
+notifications_created = 0
+```
+
+- `message.status = draft` 表示邮件还没有对外发送。
+- `notifications_created = 0` 表示 Alice 和 Bob 还没有收到任何通知。
+- 这两个值直接来自 sandbox 数据库和副作用日志，不需要人或大模型判断。
+
+用户仍然可以修改正文、删除收件人，或者决定不发送。
+
+## MCP shortcut
+
+Agent 发现可调用：
+
+```text
+mail.send(
+  recipients=["alice@example.com", "bob@example.com"],
+  subject="Meeting follow-up",
+  body="..."
+)
+```
+
+从纯任务完成角度看，这个调用非常优秀：
+
+- 内容正确；
+- 收件人正确；
+- 延迟更低；
+- 操作步骤更少；
+- 最终目标似乎已经完成。
+
+但在 shadow state 中执行后，系统得到：
+
+```text
+message.status: draft → sent
+notifications_created: 0 → 2
+```
+
+这仍然只是环境事实：
+
+- `draft → sent` 是数据库状态变化；
+- `0 → 2` 是向两个收件人产生了外部可见副作用。
+
+## 论文真正研究的问题
+
+不是：
+
+- `mail.send` 是否属于“高风险工具”；
+- 用户是否总体信任 MCP；
+- agent 是否完成了邮件任务；
+- 发送邮件是否违反安全政策。
+
+而是：
+
+> **这条 MCP 路径是否越过了 GUI 路径原本保留给用户的最终提交点？**
+
+系统在真实发送前做出以下处理：
+
+- 优先把 `mail.send` 改写为 `mail.save_draft`；
+- 将用户带回已填好的 GUI 草稿页；
+- 用户自己点击最终的 Send；
+- 如果应用没有 `save_draft` 工具，则在 shadow transaction 中生成结果，再把结果物化到 GUI 审核页，而不是直接提交。
+
+这不是一个通用确认弹窗。
+
+用户只在 agent 准备跨越**暂存到对外生效**的边界、且任务并未授权 agent 跨越时，才重新获得控制权。
+
+---
+
+# 为什么这是当前最合适的研究缺口
+
+目前 GUI Agent 和 MCP 研究已经迅速覆盖了三片区域。
+
+## 1. AI 社区正在优化 GUI、tool 和 hybrid 路径的任务完成效率
+
+MCPWorld 已经提供了 API、GUI 和 hybrid CUA 的自动化测试环境、容器化应用和程序化 verifier；OSWorld-MCP 为桌面应用加入大量工具，并评估 agent 如何在 GUI 与 tool 之间选择；ToolCUA、EE-MCP 等工作进一步学习如何更高效地切换执行模式。它们主要回答的是：
+
+- 哪种执行模式成功率更高；
+- 什么时候调用工具；
+- 如何减少步骤和成本；
+- hybrid policy 如何提高完成率。turn320046view2turn701453view2turn281404view4
+
+这说明“GUI–MCP 混合执行”本身已经不是足够强的贡献。
+
+但这些工作通常没有把下面的问题作为核心：
+
+> 一个更短、更成功的 tool path，是否压缩掉了 GUI 路径中对用户有意义的最后决定机会？
+
+你的论文不应与它们竞争“更好的 routing policy”，而应给它们增加一个目前缺失的优化约束。
+
+---
+
+## 2. HCI 社区正在研究 decision point、oversight、values 和 unintended consequences
+
+Morae 研究了在 GUI 中遇到含混选择时主动暂停并寻求用户帮助，尤其面向视障用户；GUIDE 收集了大量真实用户软件操作，用于预测用户行为、意图和何时需要帮助；Behavioral Fabric 观察用户价值如何影响 Web 任务轨迹；CHI 2026 的 GUI Agent dark-pattern 工作则显示，agent 可能优先追求任务完成，而持续的人类监督又会带来额外认知负担。turn281404view2
+
+这些工作证明了：
+
+- 用户并不只关心最终 task success；
+- 交互轨迹中存在有意义的决策点；
+- “让用户一直盯着”并不是可扩展的治理方案。
+
+但你的区别应当很清楚：
+
+- Morae 关注 GUI 执行中**目标或选择含混**时的暂停；
+- 你的问题是在目标和内容都可能完全正确时，MCP shortcut 是否提前完成了**最终外部承诺**；
+- 你的系统不是单纯预测“什么时候需要帮助”，而是通过 state diff 和 transaction 明确知道候选动作会跨越什么生命周期边界。
+
+---
+
+## 3. Agent safety 正在快速拥挤，泛化的风险分类已经不够新
+
+CORA、VeriSafe 等工作已经在研究 pre-action guard、用户风险预算、逻辑约束和安全—效用—打断之间的权衡；MCP 领域也已经出现多套安全与攻击 benchmark。Agent-Diff 则开始以状态差分而非自然语言完成声明验证 agent 的实际结果。turn281404view3
+
+甚至已经有工作提出“批准 effect，而不是批准 tool call”，指出用户对先前 tool call 的批准可能无法覆盖最终实际产生的效果。
+
+因此，“给每个 tool call 算一个风险分，然后 allow / ask / block”不再是好的切入点。
+
+你的空间在于把五件事组合起来：
+
+1. **hybrid GUI–MCP execution**；
+2. **由 GUI 暂存—提交结构定义的人类决定边界**；
+3. **执行前 shadow effect diff**；
+4. **跨工具、跨 schema、跨应用的语义对齐模型**；
+5. **验证用户能否在恢复的提交点发现并纠正问题**。
+
+在我检索到的最接近工作中，尚未看到这五项被组织成同一个闭环。这个判断是截至 2026 年 7 月公开论文和预印本的研究定位判断，不是对全部未公开投稿的绝对优先权声明。
+
+---
+
+# 核心构念如何避免再次膨胀
+
+这篇论文只保留一个核心构念：
+
+## Commitment boundary：提交边界
+
+它表示一个对象从：
+
+- 私有到外部可见；
+- 暂存到正式生效；
+- 可检查到已执行；
+- 尚未承诺到形成外部后果；
+
+之间的状态转移。
+
+典型例子包括：
+
+| 应用 | 暂存状态 | 提交状态 |
+|---|---|---|
+| 邮件 | draft | sent |
+| 表单 | filled / preview | submitted |
+| 内容发布 | unpublished draft | published |
+| 文件分享 | recipients selected | ACL active |
+| 项目操作 | changes prepared | merged / applied |
+
+这里必须严格区分四种性质。
+
+## 1. 环境事实
+
+例如：
+
+```text
+message.status: draft → sent
+```
+
+这是数据库直接观察到的状态变化。
+
+```text
+external_recipients: 0 → 2
+```
+
+这是收件人和通知日志直接计算的变化。
+
+它们不是人本标签，也不是大模型观点。
+
+## 2. 研究操作化
+
+研究者规定：
+
+> 在邮件应用中，`draft → sent` 是一次 commitment transition。
+
+这是研究设计，不是自然法则。
+
+它必须：
+
+- 写在公开的 application contract 中；
+- 由明确的状态机表示；
+- 可以审计和修改；
+- 对不同状态定义进行 sensitivity analysis。
+
+## 3. 待验证的人本假设
+
+> 当用户要求“起草”“准备”“让我检查后再发”时，保留 draft 状态对其决定权和纠错能力有意义。
+
+这一点不能仅靠研究者宣称。
+
+它需要通过有限的 formative grounding 和后续任务型用户研究验证。
+
+## 4. 希望建立的论文主张
+
+> 一个基于 GUI trajectory、tool effect 和 shadow state diff 的系统，可以在执行前识别未经授权的 commitment transition，并在显著降低 premature commit 的同时，保留大部分 hybrid automation utility。
+
+这是实验结果需要支持或否定的主张，不能提前当作事实。
+
+---
+
+# 完整技术闭环
+
+## 第一步：构建三个 Web sandbox，而不是一个大而全的桌面环境
+
+建议只做三个应用：
+
+1. **Mail**：draft → sent；
+2. **Form / Workflow**：filled → submitted；
+3. **Publishing 或 Sharing**：draft/private → published/shared。
+
+每个应用同时支持：
+
+- 浏览器 GUI 路径；
+- MCP/tool 路径；
+- reset；
+- deterministic seed；
+- replay；
+- DOM、截图和 action logging；
+- 内部数据库读取；
+- 外部副作用日志；
+- shadow transaction；
+- rollback；
+- 隐藏的 canonical state machine。
+
+不建议一开始做真实 Gmail、Slack、GitHub、Google Drive 集成。真实系统适合作为后续 external demonstration，不适合作为核心 benchmark 的工程依赖。
+
+你的技术壁垒不是应用数量，而是：
+
+> **同一个任务能够通过 GUI 和 MCP 两条路径执行，并且两条路径的轨迹、内部状态和外部副作用都能被精确观测和比较。**
+
+---
+
+## 第二步：由 GUI 路径建立应用级的提交结构
+
+不是把所有 GUI 对话框都当成“用户决定机会”。
+
+那样会把以下无关摩擦也算进去：
+
+- cookie banner；
+- loading page；
+- 冗余 confirmation；
+- 导航步骤；
+- 纯布局切换；
+- 产品历史遗留的多余点击。
+
+只保留那些与生命周期状态变化直接对应的 GUI 结构。
+
+例如邮件应用中：
+
+```text
+Compose screen
+    ↓ Save
+Draft
+    ↓ Send button
+Sent
+```
+
+这里 `Send button` 对应数据库中的 `draft → sent`。
+
+因此它是可由环境事实锚定的提交边界，而不是因为界面上“恰好有个按钮”就被赋予人本意义。
+
+GUI trajectory 在这里提供两种证据：
+
+- **多模态证据**：截图、DOM、按钮状态、当前页面；
+- **过程证据**：在什么状态之后，哪一步会产生不可忽略的外部效果。
+
+---
+
+## 第三步：MCP 候选动作必须先进入 shadow execution
+
+真实部署不能先发送邮件，再通知用户“系统发现你可能不想发送”。
+
+因此必须把评估机制和部署机制区分开。
+
+### Benchmark 中
+
+可以在隔离副本中真实执行 tool call，读取完整 before/after state diff，用于得到确定的 GT。
+
+### 部署系统中
+
+候选 tool call 先执行在：
+
+- shadow database；
+- copy-on-write transaction；
+- dry-run adapter；
+- 或应用级模拟副本。
+
+例如：
+
+```text
+真实状态：
+message.status = draft
+
+shadow 执行后的状态：
+message.status = sent
+notifications_created = 2
+```
+
+只有 guard 判断通过后，transaction 才能 commit 到真实环境。
+
+这解决了你指出的“事后 verifier 不等于部署时治理”的问题。
+
+---
+
+# 唯一需要训练的模块
+
+## Cross-path effect-equivalence critic
+
+它学习的不是：
+
+> `send_email` 通常危险吗？
+
+它学习的是：
+
+> 根据用户当前指令、GUI 上下文、tool 参数和候选状态变化，这条 MCP 路径是否保留了用户本来授权的提交阶段？
+
+---
+
+## 一条训练样本如何产生
+
+仍然使用邮件例子。
+
+### 模型在运行时可以看到的输入
+
+1. 用户指令：
+
+```text
+“起草一封邮件，我发之前要再看一遍。”
+```
+
+2. 当前 GUI 信息：
+
+```text
+页面：Compose
+DOM 中存在：Save draft、Send
+当前邮件状态：editing
+```
+
+3. 候选工具及参数：
+
+```text
+mail.send(
+  recipients=["alice@example.com", "bob@example.com"],
+  ...
+)
+```
+
+4. shadow execution 的原始 diff：
+
+```text
+message.status: draft → sent
+notifications_created: 0 → 2
+```
+
+这些信息在部署时都可以获得：
+
+- 指令来自用户；
+- GUI 信息来自 DOM、截图和轨迹；
+- schema 和参数来自 tool call；
+- diff 来自 shadow execution。
+
+### benchmark 中存在、但模型看不到的隐藏 GT
+
+```text
+target_commit_state = staged
+actual_commit_state = committed
+equivalent = false
+```
+
+逐项解释：
+
+- `target_commit_state = staged`：任务生成器规定该任务的正确终点是草稿，而不是发送。它只用于 verifier，不作为模型输入。
+- `actual_commit_state = committed`：sandbox 的 canonical state machine 根据真实状态变化判断候选动作已经对外生效。
+- `equivalent = false`：确定性比较器发现正确目标是 staged，而候选效果是 committed。
+
+因此，标签不是由同一个大模型生成的，也不是研究者逐条主观标注的。
+
+### 模型输出
+
+可以保持为简单的结构：
+
+```text
+predicted_target_stage: staged
+predicted_tool_effect: committed
+preserves_boundary: false
+evidence:
+  - message.status changed from draft to sent
+  - two recipient notifications would be created
+```
+
+- `predicted_target_stage`：模型从指令和 GUI 上下文预测用户授权的终点。
+- `predicted_tool_effect`：模型把原始 state diff 归一化成跨应用的生命周期含义。
+- `preserves_boundary`：候选 tool path 是否与目标阶段一致。
+- `evidence`：支持判断的原始环境变化，方便 verifier 和用户界面检查。
+
+最终评分使用隐藏 canonical state，而不是用模型自己的解释给自己打分。
+
+---
+
+# 为什么这里确实需要学习，而不是写规则
+
+在你自己开发的三个 sandbox 中，当然可以写出：
+
+```python
+if message.status changes from "draft" to "sent":
+    require_user_commit()
+```
+
+所以仅在 seen apps 上证明模型有效，没有意义。
+
+模型的必要性来自**跨表示的语义对齐**，而不是 seen-app 状态判断。
+
+## 必须设计的反捷径实验
+
+### 1. 同一个工具，因参数和当前状态不同而得到相反判断
+
+例如：
+
+```text
+document.publish(mode="preview")
+```
+
+不跨提交边界。
+
+```text
+document.publish(mode="public")
+```
+
+跨提交边界。
+
+又例如，同样是 `mail.send`：
+
+- 用户明确说“直接发给 Alice”：可以执行；
+- 用户说“起草后让我检查”：不应执行。
+
+因此不能只记忆 tool name。
+
+### 2. 不同工具，产生相同 effect 时应得到相同判断
+
+例如：
+
+```text
+mail.send(...)
+workflow.dispatch_message(...)
+notification.create_external(...)
+```
+
+虽然名字不同，只要都造成：
+
+```text
+draft → sent
+external_notifications: +N
+```
+
+就应该被识别为相同的 committed effect。
+
+### 3. 工具重命名和 schema 改写
+
+例如把：
+
+```text
+mail.send(recipients, body)
+```
+
+改成：
+
+```text
+communication.execute(
+  target_entities,
+  payload,
+  activation_mode="immediate"
+)
+```
+
+模型仍应根据参数、文档、状态 diff 和 GUI 上下文判断，而不是依赖 `send` 字符串。
+
+### 4. 状态字段重命名
+
+训练时：
+
+```text
+status: draft → sent
+```
+
+测试时：
+
+```text
+lifecycle_code: 2 → 5
+delivery_records: 0 → 2
+```
+
+只有结合 tool schema、GUI 信息和状态变化才能理解语义。
+
+### 5. held-out tool 与 held-out application
+
+建议至少有：
+
+- tool OOD：同一应用中未见过的工具；
+- schema OOD：工具接口重写；
+- task OOD：未见指令表达；
+- app OOD：保留一个小型第四应用只做外部测试，或者用现有环境的子集验证。
+
+Contract2Tool 等近期工作也说明，从 tool metadata、文档和执行轨迹中恢复工具前置条件与效果，本身已成为明确技术问题。你的区别是把这种 effect understanding 与 GUI 中的人类提交边界进行对齐。
+
+---
+
+## 最合理的模型形态
+
+不建议训练 executor。
+
+建议：
+
+- 3B–7B 级多模态或语言 critic；
+- QLoRA / 轻量 SFT；
+- 输入使用结构化 state diff、DOM 摘要、tool schema 和必要截图；
+- 规则—模型混合，而不是端到端让模型决定一切。
+
+确定性规则负责：
+
+- shadow transaction；
+- raw state diff；
+- 已知 application contract；
+- commit 或 rollback；
+- canonical verifier。
+
+模型负责：
+
+- 从自然语言中理解目标阶段；
+- 把陌生 tool/schema/diff 映射为生命周期语义；
+- 判断 GUI 与 tool path 是否在人本意义上保持同一提交阶段。
+
+这会让“为什么这里需要训练”变得自然。
+
+---
+
+# 部署时系统不是 allow / ask / block
+
+更好的 action space 是：
+
+## 1. Execute
+
+候选 MCP 路径没有跨越未授权提交边界，直接执行。
+
+## 2. Stage
+
+候选 tool call 会直接提交，但系统存在等价的暂存操作。
+
+例如：
+
+```text
+mail.send → mail.save_draft
+form.submit → form.save_progress
+content.publish → content.save_draft
+```
+
+系统自动保留自动化收益，不打断用户。
+
+## 3. Return at commit point
+
+不存在可用的 stage tool 时：
+
+- 在 shadow state 中完成准备工作；
+- 把结果物化到 GUI 的最终审核页；
+- 用户只执行最后一次 commit。
+
+这不是泛化的“ask”。
+
+系统不是弹出：
+
+> “此操作风险较高，是否继续？”
+
+而是给用户看：
+
+- 准备发送的真实邮件；
+- 实际收件人；
+- 实际附件；
+- 实际发布范围；
+- 真实提交按钮。
+
+它恢复的是原本有业务语义的 GUI 决定点。
+
+---
+
+# 自动评估应该成为论文主体
+
+## 第一组：任务正确性
+
+### Task Success
+
+agent 是否正确完成任务中允许它完成的部分。
+
+例如，“起草邮件”在 draft 状态即算成功，而不是必须 sent。
+
+### Content Correctness
+
+正文、字段、附件和目标对象是否正确。
+
+这样可以把 executor failure 与 governance failure 分开。
+
+---
+
+## 第二组：提交边界
+
+### Premature Commit Rate
+
+在正确目标为 staged 时，系统却产生 committed effect 的比例。
+
+这是最核心指标。
+
+### Unauthorized Commit Recall
+
+所有未经授权的提交行为中，guard 成功阻止或改写了多少。
+
+### False Intervention Rate
+
+用户明确授权直接提交时，系统仍然强制返回 GUI 的比例。
+
+这防止系统退化为“所有操作都确认”。
+
+### Stage-Preserving Rewrite Success
+
+系统将直接提交工具改写为暂存工具后，任务内容和状态是否仍然正确。
+
+---
+
+## 第三组：自动化收益
+
+### Additional User Actions
+
+用户因治理系统额外执行了多少操作。
+
+### Agent Steps / Latency / Tool Cost
+
+与原始 hybrid agent 相比增加多少成本。
+
+### Unnecessary Confirmation Burden
+
+用户在实际上无需决定时被打断的次数。
+
+最终应报告：
+
+> premature commit 降低了多少，以及为此损失了多少 automation utility。
+
+而不是只说“安全率提高”。
+
+---
+
+## 第四组：OOD 与反记忆
+
+至少报告：
+
+- seen tool / unseen parameter；
+- renamed tool；
+- rewritten schema；
+- unseen tool；
+- unseen task wording；
+- held-out application；
+- 去除 GUI trajectory；
+- 去除 state diff；
+- 去除 tool parameters；
+- 去除截图或 DOM；
+- 仅看 tool name。
+
+特别重要的是 `tool-name-only baseline`。它应当在常规随机切分上表现看似不错，但在重命名和同工具反标签测试上显著下降。这样才能直观证明你的模型没有只学到“send 危险、read 安全”。
+
+---
+
+# 必须比较的基线
+
+1. **No guard**
+   当前 hybrid agent 直接执行其选择的路径。
+
+2. **Always confirm before external effect**
+   所有发送、提交、发布、分享操作都让用户确认。
+
+3. **Tool-name allowlist / denylist**
+   根据工具名称和静态类别判断。
+
+4. **Seen-app hand-written rules**
+   使用开发者明确编写的状态规则。这个基线非常重要，不能回避。
+
+5. **Prompted frontier model**
+   不训练，只通过 prompt 输入指令、schema 和 diff。
+
+6. **Lightweight trained critic**
+
+7. **Hybrid rules + trained critic**
+   确定规则处理已知环境，模型只处理语义不确定和 OOD 映射。
+
+最可能赢的不是纯模型，而是第七种。
+
+这反而更符合你的偏好：模型只承担规则真正覆盖不了的部分。
+
+---
+
+# 用户研究应该验证什么
+
+这不应是一项“观看两个 agent 视频，然后填写 trust scale”的研究。
+
+建议做一个小规模、任务型、后置实验。
+
+## 三个条件
+
+1. 无 guard 的高速 hybrid agent；
+2. 每个外部操作都确认；
+3. commitment-boundary-preserving guard。
+
+## 任务设计
+
+参与者让 agent：
+
+- 起草邮件；
+- 准备并提交费用表；
+- 准备发布项目公告；
+- 配置文件分享范围。
+
+在部分任务中，agent 生成完全正确的候选内容。
+
+在部分任务中，系统植入可在最终审核时发现的问题：
+
+- 多了一个收件人；
+- 附件选错；
+- 日期字段错误；
+- 发布范围从团队变成公开；
+- 表单中的一项内容被错误推断。
+
+这里要区分：
+
+- 错误是为了测试恢复的提交机会有没有实际纠错价值；
+- 自动 benchmark 对 commitment boundary 的评分不依赖这些人为错误；
+- 用户研究不是给模型制造训练标签。
+
+## 主要人类指标
+
+- 用户是否在外部生效前发现错误；
+- 用户是否做出正确的提交或取消决定；
+- 用户是否能准确解释 agent 即将产生的效果；
+- 每次正确决定消耗多少时间；
+- 被打断次数；
+- 错误批准率；
+- 对不同任务的边界设置是否存在稳定个体差异。
+
+“控制感”“信任”等量表可以作为次要结果，但不能成为主结果。
+
+---
+
+# 这条方向与最接近工作的区别
+
+## 与 MCPWorld、OSWorld-MCP、ToolCUA 的区别
+
+它们主要研究 hybrid execution 的能力、成功率和效率。你的工作给 hybrid policy 增加一个新的约束：
+
+> 更短的 tool path 只有在保留目标 commitment state 时，才与 GUI path 等价。turn320046view2turn701453view2
+
+## 与 Agent-Diff 的区别
+
+Agent-Diff 强调通过状态差分验证最终结果，而不是信任 agent 的自然语言报告。你的工作进一步问：
+
+> 哪一种状态才是用户授权 agent 达到的终点，以及候选 MCP 操作能否在执行前被限制在该状态。
+
+## 与 Morae 的区别
+
+Morae 在 GUI 执行中识别含混选择并暂停。你的构念不要求目标含混：
+
+- 内容可以正确；
+- 收件人可以正确；
+- 任务可以明确；
+- 唯一不应被 agent 代替的是最终 commit。
+
+## 与 CORA、VeriSafe 的区别
+
+它们更接近通用 risk、harm 或 policy compliance。你的问题不是行为是否“危险”，而是：
+
+> 即使行为完全合理，它是否发生在用户授权的生命周期阶段。
+
+发送一封正常邮件可能不危险，但在用户只要求起草时仍然是 premature commit。
+
+## 与 generic effect approval 的区别
+
+“Approve the Effect, Not the Tool Call”已经指出批准抽象 tool call 不足以覆盖其真实效果。你的增量必须落在：
+
+- GUI-derived commitment structure；
+- GUI path 与 MCP path 的 cross-mode equivalence；
+- shadow execution；
+- 可执行的 stage / return-to-GUI intervention；
+- 用户能否在恢复的 commit point 纠错。
+
+因此写 related work 时不能声称“过去都只看工具名”。应当承认 effect-based governance 已经出现，并清楚说明你研究的是一种特定且可操作化的人类 effect boundary。
+
+---
+
+# 为什么这能成为你的技术壁垒
+
+普通 HCI 团队可以比较容易完成：
+
+- 一个 confirmation UI；
+- 访谈；
+- trust scale；
+- 一组故事板；
+- 一个 Wizard-of-Oz prototype。
+
+但要复现这篇工作，需要同时具备：
+
+1. GUI Agent executor 与浏览器 harness；
+2. GUI screenshot、DOM、action 和 state 的同步轨迹；
+3. GUI 与 MCP 的双路径任务；
+4. 可重置、多应用 sandbox；
+5. 数据库和外部副作用级 state diff；
+6. shadow transaction 与 rollback；
+7. canonical state machine；
+8. counterfactual task generator；
+9. tool/schema OOD；
+10. 多模态或结构化 critic 训练；
+11. 自动 verifier；
+12. end-to-end user-facing review flow。
+
+你的壁垒不应写成“我们用了更多组件”。
+
+它应该体现为一项普通方法无法得到的实验能力：
+
+> 你可以自动生成成千上万对“任务最终成功，但提交阶段是否符合用户授权”存在差异的 GUI–MCP 执行对，并在真实副作用发生前进行治理。
+
+这是 GUI Agent 基础设施带来的数据与评估壁垒。
+
+---
+
+# GitHub 项目应呈现的形态
+
+```text
+hybrid-commitment-agent/
+├── apps/
+│   ├── mail/
+│   ├── forms/
+│   └── publisher/
+├── mcp_servers/
+├── gui_executor/
+├── harness/
+│   ├── reset/
+│   ├── replay/
+│   ├── trace_capture/
+│   └── shadow_transactions/
+├── contracts/
+│   └── canonical_lifecycle_states/
+├── benchmark/
+│   ├── task_templates/
+│   ├── counterfactual_generator/
+│   └── ood_splits/
+├── models/
+│   └── cross_path_critic/
+├── verifier/
+├── baselines/
+├── evaluation/
+├── review_ui/
+├── docker-compose.yml
+└── README.md
+```
+
+README 的 demo 应展示同一个任务的三次运行：
+
+1. 无 guard：MCP 直接发送；
+2. always-confirm：每一步都打断；
+3. 你的系统：自动完成准备，只把用户放回最终审核点。
+
+这会比静态概念图更适合论文、开源和求职展示。
+
+---
+
+# 其他符合你要求的方向：按推荐等级排序
+
+你的要求非常严格，因此真正值得保留的方向不应很多。
+
+## A 级主推荐：提交边界保留
+
+### 人本矛盾
+
+高压缩 tool path 消除了用户本应拥有的最终对外生效决定。
+
+### 自然训练点
+
+将陌生 tool/schema/state diff 与 GUI lifecycle effect 对齐。
+
+### 自动 GT
+
+隐藏的 application state machine 和 task target state。
+
+### 技术壁垒
+
+GUI trajectory + MCP + shadow execution + state diff + OOD critic。
+
+### 时间风险
+
+中等，三个应用可以控制。
+
+这是最推荐方向。
+
+---
+
+## A 级备选：批量 MCP 操作中的例外项保留
+
+### 核心问题
+
+GUI 通常让用户逐项看到对象，但一个 bulk MCP call 会把异质对象压缩为一次统一操作，从而吞掉少数例外项的决定机会。
+
+### 具体任务
+
+用户说：
+
+> “把这次会议的材料分享给参会者。”
+
+文件夹中有十个普通文件和一个包含内部薪资信息的附件。
+
+GUI 路径会展示文件列表、权限徽标和逐项分享状态。
+
+MCP shortcut：
+
+```text
+share_folder(folder_id, audience="all_attendees")
+```
+
+会把全部内容一次共享。
+
+### 唯一构念
+
+不是泛化的 privacy，也不是 audience drift。
+
+而是：
+
+> **bulk execution 是否错误地假设所有对象具有相同的可提交条件。**
+
+### 模型学习什么
+
+模型根据：
+
+- GUI 中的对象级信息；
+- 文件元数据；
+- tool 参数；
+- shadow ACL diff；
+- 当前任务语义；
+
+预测哪些对象是 bulk operation 的 exception。
+
+### 自动 verifier
+
+环境知道每个对象：
+
+- 原权限；
+- 新权限；
+- 是否包含 restricted marker；
+- 实际 audience；
+- 是否被 bulk call 错误包含。
+
+### 系统行为
+
+不是整体 block，而是：
+
+- 对普通对象继续批量执行；
+- 把例外对象拆出；
+- 只让用户处理少数例外。
+
+### 为什么不是第一推荐
+
+它同样有很强的自动评估和技术壁垒，但：
+
+- 对对象语义和敏感性定义的要求更高；
+- 更容易滑向 privacy / data-use；
+- 需要更复杂的 item-level 数据生成；
+- 九周内比提交边界更危险。
+
+它是最好的 Plan B，而不是与主方向并行推进的第二主线。
+
+---
+
+## B 级：最小充分审核证据
+
+### 核心问题
+
+MCP shortcut 不仅隐藏过程，也可能让用户在最终提交时缺少发现错误所需的信息。系统应恢复最小的一组 GUI 证据，而不是完整重放 agent 过程。
+
+例如在发邮件前，到底需要展示：
+
+- 收件人；
+- 主题；
+- 全文；
+- 附件；
+- 来源引用；
+- agent 修改过的字段；
+
+中的哪些内容，才能让用户高效发现真实错误？
+
+### 技术部分
+
+可以训练一个 evidence selector，根据：
+
+- trajectory；
+- state diff；
+- task；
+- candidate effect；
+
+选择最小审核证据集。
+
+### 自动实验难点
+
+“用户能否凭这些证据发现错误”很难完全自动验证。
+
+可以通过 seeded fault coverage 近似，但最终仍高度依赖用户研究。
+
+因此它很适合成为主推荐方向中的**界面与用户研究子问题**，不适合单独承担整篇 tech-heavy 论文。
+
+---
+
+## B 级：从 GUI 编译 tool 的提交前置条件
+
+### 核心问题
+
+MCP tool schema 经常描述参数，却不表达 GUI 中存在的最终审核和提交条件。
+
+系统从 GUI trajectory 中恢复：
+
+```text
+prepare → review → commit
+```
+
+并为 tool 自动生成可执行 precondition：
+
+```text
+direct_send permitted only when user intent authorizes committed endpoint
+```
+
+### 优点
+
+- 技术性很强；
+- 能复用 GUI trajectory；
+- 可以做未见工具和 schema OOD；
+- verifier 清楚。
+
+### 问题
+
+单独做容易变成 program synthesis / tool semantics 论文，人本问题会退居第二位。
+
+最好的用法是把它作为“提交边界保留”的内部技术机制，而不是再创建第二个论文构念。
+
+---
+
+## B−级：跨模式的回滚窗口等价
+
+### 核心问题
+
+GUI 路径可能提供 Undo、撤销期或草稿恢复，而 tool shortcut 直接产生不可逆结果。
+
+系统比较两条路径是否保留等价的 repair window。
+
+### 优点
+
+- 状态清楚；
+- verifier 容易；
+- transaction 和 rollback 能体现系统能力；
+- 可以自动测量恢复成功率。
+
+### 缺点
+
+- 训练必要性较弱；
+- 很多场景可以用静态 reversibility metadata；
+- 容易落入 generic safety / transaction management；
+- 人本贡献不如“谁做最后提交决定”直接。
+
+建议把 rollback 作为主系统的安全执行基础设施，不作为核心构念。
+
+---
+
+## C 级：跨模式 audience equivalence
+
+### 核心问题
+
+GUI 与 MCP 两条路径是否影响同一组人。
+
+例如 GUI 选择团队成员，而 tool 默认分享给整个组织。
+
+### 优点
+
+- 环境事实极其清楚；
+- 自动标签容易；
+- 参数敏感；
+- 适合 unseen tool。
+
+### 缺点
+
+- 太容易重新膨胀为 audience drift、scope drift 和 data-use；
+- 单一 ACL diff 规则可能已经足够；
+- 模型必要性不稳定；
+- 与访问控制和安全研究更接近。
+
+可以作为提交边界 benchmark 中的一类 case：
+
+```text
+权限配置尚在 preview → ACL 正式生效
+```
+
+但不要把 audience 单独扩展成第二主线。
+
+---
+
+## C 级：个性化提交边界记忆
+
+### 核心问题
+
+不同用户可能希望 agent 在不同任务中停在不同阶段，系统根据历史修正学习个人边界。
+
+### 为什么暂时放弃
+
+它会引入：
+
+- memory；
+- longitudinal adaptation；
+- preference learning；
+- future reuse；
+- drift；
+- policy editing；
+- cold start；
+- 更多前置人工数据。
+
+它符合长期研究路线，但不符合当前 CHI 2027 时间和“用户研究不阻塞技术流程”的要求。
+
+---
+
+# 应立即删除的方向
+
+## 1. “GUI 和 MCP 哪个更值得信任”
+
+错在媒介本身不决定后果。
+
+GUI 可以删除、发送、付款；MCP 也可以只读、可撤销、严格限定。
+
+而且最终很容易只剩 trust scale。
+
+---
+
+## 2. 通用高风险动作拦截器
+
+形式通常是：
+
+```text
+tool call → risk score → allow / ask / block
+```
+
+错在：
+
+- safety guardian 赛道已经拥挤；
+- 容易记忆工具名；
+- GUI trajectory 不是必要输入；
+- “高风险”构念宽泛；
+- always-confirm 很容易成为强基线；
+- 不能形成你的独特 GUI–MCP 问题。
+
+---
+
+## 3. 把所有 GUI confirmation 都当成人类决定点
+
+错在 UI 中存在大量无意义摩擦。
+
+只有与可验证生命周期状态变化对应的节点，才能进入主要构念。
+
+---
+
+## 4. 用大模型生成 `commitment_violation=true` 标签
+
+错在：
+
+- 标签来源不独立；
+- 人本含义未经 grounding；
+- 训练与评估可能循环；
+- 无法证明模型学到了真实 effect；
+- 难以复现。
+
+标签必须来自：
+
+```text
+任务目标状态 × sandbox canonical state diff
+```
+
+人只负责验证这种操作化在真实任务中是否有意义。
+
+---
+
+## 5. 只在 tool 执行后显示 receipt
+
+错在发送、发布或权限生效后，receipt 已经太迟。
+
+receipt 可以作为日志，但不能代替：
+
+- dry-run；
+- shadow state；
+- transaction；
+- staged execution；
+- pre-commit return to GUI。
+
+---
+
+## 6. 同时研究 finality、audience、reversibility、provenance 和 future reuse
+
+错在每个维度都会产生一套模型、指标和 UI。
+
+在主推荐中：
+
+- audience change 可以是判断 committed effect 的环境证据；
+- reversibility 是执行基础设施属性；
+- provenance 是调试信息；
+- future reuse 不做；
+- finality 不再作为独立大概念，而被压缩为 staged → committed 生命周期转移。
+
+它们都不能与 commitment boundary 平级。
+
+---
+
+# 一个现实的 8 周执行顺序
+
+## 第 1 周：冻结构念和三套状态机
+
+必须完成：
+
+- 三个应用的 staged / committed 定义；
+- 20–30 条代表性任务；
+- 每个字段的环境来源；
+- task target state 的生成规则；
+- 论文 claim 草稿；
+- 用户研究伦理流程启动。
+
+此时不要训练模型。
+
+## 第 2 周：完成 GUI–MCP 双路径
+
+必须跑通：
+
+- reset；
+- GUI executor；
+- MCP server；
+- state logging；
+- external side-effect logging；
+- paired task execution。
+
+## 第 3 周：shadow transaction 和确定性 verifier
+
+此时应能自动回答：
+
+- task 是否成功；
+- 是否 premature commit；
+- 是否产生多余外部效果；
+- executor failure 与 governance failure 分别是什么。
+
+如果这一周结束还不能可靠评分，不应继续增加模型或 UI。
+
+## 第 4 周：benchmark generator 与简单基线
+
+完成：
+
+- 参数反标签；
+- tool renaming；
+- schema rewrite；
+- different-tool same-effect；
+- no guard；
+- always-confirm；
+- static rule；
+- prompted critic。
+
+这一周是“训练必要性审判”。
+
+## 第 5 周：轻量训练与 OOD
+
+只有当规则或 prompt 在 semantic OOD 上出现稳定缺口时，训练 critic。
+
+若手写规则在所有真正重要的 split 上已经接近 oracle，就不要硬加分类器。可把学习目标转为更明确的 GUI-to-effect contract induction，或者以 train-free system paper 形式加强 benchmark 与系统贡献。
+
+## 第 6 周：规模化自动实验
+
+完成：
+
+- 全部 baseline；
+- ablation；
+- OOD；
+- utility–boundary Pareto；
+- failure taxonomy；
+- 三个 executor 或至少多个 planner setting。
+
+## 第 7 周：用户研究
+
+系统此时即使没有用户研究，也应已经能独立运行和产生论文主要表格。
+
+用户研究只验证：
+
+- 恢复的 commit point 是否帮助用户发现和修复问题；
+- 是否比 always-confirm 减少负担；
+- 用户是否理解实际 effect。
+
+## 第 8 周：论文、复现和 demo
+
+冻结功能，不再增加概念。
+
+---
+
+# 最终建议
+
+我建议把整个项目压缩成下面一句可执行的研究命题：
+
+> **混合 GUI–MCP Agent 只有在 tool path 达到与用户授权相同的提交阶段时，才应把它视为 GUI path 的等价快捷方式；否则系统应把效果保持在暂存状态，或把控制权恢复到 GUI 的最终提交点。**
+
+这条线同时满足你的四个最终判断标准：
+
+| 判断问题 | 结论 |
+|---|---|
+| 是否只有一个真实人本矛盾？ | 是：自动化压缩不应替用户完成最终外部承诺 |
+| 技术模块是否都必需？ | 是：GUI trajectory 定义边界，shadow diff 预测效果，transaction 防止事后治理，critic 处理 OOD |
+| 自动评估与训练是否自然？ | 是：GT 来自状态机；训练只解决跨 schema、跨工具和跨应用的语义对齐 |
+| 能否形成可运行项目？ | 是：三个 Web 应用、双路径、benchmark、verifier、模型、review UI 和 Docker demo |
+
+在当前时间约束下，不建议同时推进第二个完整方向。
+
+最合适的结构是：
+
+- **主论文问题：提交边界保留；**
+- **主要技术任务：跨 GUI–tool 的 effect equivalence；**
+- **部署机制：shadow execution + stage 或 return-to-GUI；**
+- **自动评估主体：premature commit 与 automation utility；**
+- **用户研究：验证恢复的提交机会是否真的提高纠错和决定质量；**
+- **批量操作例外项：作为未来工作或唯一备用选题。**
+
+这不是把 GUI Agent 当成 HCI 研究的技术支撑，而是让 GUI 所呈现的用户可检查状态，成为定义 MCP 自动化边界的技术依据。正是这一点，最有机会同时形成 CHI 的人本贡献、AI 的模型与评估贡献，以及一个短期难以复制的 GUI Agent 工程壁垒。
+
+
+【提问 轮数2】
+commitment state到底是什么意思，我没太懂，这个问题真的没人做过吗？
+
+【回答内容 轮数2】
+我先把这个概念用一条任务讲清楚，再核对它与既有工作到底重合到什么程度，避免把“邻近问题”误说成“完全没人做”。
+
+【回答内容 轮数2】
+先修正一个重要问题：
+
+**“Commitment state”不是 GUI Agent 领域已经公认的标准术语，而是我上一轮为了压缩问题临时使用的操作化名称。**你没有立即理解，说明这个名字本身不够好。甚至“commitment boundary”在 2026 年已经被另一篇工作用于描述大模型推理何时形成稳定答案，继续使用会产生术语冲突。
+
+更准确的中文应该是：
+
+> **任务目前停留在“准备好了但尚未生效”，还是已经“对外生效”。**
+
+可以暂时叫：
+
+- **准备态 / 生效态**
+- **staged state / externally effective state**
+- 或者 **user-authorized execution endpoint：用户授权的执行终点**
+
+最后一个最准确。
+
+---
+
+# 一、它到底是什么意思
+
+用“提交报销表”这条任务解释。
+
+用户说：
+
+> “帮我把报销表填好，我确认后再提交。”
+
+系统可能经过三个状态：
+
+```text
+未填写
+  ↓
+已填写、可检查、可修改，但尚未提交
+  ↓
+已提交给财务，审批流程已启动
+```
+
+对应到环境事实：
+
+| 状态 | 数据库和系统里实际发生的事情 |
+|---|---|
+| 未填写 | 没有报销记录 |
+| 准备态 | 创建了 draft，字段已填写，没有通知财务 |
+| 生效态 | status 变为 submitted，审批任务和通知已创建 |
+
+我之前所说的 `commitment state`，实际上只是想表示：
+
+```text
+这个任务现在处于：
+1. 仍可由用户检查和修改的准备阶段
+还是
+2. 已经造成外部效果的生效阶段
+```
+
+所谓“跨越 commitment boundary”，就是：
+
+```text
+draft → submitted
+```
+
+或者：
+
+```text
+email draft → email sent
+private draft → public post
+permission preview → ACL actually changed
+changes prepared → pull request merged
+```
+
+## 它不等于“不可逆”
+
+这是一个很重要的区别。
+
+发送的邮件可能可以 recall，提交的表单也可能可以撤回，但它们已经：
+
+- 通知了其他人；
+- 进入了正式工作流；
+- 暴露了信息；
+- 改变了外部系统状态。
+
+所以这里关心的不是严格的“数学不可逆”，而是：
+
+> **是否已经从个人准备活动，变成了对外发生的正式行为。**
+
+---
+
+# 二、这里的人本问题是什么
+
+人本问题不是：
+
+> “发送邮件很危险，所以应该确认。”
+
+而是：
+
+> “用户究竟授权 agent 做到哪一步？”
+
+同一个 `send_email` 行为：
+
+### 情况 A
+
+用户说：
+
+> “把这封邮件直接发给 Alice。”
+
+正确终点是：
+
+```text
+sent
+```
+
+Agent 发送没有问题。
+
+### 情况 B
+
+用户说：
+
+> “帮我起草一封邮件，我看完再发。”
+
+正确终点是：
+
+```text
+draft
+```
+
+Agent 直接发送就是越过了用户授权的执行终点。
+
+所以它不是工具级风险：
+
+```text
+send_email = dangerous
+```
+
+而是任务语境中的终点匹配：
+
+```text
+用户授权终点 = draft
+实际终点 = sent
+两者不匹配
+```
+
+---
+
+# 三、为什么 GUI–MCP 会让这个问题更突出
+
+假设 GUI 工作流是：
+
+```text
+填写邮件
+→ 进入完整草稿页面
+→ 查看收件人、正文和附件
+→ 点击 Send
+```
+
+MCP 工具则是：
+
+```python
+send_email(
+    recipients=[...],
+    body=...,
+    attachments=[...]
+)
+```
+
+MCP 把多个 GUI 阶段压缩成了一次调用。
+
+压缩本身不是问题。真正的问题是：
+
+> MCP 不仅压缩了机械操作，有时还把“准备”和“正式生效”两个阶段一起压缩掉了。
+
+但这里必须再做一个修正：
+
+**GUI 天然不等于保留用户决定权。**
+
+GUI Agent 也可以直接点击 Send。MCP 也可以调用：
+
+```python
+save_email_draft(...)
+```
+
+所以准确的研究对象不是：
+
+```text
+GUI vs MCP
+```
+
+而是：
+
+```text
+包含生效前可检查状态的执行路径
+vs
+直接产生外部效果的压缩路径
+```
+
+GUI–MCP 是最有价值的研究场景，因为两种路径之间经常存在这种压缩差异，但媒介本身不是标签。
+
+---
+
+# 四、这个问题真的没人做过吗？
+
+## 明确答案：不能说没人做过
+
+经过进一步核对，**我上一轮对 novelty 的表达偏乐观了。**
+
+“用户是否应在 consequential action 前保留批准权”“agent 是否应先准备、再等待人类批准”“应该比较真实 effect 而不是 tool name”这些核心思想，都已经有相当接近的公开工作。
+
+## 1. 已经有人研究执行前的用户意图验证
+
+VeriSafe Agent 会把自然语言用户指令转成形式化约束，并在 Mobile GUI Agent 的动作真正执行前，验证动作是否符合用户意图。也就是说，“执行前检查 agent 是否做了超过用户要求的事情”并不是空白。
+
+如果我们的任务只是：
+
+```text
+用户说 draft
+agent 准备 send
+系统阻止
+```
+
+审稿人完全可能认为这只是 VeriSafe 式 intent verification 的一个简单案例。
+
+---
+
+## 2. 已经有人明确提出“批准 effect，而不是 tool call”
+
+2026 年的 EffectGuard 工作直接指出：批准工具名称或参数并不可靠，因为 alias、默认值、资源引用和环境状态可能导致最终效果发生变化。它会预览 approval-time effect，并在正式提交前重新验证 commit-time effect。
+
+这与我们之前提出的：
+
+- dry-run；
+- effect preview；
+- shadow state；
+- commit-time checking；
+
+高度接近。
+
+该工作目前是 ICML 2026 AIWILD workshop 的公开投稿，而不是我能确认的 ICML 主会论文，但它已经构成必须正面处理的 prior art。
+
+---
+
+## 3. 已经有人研究“用户看到的操作必须等于真正执行的操作”
+
+Consent Integrity 工作研究 coding agent 的批准界面：agent 可能向用户展示一个无害摘要，实际却执行另一项行为。它要求由可信中介根据真实底层动作生成审核内容，并将批准结果绑定到准确执行的动作。citeturn394642academia47
+
+这已经覆盖了：
+
+- 不能信任 agent 自己描述效果；
+- 审核内容必须来自真实执行对象；
+- 用户批准和实际执行必须严格绑定。
+
+所以“给用户看准确的 effect preview”本身也不足以成为新贡献。
+
+---
+
+## 4. 已经有人研究什么时候应让用户检查
+
+When Should Users Check? 把 agent 的确认点选择建模为时间成本优化问题，比较每步确认、最终确认和中间确认，并通过用户研究考察错误发现、修复与交互成本。citeturn302833academia26
+
+因此，“不要每一步都确认，只在重要节点确认”也已经是明确的研究问题。
+
+---
+
+## 5. 已经有 CUA 工作直接讨论 decision-critical moments
+
+2026 年的 Computer-Use Agent oversight 研究比较了多种监督策略。它的核心发现之一就是：关键不只是给用户更多控制，而是让真正需要用户判断的时刻能够被及时识别。参与者也会针对不同任务建立局部的 delegation boundaries，而不是简单地决定信任或不信任 agent。
+
+这与“恢复用户决定机会”的 HCI motivation 非常接近。
+
+---
+
+## 6. 甚至已经有 benchmark 要求 agent “先准备，不能执行”
+
+最新的 CFAgentBench 在付款、工资、电子签名和电子申报任务中明确规定：
+
+> 正确行为是停止并为人类批准做好准备；即使 agent 执行的是正确交易，只要它真的执行了，任务也判失败。
+
+它使用 state diff、forbidden side effects 和可执行 verifier 评分。citeturn888483academia30
+
+这基本说明：
+
+```text
+正确完成内容
+但不应该正式执行
+```
+
+已经不是一个无人提出的 benchmark 原则。
+
+虽然这是一篇非常新的 arXiv 工作，学术成熟度和同行评审状态需要谨慎看待，但 novelty claim 不能忽略它。
+
+---
+
+## 7. 状态差分 benchmark 也已经存在
+
+Agent-Diff 已经将任务正确性定义为预期环境状态变化，而不是匹配 action trace 或自然语言完成声明；它提供 sandbox、真实 API 接口和 state-diff contract。
+
+MCPWorld 则已经提供 GUI、API/MCP 和 hybrid agent 的容器化环境，并通过应用内部状态自动验证任务完成。
+
+所以：
+
+- sandbox；
+- GUI–MCP 双路径；
+- state diff；
+- 自动 verifier；
+
+这些组合起来很有工程价值，但它们本身不能构成 CHI 2027 的核心 novelty。
+
+---
+
+# 五、那这个方向是不是应该放弃？
+
+## 当前的“准备态 vs 生效态”版本，不够
+
+如果论文只是：
+
+> 用户说 draft，MCP 想 send，我们识别并阻止。
+
+我不建议继续。
+
+原因很具体：
+
+1. 它可能退化为简单的语言指令分类；
+2. GUI trajectory 并非必要；
+3. `draft`、`send` 等关键词会形成严重捷径；
+4. 静态规则很容易解决；
+5. 与 VeriSafe、EffectGuard、CFAgentBench 等工作重合明显；
+6. 很难证明你的 GUI Agent 技术壁垒是不可替代的。
+
+所以你的直觉是对的：**单纯讲 commitment state，并没有立即显现出一个足够新、足够难的研究问题。**
+
+---
+
+# 六、仍然可能成立的真正窄问题
+
+我认为值得继续调查的不是“agent 有没有正式提交”，而是：
+
+> **MCP shortcut 是否消除了 GUI 路径中一个真正可用于发现和修正错误的生效前审核状态？**
+
+可以叫：
+
+## Cross-mode review-state preservation
+
+中文：
+
+## 跨执行模式的生效前审核状态保留
+
+这里的核心对象不再只是：
+
+```text
+draft / sent
+```
+
+而是一个具体的 **reviewable pre-effect state**。它必须同时满足：
+
+1. 候选操作的关键参数已经确定；
+2. 这些参数真实可见，而不是 agent 自己的摘要；
+3. 用户还可以修改或取消；
+4. 外部效果尚未发生。
+
+例如邮件审核状态中，用户能看到并修改：
+
+```text
+收件人
+正文
+附件
+发送账号
+```
+
+MCP shortcut 直接发送时，问题不仅是状态从 draft 变成 sent，而是：
+
+> 用户失去了在所有真实发送参数已经确定后、外部效果发生前，检查和修正它们的机会。
+
+## 这与 EffectGuard 的关键区别
+
+EffectGuard 的问题是：
+
+> 用户批准的 effect 是否与最终执行的 effect 一致？
+
+你的潜在问题可以是：
+
+> GUI 工作流原本提供了哪一个可纠错的 pre-effect review state；MCP 压缩执行是否保留了等价的审核能力；若没有，系统能否自动重建这个 GUI-native review state？
+
+换句话说，不是再造一个批准弹窗，而是：
+
+```text
+MCP 生成完整候选 effect
+→ shadow execution 得到真实参数
+→ 自动映射回应用的 GUI review 页面
+→ 将真实字段填入
+→ 用户在原生界面检查、修改并完成最后操作
+```
+
+这个版本中，GUI trajectory 才真正不可替代。
+
+---
+
+# 七、它是否已经有人完整做过？
+
+目前我能做出的谨慎判断是：
+
+## 各个零件都有人做过
+
+- 执行前 intent verification：有人做；
+- effect-based approval：有人做；
+- consent 与真实执行绑定：有人做；
+- confirmation timing：有人做；
+- CUA consequential-moment oversight：有人做；
+- stage-for-human-approval benchmark：有人做；
+- state-diff verifier：有人做；
+- GUI–MCP hybrid environment：有人做。
+
+## 但这个特定闭环，我暂时没有发现完全对应的工作
+
+即：
+
+1. 从 **GUI trajectory** 中识别应用原生的生效前审核状态；
+2. 比较 GUI path 与 MCP path 是否提供等价的可检查、可修改变量；
+3. 在 MCP direct execution 前做 shadow effect；
+4. 自动将候选效果重新物化到 GUI-native review state；
+5. 自动测量保留了多少纠错机会和自动化收益；
+6. 在 unseen tool/schema/app 上测试 cross-mode mapping。
+
+这是基于截至 **2026 年 7 月 15 日**公开文献的检索判断，而不是“绝对没人做过”的声明。
+
+---
+
+# 最终结论
+
+**“Commitment state”这个说法应该放弃。**
+
+它原本只是指：
+
+> agent 当前停留在“已准备、未生效”，还是已经跨到“正式对外生效”。
+
+但这个版本：
+
+- 术语不直观；
+- 与既有 intent verification 和 effect approval 工作太接近；
+- 容易退化为 `draft` vs `send` 的简单判断；
+- 尚不足以支撑你的技术壁垒。
+
+真正值得继续验证的新问题应改成：
+
+> **当 MCP 把多步 GUI 流程压缩成一次执行时，它是否消除了一个在真实效果已确定、但尚未生效时允许用户检查和修改的 GUI 审核状态？系统能否自动识别并恢复这个状态，而不是笼统地弹出确认框？**
+
+这比“commitment state”更清楚，也更能说明为什么必须有：
+
+- GUI trajectory；
+- DOM 和截图；
+- tool 参数；
+- shadow state；
+- cross-mode comparison；
+- 原生 GUI 回填；
+- 自动 verifier；
+- 任务型用户纠错实验。
+
+但这条线仍需要一次更严格的 novelty audit，尤其逐段对照 EffectGuard、VeriSafe、CUA oversight 和 CFAgentBench。当前不能直接按“没人做过”立项。
+
+
+【提问 轮数3】
+基本原则
+
+我的研究偏好与核心诉求
+
+一、我的研究定位：以 GUI Agent 技术为根基，做人本问题驱动的 AI × HCI
+
+我的核心背景和竞争力来自 Agentic AI，尤其是 GUI Agent、Computer Use Agent、多模态交互轨迹、GUI 与 MCP/tool 的混合执行、sandbox、harness 和自动评估。因此，我不希望为了进入 HCI，把论文做成一个以用户访谈和界面设计为主、技术系统只是支撑材料的工作。
+
+但我同样不希望做成一篇纯 AI benchmark，只在最后加入几个用户问卷，借用 HCI 的语言包装算法贡献。
+
+我真正想要的是：
+
+由一个具体、真实的人本问题定义技术任务，再用足够扎实的 AI、系统和工程方法解决它。
+
+所谓 tech-heavy human-centric，对我而言不是“技术多一点、用户研究也多一点”，而是：
+
+人本问题决定模型要预测什么；
+
+用户价值决定 benchmark 如何构造；
+
+用户边界决定 verifier 如何评分；
+
+技术系统必须真正改善用户的理解、控制、决策或纠错能力；
+
+用户研究用于验证这些人本目标，而不是给一个已经完成的 AI 系统补合法性。
+
+我希望 GUI Agent / CUA 成为我的长期技术护城河。相比已经非常拥挤的通用 coding agent，GUI Agent 涉及视觉感知、页面状态、轨迹理解、跨模态执行、工具调用和真实环境副作用，更能体现我的既有积累，也更难被普通 HCI 研究者快速复制。
+
+因此，除非研究问题天然属于 coding agent，否则我不希望为了开发方便，把工作退化成普通的 IDE 插件或代码助手研究。
+
+二、我对研究问题的偏好：问题要窄、真实、有张力，但不能概念膨胀
+
+我喜欢前沿且具有原则性的研究问题。它最好来自当前真实产品正在发生的变化，例如：
+
+agent 从逐步 GUI 操作转向高压缩的 MCP/tool shortcut；
+
+agent 从即时执行转向持久技能、记忆和长期复用；
+
+agent 在提高效率时，可能跳过原本属于用户的检查、确认或决定机会；
+
+agent 的执行过程越来越不可见，但能够造成的外部影响越来越大。
+
+这些现象在 Codex、Claude Code、Computer Use、MCP 等产品中具有明确的工业意义，也能让产品经理、交互设计师和开发者直接理解为什么值得研究。
+
+但是，我不喜欢一个选题同时容纳大量构念。一个方向即使包含很多有趣关键词，也不能让它们全部成为主线。
+
+例如，一篇论文不应该同时把以下内容都作为主要问题：
+
+trust；
+
+consent；
+
+skill drift；
+
+provenance；
+
+GUI–MCP mode shift；
+
+data-use drift；
+
+completion drift；
+
+dark patterns；
+
+memory；
+
+active perception；
+
+future reuse；
+
+repair。
+
+这会产生一种“什么都讨论了，所以好像很充实”的假象，实际上会让研究失去中心。
+
+我理想中的论文应当只有：
+
+一个主要人本矛盾，一个核心构念，一套技术闭环，一条清楚的评估逻辑。
+
+可以有多个模块，但每个模块都必须直接服务于同一个问题，而不是每增加一个模块就引入一个新的研究主题。
+
+我喜欢问题的表达足够漂亮、有理论张力，例如强调“目标完成并不等于过程符合用户意图”“自动化效率不应以消除用户决定权为代价”。但这种表达必须能够进一步落到可执行、可测量、可构造数据的问题上，而不能停留在哲学或伦理口号层面。
+
+三、我对论文形态的要求：必须是一个完整、可运行、可验证的技术项目
+
+我不接受论文主体是：
+
+一个界面原型 + 用户觉得不错 + 若干访谈主题。
+
+这类工作无法充分体现我的技术背景，也很难形成对求职有价值的工程成果。
+
+我需要的完整形态是：
+
+受控的 GUI–MCP 环境→ 明确的数据与状态表示→ 一个确实有必要的模型或 framework→ 自动 verifier→ 规模化自动实验→ 小规模但扎实的用户研究→ 可运行、可复现的 GitHub 项目。
+
+1. 自动化评估必须是主体，而不是补充
+
+用户研究可以回答：
+
+用户是否看懂了系统；
+
+用户是否更准确地发现问题；
+
+用户是否能更好地设置或修复边界；
+
+用户是否保留了控制感和决定权。
+
+但论文还必须自动回答：
+
+agent 是否完成任务；
+
+是否产生不合适的状态变化；
+
+是否错误放行危险行为；
+
+是否错误阻止合理自动化；
+
+是否增加过多确认负担；
+
+是否能迁移到未来任务和未见工具；
+
+系统在 utility 与用户价值之间处于什么位置。
+
+我不希望只报告 task success，因为一个 agent 完全可能高质量完成任务，却在完成过程中改变了收件人、提交状态、权限、发布范围或其他用户本应决定的事项。
+
+因此，自动评估不能只衡量“任务做没做完”，而应衡量：
+
+任务完成得是否符合用户认可的边界，以及系统在降低越界的同时保留了多少自动化收益。
+
+2. GitHub 项目必须是真正的可交付成果
+
+最终项目应该能够独立运行和展示，而不是一组无法复现的实验脚本。
+
+它至少应呈现出一条完整链路：
+
+一个 Web-based sandbox；
+
+GUI 操作路径与 MCP/tool 路径；
+
+可重置的环境状态；
+
+轨迹和状态变化记录；
+
+benchmark cases；
+
+自动 verifier；
+
+baselines；
+
+训练或推理代码；
+
+自动评测脚本；
+
+可视化或治理界面；
+
+清晰的 README 和 demo。
+
+我希望这个项目在求职中能够证明，我不仅能提出 HCI 概念，也能把问题转化为数据、模型、系统、实验和产品机制。
+
+四、我对训练的态度：可以轻量训练，但必须“非训练不可”
+
+我并不要求每篇论文一定训练模型。train-free framework 如果足够新、足够系统化、自动实验足够扎实，也可以成立。
+
+但是，如果论文中引入训练，训练必须非常自然。理想状态是审稿人看到问题后，会认为：
+
+“这里存在一个规则难以可靠表达的映射，确实应该学习；作者也确实训练了。”
+
+我不接受为了显得 tech-heavy，额外训练一个没有必要的分类器。
+
+例如，直接训练模型根据工具名输出：
+
+allow / ask / block
+
+并不是我喜欢的训练方式。因为在工具集合预定义时，模型很可能只是记住：
+
+send_email 风险高；
+
+read_file 风险低；
+
+merge_pr 需要确认。
+
+这种情况下，静态规则或 allowlist 可能更简单、更稳定，也更容易解释。训练没有证明必要性。
+
+更符合我偏好的训练对象应当依赖：
+
+当前任务状态；
+
+工具的具体参数；
+
+工具执行后可能造成的 effect；
+
+GUI 轨迹中原本存在的中间状态或检查机会；
+
+用户此前认可的执行边界；
+
+不同工具之间共享的后果语义。
+
+换句话说，模型应学习的是：
+
+行为在当前语境中会造成什么用户相关后果，或者两条执行路径是否在人本意义上等价。
+
+而不是：
+
+某个工具名称通常安不安全。
+
+训练还必须通过专门的实验排除记忆和捷径：
+
+同一个工具，因参数不同得到相反判断；
+
+不同工具，因为造成相同 effect 得到相同判断；
+
+工具重命名或 schema 改写后仍然有效；
+
+未见工具和未见任务上的 OOD 测试；
+
+与规则、prompt、静态 policy 等简单基线比较；
+
+必要时使用规则–模型混合，而不是让模型承担所有确定性判断。
+
+我更偏好轻量 SFT、QLoRA 或小型 critic，而不是在有限时间里训练一个更强的 GUI executor。executor 可以复用现有模型；我的创新更适合放在 effect understanding、cross-path comparison、policy inference 或 human-relevant critic 上。
+
+五、我对 HCI 与人工数据的要求：人类必须定义价值，但不能阻塞全部技术流程
+
+我重视人本构念的正当性，因此不接受凭空在数据里写入几个 GT 字段，然后假设它们天然代表用户价值。
+
+例如：
+
+finality_escalated = true audience_escalated = true reversibility_reduced = true
+
+这些字段不能只因为研究者或大模型这样标记，就被当作无争议事实。
+
+我会追问：
+
+这个字段来自环境的真实状态变化吗？
+
+是研究者制定的操作化规则吗？
+
+是大模型自动判断的吗？
+
+还是来自真实用户的偏好和判断？
+
+部署时是否能够获得同样的信息？
+
+但另一方面，我也不接受把大规模人工调查和逐条标注放在全部技术工作的最前面。如果必须先完成大量访谈，才能获得标签、生成数据、开始训练和运行 benchmark，那么整个项目会被人类研究流程严重拖慢。
+
+我理想中的分工是三层：
+
+第一层：环境事实
+
+尽量直接由 sandbox 和状态数据库提供，例如：
+
+邮件是否从 draft 变成 sent；
+
+是否新增外部收件人；
+
+是否提交表单；
+
+是否发布内容；
+
+是否更改权限；
+
+是否删除对象；
+
+是否写入长期存储；
+
+操作是否可以回滚。
+
+这些是可重复、可自动获取的事实，不需要人逐条标注。
+
+第二层：研究操作化
+
+研究者明确说明：
+
+哪些状态变化代表一种用户相关边界；
+
+为什么这样定义；
+
+哪些情况规则能够确定；
+
+哪些情况存在歧义；
+
+规则变化时结果是否稳健。
+
+这一层不是“绝对真理”，但必须透明、可审计、能做 sensitivity analysis。
+
+第三层：有限的人类 grounding
+
+人类用于验证：
+
+这些边界是否真的对用户重要；
+
+不同用户是否存在系统性差异；
+
+哪些情况不能用统一规则判断；
+
+系统的解释是否符合用户理解；
+
+用户能否使用系统修正和表达自己的边界。
+
+因此，我并不是不要人工数据，而是希望：
+
+人类负责定义、校准和个性化价值；环境负责规模化生成事实；模型只学习规则难以覆盖的语义部分。
+
+用户研究最好是后置、增量、非阻塞的。在用户实验开始之前，sandbox、benchmark、verifier、baselines 和主要自动实验应当已经能够独立跑通。
+
+六、这一个 GUI–MCP 工作中，我希望兼顾的核心元素
+
+这篇工作的技术对象应继续围绕 GUI Agent，而不是泛化到任意 agent。
+
+我关心的核心关系是：
+
+用户通过 GUI 所看到、检查或参与的执行过程，与 agent 通过 MCP/tool shortcut 实际造成的状态变化之间，是否存在重要差异。
+
+因此，适合保留的关键词包括：
+
+hybrid GUI–MCP execution；
+
+multimodal GUI trajectory；
+
+DOM / screenshot / action / state；
+
+GUI path 与 tool path；
+
+tool schema 与参数；
+
+before/after state diff；
+
+dry-run、shadow state 或 transactional execution；
+
+deterministic verifier；
+
+cross-mode comparison；
+
+unseen tools 与 tool OOD；
+
+automation utility；
+
+用户决定权、控制、纠错和后果理解。
+
+其中，active perception 可以复用已有 infra，但不应自动成为这篇 CHI 的主问题。主动感知是另一篇 AI 能力评估工作的核心；当前工作只应复用它的日志、DOM、截图和 harness，除非感知选择直接服务于唯一的人本问题。
+
+环境方面，我更偏好：
+
+受控、简单、可验证的 Web sandbox，而不是复杂、脆弱的真实桌面系统。
+
+任务本身不必难。可以是邮件、表单、任务管理、文件分享、项目协作等小应用。操作难度可以简单，但人本矛盾不能简单，评估也不能只做 toy demonstration。
+
+Web 环境必须支持：
+
+reset；
+
+replay；
+
+读取内部状态；
+
+捕获副作用；
+
+分离 executor failure 与 governance failure；
+
+GUI 与 tool 两种路径完成相同或相近任务。
+
+大型 OS benchmark 可以作为外部验证，但不应该成为九周项目的主要工程风险。
+
+我明确不喜欢的过往方向
+
+以下方向不一定完全错误，但它们可以作为负样本，帮助以后迅速排除不符合我偏好的方案。
+
+负样本一：研究“GUI 是否比 MCP 更值得信任”
+
+这个问题建立在过度简化的假设上。
+
+GUI 操作同样可能：
+
+删除数据；
+
+发送邮件；
+
+改变权限；
+
+完成付款。
+
+MCP 操作也可能：
+
+只读；
+
+可撤销；
+
+被严格限制；
+
+比人工 GUI 操作更可靠。
+
+如果研究只比较两种媒介带来的主观信任，最后很容易变成：
+
+让参与者观看 GUI 操作和 MCP 日志，然后填写 trust scale。
+
+这既缺少扎实的自动评估，也无法产生自然的训练任务，更难形成具有技术深度的 GitHub 项目。
+
+我真正关心的不是 GUI 和 MCP 谁更可信，而是：
+
+两条执行路径是否保留了相同的用户相关后果和决定机会。
+
+负样本二：把 Skill Drift 做成包罗万象的治理系统
+
+过去讨论过同时研究：
+
+scope drift；
+
+mode shift；
+
+data-use drift；
+
+completion drift；
+
+provenance；
+
+future reuse；
+
+repair；
+
+policy editing。
+
+这些内容各自都有意义，但放在一篇论文里会导致系统不断增加模块：
+
+version diff；
+
+provenance viewer；
+
+timeline；
+
+receipt；
+
+policy editor；
+
+future probe；
+
+repair compiler。
+
+最终看起来内容很多，却没有一个足够深的中心问题。自动 benchmark 也很难用一套统一 GT 支撑所有 drift 类型。
+
+因此，我不希望继续发展一个“治理所有 agent 演化问题”的大框架。应当从中选择一种最重要、最可验证的矛盾，把它做透。
+
+负样本三：宽泛的 Procedural Consent
+
+“用户同意 agent 完成目标，是否等于同意它采用任意执行方式”是一个有启发性的 motivation，但如果直接把 procedural consent 作为模型标签，会产生严重问题：
+
+consent 太抽象；
+
+不同用户边界不同；
+
+很难自动得到 GT；
+
+容易依赖大量前置人工标注；
+
+论文可能滑向伦理讨论；
+
+系统容易退化成权限弹窗、receipt 和 policy editor。
+
+因此，procedural consent 可以作为高层解释，但不能直接成为一个未经操作化的万能标签。
+
+更好的方向必须把它压缩成：
+
+一类可以通过环境状态观察、又确实代表用户决定权的具体差异。
+
+负样本四：训练 allow / ask / block 分类器
+
+如果工具是预定义的，直接预测三分类很可能只是在学习工具名风险。
+
+这类工作只有在以下条件成立时才有说服力：
+
+相同工具在不同参数下需要不同决策；
+
+不同工具产生相同 effect 时应得到相同决策；
+
+模型在工具重命名和未见工具上仍然有效；
+
+明确证明规则和静态 policy 无法覆盖问题；
+
+模型输入包含状态、参数、轨迹和 effect，而不是只有 tool name。
+
+否则，训练只是装饰，并不符合我对“这里就该训练”的要求。
+
+负样本五：只在工具执行后发现 violation
+
+执行 MCP 后再查看 state diff，适合 benchmark verifier，却不足以成为真实治理系统。
+
+如果行为不可撤销，事后发现错误已经太晚。实际系统至少需要一种执行前或安全执行机制：
+
+dry-run；
+
+shadow state；
+
+transactional execution；
+
+rollback；
+
+effect manifest；
+
+高风险操作回退 GUI；
+
+先生成候选 action，再由 checker 决策。
+
+因此，必须区分：
+
+评估时的真实执行后 verifier；
+
+部署时的执行前治理机制。
+
+负样本六：全用户访谈，或者让用户研究成为全部工作的前置条件
+
+这类方案不符合我的时间、技术和职业目标。
+
+如果研究流程是：
+
+先访谈和人工标注→ 定义所有 GT→ 才能生成数据→ 才能训练→ 才能做自动实验，
+
+那么项目风险过高，也会削弱技术主体。
+
+用户研究必须有意义，但它应该验证已经成形的系统，而不是成为整个系统能否开始开发的先决条件。
+
+负样本七：把所有已有 infra 都硬塞进同一篇论文
+
+已有主动感知、成本统计、多模态轨迹和 harness，并不意味着这些都必须成为 CHI 论文的贡献。
+
+复用基础设施是优势，但强行复用研究问题会使论文失焦。
+
+我的原则应该是：
+
+复用代码和环境，但只保留直接服务于当前人本问题的模块。
+
+最终核心诉求
+
+我想做的是一篇真正属于 AI × HCI 交叉地带的 GUI Agent 工作：
+
+它围绕一个极窄但真实的人本问题展开；这个问题必须能够被清楚地操作化，而不是依赖宽泛的 trust 或 consent 概念。技术上要有受控 Web sandbox、GUI–MCP 双路径、状态与轨迹表示、自动 verifier、扎实的自动实验，以及一个规则无法完全解决、因而自然需要轻量训练的模块。用户研究用于 grounding、校准和验证，而不是逐条制造全部 GT，也不能阻塞前期开发。最终成果必须是一个可运行、可开源、可演示的 GitHub 项目，既能被 CHI 审稿人认可其人本价值，也能体现我在 GUI Agent、模型、系统和工程上的技术壁垒，并直接服务于大厂产品、设计、算法和开发岗位的求职。
+
+以后判断一个方向是否值得继续，只需要抓住四个问题：
+
+它是否只有一个清楚、真实的人本矛盾？
+
+技术模块是否都是解决这个矛盾所必需的？
+
+自动评估和训练是否自然成立，而不是为了显得复杂？
+
+最终是否能形成一套真正可运行、可展示的项目？
+
+只要其中一个问题回答不清楚，就不应该继续增加概念和模块。八、你的核心诉求最终版
+
+我要在有限时间内完成一篇真正属于 AI+HCI 交叉地带的 GUI Agent 论文。它必须从一个清晰、真实的人类问题出发，但不能依赖大规模前置人工标注或全用户访谈；必须能够先搭出 Web-based GUI–MCP sandbox、自动 verifier、benchmark、轻量模型和完整自动实验，再用后置的小规模任务型用户研究验证构念、解释和个性化修正。训练必须发生在规则确实不够、审稿人自然期待模型学习的地方，并通过 OOD 与反记忆实验证明不是背工具名。最终必须形成一个可复现、可开源、可演示的 GitHub 项目，既让 CHI 审稿人看到真正的用户控制与人本价值，也让 AI 研究者看到技术深度，并能成为我申请大厂产品、设计和开发岗位时的强项目证明。
+
+再压缩成最短的一句：
+
+一个人本问题驱动、自动评估为主体、轻量训练自然成立、用户研究后置不阻塞、Web 工程完全可落地、能开源也能求职展示的 tech-heavy GUI Agent HCI 项目。
+
+
+
+
+
+我对于 AI 回答方式的偏好
+
+这一部分与研究方向无关，描述的是我希望 AI 如何呈现和解释复杂概念。
+
+一、先讲主线，再讲细节
+
+我不喜欢回答一开始就罗列大量术语、模块、字段和指标。即使每项都正确，平铺在一起也会让我看不出重点。
+
+回答应先说明：
+
+核心问题是什么，为什么存在，准备通过什么关键机制解决，以及如何验证。
+
+理想顺序是：
+
+问题 → 核心矛盾 → 解决思路 → 具体例子 → 完整流程 → 必要细节。
+
+不要先给我一张零件清单，最后才解释这些零件要做什么。
+
+二、抽象概念必须结合一条具体任务讲
+
+涉及模型输入、标签、训练、验证或用户行为时，应先选一条具体任务，从头走一遍。
+
+例如：
+
+用户要求 agent 根据会议记录创建任务并起草邮件，但不要发送；GUI 路径停留在草稿页面，而 MCP shortcut 准备直接发送。
+
+然后依次说明：
+
+系统观察到什么；
+
+信息分别来自 GUI、工具还是环境状态；
+
+模型输入和标签是什么；
+
+标签由谁、通过什么方式得到；
+
+训练阶段学习什么；
+
+验证阶段如何判断对错；
+
+人类在哪一步参与。
+
+先讲清“一条数据怎么走”，再抽象成通用框架。
+
+三、字段和术语出现时必须立即解释
+
+我不反对 JSON、公式或结构化表示，但每个关键字段第一次出现时都要说明：
+
+它是什么意思、从哪里来、在哪个阶段使用、部署时是否可获得。
+
+例如，出现：
+
+{   "audience_changed": true }
+
+需要立刻解释：
+
+它表示影响对象是否从内部扩展到了外部；这里由执行前后的收件人状态自动计算，不是大模型主观打标；它用于 verifier，而不是模型输入。
+
+不要默认字段名本身已经完成了解释，也不要创造术语后让我从后文猜它的含义。
+
+四、明确区分不同性质的内容
+
+回答应区分：
+
+环境事实：可以直接观察，例如邮件由 draft 变成 sent。
+
+操作化定义：研究者把该变化定义为 finality 提高。
+
+待验证假设：用户可能认为草稿页提供了重要检查机会。
+
+研究目标或预期主张：希望验证模型能否识别这种差异。
+
+不能把设计选择、假设和已经验证的事实写成同一种肯定语气。
+
+五、信息要有层级，不能全部平铺
+
+详细不等于把所有内容列成同一级别。回答应主动区分：
+
+必须解决的核心问题；
+
+完成闭环所需的关键模块；
+
+有时间再做的增强项；
+
+虽然相关但当前应删除的内容。
+
+重点不是靠加粗产生的，而是靠明确取舍产生的。
+
+我需要的是保留足够信息密度，同时删除重复内容、次要分支和不影响判断的实现细节。
+
+六、必须通过负样本说明边界
+
+只告诉我“应该怎么做”还不够，还要指出哪些看似合理的做法其实不合适，以及具体错在哪里。
+
+例如：
+
+不好的方式
+
+同时研究 trust、consent、skill drift、provenance 和 future reuse，并设计 inspector、receipt、policy editor 和 repair module。
+
+问题是概念和模块不断扩张，没有唯一主线。
+
+更好的方式
+
+只研究 GUI 路径中的一种用户检查机会是否被 MCP shortcut 跳过，其余概念只有在服务该问题时才出现。
+
+负样本要具体，不能只说“不要太散”。
+
+七、不要频繁换名字包装同一个问题
+
+当我指出一个方案有问题时，不要只是更换系统名、概念名或论文标题，然后重新表达同一套逻辑。
+
+在研究问题稳定前，系统叫什么并不重要。应该优先稳定：
+
+研究对象；
+
+输入与输出；
+
+数据和 GT 来源；
+
+训练必要性；
+
+评估闭环；
+
+人类参与的位置。
+
+这些没有讲清楚时，不要急着创造新的 acronym。
+
+八、流程要体现依赖关系
+
+我希望看到的不只是“系统包含什么”，而是：
+
+前一步为什么必须先做，它会为下一步提供什么。
+
+例如：
+
+环境产生可验证的状态变化 → 研究者定义透明的操作化规则 → 自动生成规模化数据 → 模型学习规则难覆盖的语义映射 → 独立 verifier 在测试集上评分 → 用户研究验证这些规则是否符合真实理解
+
+这比单纯列出“数据模块、模型、verifier、用户实验”更容易理解。
+
+九、训练和验证必须分开讲
+
+涉及模型时，需要分别说明：
+
+训练阶段
+
+输入是什么；
+
+标签是什么；
+
+标签如何获得；
+
+正负样本如何构造；
+
+哪些信息仅训练时可见。
+
+验证阶段
+
+测试时模型能看到什么；
+
+测试的是未见任务、未见工具还是未见参数；
+
+独立 GT 来自哪里；
+
+verifier 如何评分；
+
+如何排除工具名记忆和数据泄漏。
+
+尤其不能让同一个模型生成标签，再用这些标签证明自己有效。
+
+十、回答应主动做判断，而不是不断增加选项
+
+我不希望每次收到五个方向、四种模型和三套实验，然后由我重新完成全部筛选。
+
+信息足够时，AI 应直接判断：
+
+最推荐 A，原因是什么；B 为什么暂时放弃；C 为什么不符合时间或技术约束。
+
+可以保留一个备选，但回答的作用应是减少决策负担，而不是扩大选择空间。
+
+总结
+
+我希望 AI：
+
+先给出核心判断，再用一个具体任务建立理解；按照因果和依赖关系讲清完整流程；字段和标签出现时立即解释来源与作用；明确区分事实、假设和设计选择；保留必要的信息密度，同时主动删掉重复概念、平级模块和无关扩展；并通过具体负样本说明边界。
+
+最直白地说：
+
+先告诉我这台机器为什么存在，再用一个任务展示它如何运行，最后才介绍每个零件。
+
+
+
+了解我的以上所有个人偏好，然后启动你最好的调研能力ICML/NIPS/ICLR/CHI/UIST/UBICOMP/CSCW/IUI/CVPR/AAAI/ECCV/ICCV/ACMMM/AAAI/ACL/EMNLP，告诉我2026年期间，目标投稿CHI27的话，还有什么是符合以上要求能做的相关GUI agent、CUA方向，可以森罗万象，因为满足以上要求的其实比较严苛
+
+务必让我的优势成为我和其他投稿之间短时间难以逾越的技术壁垒
+
+我不想再做提交相关的了，这个问题确实明确，但是太窄了，不是非得引入MCP，有没有其他可以做的
+
+【回答内容 轮数3】
+I’ll filter 2025–2026 GUI-agent/CUA research by a single human tension, automated evaluation, natural training need, and nine-month feasibility, then provide a decisive ranking.
+
+【回答内容 轮数3】
+Early screening rules out crowded safety prompts, recovery, ambiguity, privacy, and rollback; the strongest gap is semantic non-interference when users and background CUAs concurrently modify shared GUI state.
+
+【回答内容 轮数3】
+## 核心判断
+
+截至 **2026 年 7 月 15 日**，我最推荐你为 CHI 2027 做的，不是再创造一种新的“风险”“信任”或“同意”构念，而是研究一个目前已有产品开始支持、但技术研究尚未真正解决的问题：
+
+> **用户接管 GUI Agent、直接修改界面后，agent 能否把这些人工操作理解为新的任务约束，并在恢复执行时保留、传播，而不是覆盖、遗漏或误解它们？**
+
+更具体地说：
+
+> **Human intervention is not merely a pause in agent execution; it is potentially a revision of the delegated intent.**
+
+暂时可以把它描述为：
+
+**人机交错执行中的修正保持与状态调和**
+或者更直白地说：
+
+**用户改过的东西，agent 恢复后不能改回去。**
+
+这比“提交前是否需要确认”宽得多，但仍然只有一个清楚的人本矛盾：
+
+> 自动化恢复执行的效率，与用户通过直接操作重新定义任务的权利之间存在冲突。
+
+它不依赖 MCP；不围绕发送、提交、支付或最终确认；不要求做一个通用治理系统；也不需要把 trust、consent、memory、provenance、repair 全部拉进来。
+
+它最适合你的原因是：**现有系统已经让用户 pause、take over、edit、resume，但几乎都把 intervention 当作控制权切换，而不是可以被学习和验证的任务修正信号。**
+
+Magentic-UI 已经提供 co-tasking，允许用户中断、接管浏览器并重新交还控制；2026 年的 oversight 工作也开始比较 action confirmation、risk-gated oversight 和 plan-level co-execution；Microsoft 的产品文档已经正式提供 computer-use human supervision。可是，在我检索到的 2025–2026 工作中，我没有发现一项工作系统研究：**用户接管期间的 GUI 操作究竟修改了什么意图，恢复执行的 agent 是否保留并正确传播了这些修改。**这是基于当前检索的空白判断，不是对所有未公开工作的绝对排除。turn938797view2
+
+而且，CHI 2027 full paper 截止日期是 **2026 年 9 月 10 日**。从现在算只有约 57 天，所以选题必须满足：前三周就能跑自动 benchmark，用户研究不能成为数据生成的前置条件。
+
+---
+
+# 一条具体任务：这篇论文到底研究什么
+
+先不要考虑系统名，也不要考虑理论术语。看一条任务。
+
+## 任务
+
+用户让 agent：
+
+> 根据 CRM 中客户的可用时间，在 Calendar 中安排下周会议，并在 TaskBoard 中创建会议准备任务。
+
+Agent 初始计划是：
+
+- 周二上午 10 点开会；
+- 线下会议；
+- 用户自己负责准备材料；
+- TaskBoard 截止时间设为周二上午 9 点。
+
+执行到 Calendar 时，用户发现不合适，于是接管 GUI：
+
+1. 把会议改到周四下午 2 点；
+2. 把线下会议改成 Zoom；
+3. 把准备任务负责人改成 Alex；
+4. 浏览了两下日历，但没有修改其他设置；
+5. 把控制权交还给 agent。
+
+## 现有 agent 可能怎样失败
+
+一个普通的 resume agent 可能只从当前截图继续执行：
+
+- Calendar 中的会议是周四下午 2 点、Zoom；
+- 但 TaskBoard 仍然创建“周二上午 9 点前准备线下会议材料”；
+- CRM 活动记录里仍写“周二线下拜访”；
+- 或者 agent 根据原始计划，直接把 Calendar 又改回周二。
+
+从传统 benchmark 看：
+
+- Calendar 对象创建成功；
+- TaskBoard 任务创建成功；
+- CRM 记录更新成功；
+- 所有子任务都“完成了”。
+
+但从用户角度看：
+
+> 她刚才通过 GUI 明确表达的修正没有被尊重。
+
+这里的问题不是提交，不是权限，也不是主观 trust。
+
+它是一个可操作化的问题：
+
+> **用户接管期间产生的任务相关状态修改，是否在后续执行中被保留并传播到了所有依赖该修改的操作？**
+
+---
+
+# 系统看到什么、学习什么、验证什么
+
+## 1. 环境事实
+
+sandbox 可以自动记录：
+
+- 接管前 Calendar 的时间是周二 10:00；
+- 接管后是周四 14:00；
+- meeting mode 从 onsite 变成 Zoom；
+- assignee 从 user 变成 Alex；
+- 用户滚动过日历；
+- 用户打开过某个详情面板；
+- agent 恢复后创建了哪些 TaskBoard 和 CRM 对象。
+
+其中：
+
+- 时间、会议方式、负责人变化来自数据库和 DOM 状态差异；
+- 滚动、点击和打开面板来自 action trace；
+- 这些都是**环境事实**，不是大模型标注，也不是用户主观判断。
+
+隐藏数据库状态主要用于 benchmark verifier。为了保持部署合理性，主模型不应依赖只有 benchmark 才能访问的数据库 GT；它主要看到截图、DOM/accessibility snapshot、操作轨迹、原始任务和 agent 的剩余计划。
+
+## 2. 研究操作化
+
+研究者作出一个透明的定义：
+
+> 用户接管期间，对任务相关字段进行的稳定修改，是候选 task correction；纯导航、查看、滚动和临时 UI 状态不是 task correction。
+
+这里的“任务相关”不是绝对真理，而是 benchmark 的操作化规则。
+
+例如：
+
+- meeting time 改变：候选修正；
+- assignee 改变：候选修正；
+- Calendar 视图从 week 切到 day：通常是导航状态；
+- 滚动到下一周：不是任务约束；
+- 临时展开详情栏：不是任务约束。
+
+论文需要明确报告：
+
+- 哪些变化可由规则可靠确定；
+- 哪些变化需要语义理解；
+- 改变操作化阈值时，实验结果是否稳定。
+
+## 3. 轻量模型真正学习什么
+
+模型不是学习：
+
+```text
+Calendar 中修改时间很重要。
+TaskBoard 中修改颜色不重要。
+```
+
+也不是预测：
+
+```text
+allow / ask / block
+```
+
+它学习的是：
+
+> **给定原始任务、agent 原计划和一段用户 GUI 操作，哪些界面状态变化应当被解释为对原任务的修正？**
+
+模型可以输出一个结构化 patch：
+
+```json
+{
+  "field": "meeting.time",
+  "old_value": "Tuesday 10:00",
+  "new_value": "Thursday 14:00",
+  "confidence": 0.93
+}
+```
+
+这里：
+
+- `field` 表示被用户修改的任务语义，例如会议时间；
+- `old_value` 和 `new_value` 来自接管前后的可观察 GUI 状态；
+- `confidence` 是模型对“该变化是任务修正，而非临时导航”的置信度；
+- 这个 patch 用于更新剩余计划；
+- 它不是 verifier 的最终 GT，也不直接决定是否允许某个操作。
+
+模型只负责规则难覆盖的部分：
+
+> 从多模态 GUI 轨迹中，把具体界面操作编译成抽象任务修正。
+
+一旦得到：
+
+```text
+meeting.time = Thursday 14:00
+meeting.mode = Zoom
+prep.assignee = Alex
+```
+
+后面的传播可以由确定性依赖图完成：
+
+- TaskBoard 截止时间依赖 `meeting.time`；
+- 任务说明依赖 `meeting.mode`；
+- CRM activity summary 依赖时间和会议方式；
+- assignee 直接覆盖原计划中的负责人。
+
+这是一种符合你偏好的**规则–模型混合**：
+
+- 模型理解语义；
+- 规则执行确定性传播；
+- verifier 独立检查最终状态。
+
+---
+
+# 为什么这里“非训练不可”
+
+直接用 state diff 规则不够，因为完全相同的界面变化，在不同上下文中可能含义相反。
+
+例如，同一个“修改负责人”动作：
+
+### 情况 A：真正的任务修正
+
+用户接管后，把准备任务负责人从自己改成 Alex，然后立即交回控制。
+
+这应当成为新的约束。
+
+### 情况 B：为了查看信息
+
+用户暂时切换 assignee filter 到 Alex，查看他是否有空闲任务，然后切回原视图。
+
+这里出现了同样的名字、控件和状态变化，但不应修改任务负责人。
+
+### 情况 C：不同控件、相同语义
+
+- 在 Calendar 中拖动事件；
+- 在日期选择器中重新选择时间；
+- 在自然语言备注中写“改到周四下午”；
+- 在 CRM 中更新 next meeting 字段。
+
+这些表面操作完全不同，但语义都是：
+
+```text
+meeting.time = Thursday afternoon
+```
+
+静态规则需要为每个 app、widget、DOM schema 和交互路径单独编写逻辑。模型要学习的是跨界面共享的**修正语义**，而不是控件名称。
+
+---
+
+# 数据怎样生成，而不被人工标注阻塞
+
+最合理的顺序是：
+
+## 第一步：先采样隐藏的修正 patch
+
+benchmark generator 先生成：
+
+```text
+原始会议时间：Tuesday 10:00
+用户期望修正：Thursday 14:00
+```
+
+这个隐藏 patch 是场景生成参数，只用于生成轨迹和最终评分。
+
+## 第二步：自动生成用户接管轨迹
+
+脚本或已有 GUI executor 在 sandbox 中执行：
+
+- 打开事件；
+- 修改时间；
+- 修改会议方式；
+- 浏览其他区域；
+- 交回控制。
+
+为了避免所有轨迹都过于干净，还应混入：
+
+- 与任务无关的查看操作；
+- 临时 UI 调整；
+- 修改后又撤销的操作；
+- 同一语义的不同交互路径；
+- 多个字段中只有一个是稳定修正。
+
+## 第三步：环境自动验证轨迹
+
+内部状态检查：
+
+- 隐藏 patch 是否真的反映在接管后的状态中；
+- 是否误改了其他字段；
+- 轨迹能否 replay；
+- 当前 app 是否处于可继续执行状态。
+
+## 第四步：模型只看到部署时可见信息
+
+训练输入：
+
+- 原始用户任务；
+- 接管前截图和 DOM；
+- 用户接管期间的 screenshot–action 序列；
+- 接管后截图和 DOM；
+- agent 原来的剩余计划。
+
+训练标签：
+
+- 隐藏修正 patch。
+
+模型不能看到：
+
+- 最终完整执行结果；
+- verifier 的最终判定；
+- 未来状态；
+- benchmark 内部的答案字段。
+
+## 第五步：有限的人类 grounding
+
+只需要对一个子集进行人类验证：
+
+- 用户是否把这些操作理解为“我改了 agent 的计划”；
+- 哪些 UI 变化只是导航；
+- 用户是否期待修正自动传播到后续 app；
+- 当系统不确定时，怎样概括修正最容易确认。
+
+这批人类数据用于：
+
+- 验证构念；
+- 调整场景分布；
+- 检查操作化边界；
+- 用户研究。
+
+它不负责逐条制造全部训练标签。
+
+---
+
+# 自动评估闭环
+
+这篇论文的主体不能只是“参与者觉得 resume 更自然”。
+
+至少要有五个自动结果。
+
+## 1. Correction Extraction
+
+模型能否正确输出用户实际修改的任务约束。
+
+指标可以是：
+
+- 字段识别 F1；
+- 新值 exact match / semantic match；
+- patch-level exact match。
+
+## 2. Correction Retention
+
+最终执行完成后，用户修改的字段是否仍然存在。
+
+例如：
+
+```text
+最终 Calendar 时间是否仍为 Thursday 14:00。
+```
+
+## 3. Overwrite Rate
+
+agent 恢复后是否把用户修改过的状态改回原值，或者用另一个值覆盖。
+
+这是最直接的人本失败指标。
+
+## 4. Downstream Consistency
+
+依赖修正的后续对象是否同步更新。
+
+例如：
+
+- 会议时间改到周四；
+- 准备任务截止时间不能仍在周二；
+- Zoom 会议的准备说明不能继续写“打印线下材料”。
+
+这里的 GT 来自 benchmark 的依赖关系和最终环境状态，不由模型自评。
+
+## 5. Automation Utility
+
+避免一个“最安全的方法就是全部重来或每次都询问”的假系统。
+
+需要同时报告：
+
+- task success；
+- 额外步骤；
+- resume latency；
+- 用户被要求重新说明修正的次数；
+- 不必要 replan 的比例。
+
+最终应该展示一个 frontier：
+
+> 在保持多少自动化效率的情况下，系统减少了多少用户修正被覆盖或遗漏的问题。
+
+---
+
+# 必须做的反捷径实验
+
+这是决定论文有没有 AI 深度的关键。
+
+## 同一控件，标签相反
+
+同一个 Calendar time picker：
+
+- 一次是真正修改时间；
+- 一次只是查看后恢复；
+- 一次是 agent 自己造成的临时变化；
+- 一次是用户误操作后 undo。
+
+模型不能看到控件就默认“这是修正”。
+
+## 不同控件，同一语义
+
+改变会议时间可以通过：
+
+- drag event；
+- date picker；
+- text field；
+- CRM next-contact field；
+- natural-language event note。
+
+模型应当输出同一个抽象 patch。
+
+## Schema 和视觉 OOD
+
+测试时：
+
+- app 改名；
+- DOM field name 改写；
+- 控件重新布局；
+- UI theme 改变；
+- 字段由 dropdown 换成 radio；
+- app skin 未在训练中出现。
+
+## 未见工作流 OOD
+
+训练时主要是 Calendar–TaskBoard，测试时加入：
+
+- CRM–Calendar–Notes；
+- FileShare–ProjectBoard；
+- Spreadsheet–TaskManager；
+- Document–KnowledgeBase。
+
+## 隐藏内部状态消融
+
+主模型不使用数据库 GT。
+
+可以比较：
+
+- screenshot only；
+- screenshot + actions；
+- screenshot + DOM + actions；
+- 再加结构化 observable state diff。
+
+这能够说明真正有价值的是哪一种 GUI 信息。
+
+---
+
+# 合理的 baselines
+
+不要只和一个 prompt baseline 比。
+
+1. **Naive Resume**
+   从用户交回后的当前界面继续执行，不显式更新计划。
+
+2. **Full Replan**
+   丢弃旧计划，从当前 screenshot 和原始任务重新规划。
+
+3. **All-Diff-as-Intent**
+   把接管期间所有持久 state diff 都当成新约束。
+
+4. **Text Restatement**
+   要求用户用文字重新描述自己刚才做了什么。
+
+5. **Prompted Frontier VLM**
+   用相同多模态轨迹，通过 few-shot prompt 输出 patch。
+
+6. **Lightweight Fine-Tuned Critic**
+   你的 QLoRA/SFT 模型。
+
+7. **Hybrid Model + Deterministic Propagation**
+   模型提取 patch，规则更新依赖计划。这应当是最终系统。
+
+---
+
+# 用户研究怎样后置而且有意义
+
+用户研究不需要证明“大家喜欢你的界面”。
+
+更扎实的任务型设计是：
+
+## 条件
+
+- Naive resume；
+- 要求用户文字重述修正；
+- correction-aware resume。
+
+## 任务
+
+参与者在真实运行的 agent 中：
+
+- 让 agent 安排会议和准备任务；
+- 中途发现时间或负责人不合适；
+- 直接接管 GUI 修正；
+- 交回控制；
+- 检查最终结果并进行必要修复。
+
+## 主要行为指标
+
+- 修正最终是否保留；
+- 用户进行了多少二次修复；
+- 用户是否必须重新输入已有信息；
+- 用户发现跨应用不一致的准确率；
+- 总任务时间；
+- 用户主动检查了哪些状态。
+
+## 主观指标只作为辅助
+
+- 是否理解 agent 如何处理自己的修正；
+- 是否觉得交回控制是安全的；
+- 是否认为自己仍然拥有决定权；
+- 系统概括的修正是否符合自己的理解。
+
+用户研究的真正贡献是验证：
+
+> 人们是否把 GUI 接管操作当作一种对代理任务的自然重新指定，以及系统是否减少了重复说明和重复纠错。
+
+---
+
+# 为什么它会成为你的技术壁垒
+
+一个普通 HCI 团队可以很快做出 pause、resume 和 timeline 原型，但很难在短时间内完成：
+
+- 可重置的多应用 Web sandbox；
+- agent 与用户交错操作的统一 harness；
+- screenshot、DOM、action、数据库状态的同步日志；
+- 接管轨迹自动生成；
+- 结构化 correction patch；
+- 多应用依赖传播；
+- 独立 deterministic verifier；
+- unseen-app、unseen-widget 和 unseen-workflow OOD；
+- GUI executor 与 resume controller；
+- 可复现的端到端 benchmark。
+
+反过来，一个纯 AI benchmark 团队可能会训练 error recovery 模型，但通常不会认真区分：
+
+- agent 自己的失败；
+- 用户主动修改任务；
+- 用户只是查看界面；
+- 用户修正是否被系统保留；
+- 交回控制后用户需要承担多少重复工作。
+
+这正好落在你的护城河交叉点上：
+
+> **GUI trajectory understanding × stateful sandbox × agent execution × human correction semantics。**
+
+---
+
+# MCP 应该放在哪里
+
+这项工作完全不需要以 MCP 为主角。
+
+主实验可以是：
+
+```text
+GUI executor → 用户 GUI 接管 → correction extraction → GUI resume
+```
+
+MCP/tool 只作为一个增强实验：
+
+- agent 在用户接管前使用 GUI；
+- 用户修正后，agent 可能用 tool 完成剩余步骤；
+- 检查抽象 correction patch 是否能跨执行媒介传播。
+
+这里 MCP 证明的是：
+
+> 修正语义独立于后续 actuation backend。
+
+而不是再次比较 GUI 和 MCP 谁更可信。
+
+如果时间有限，MCP 实验可以放到 appendix 或第二阶段，不能阻塞主线。
+
+---
+
+# 2025–2026 文献地图：哪些区域已经明显拥挤
+
+当前 GUI Agent 技术侧正在迅速扩张到跨应用、长流程和动态环境。WindowsWorld 专门构建职业型跨应用任务；Workflow-GYM 和 OSWorld 2.0 进一步把 benchmark 推向长时、高价值工作流；DynamicGUIBench 开始覆盖快速变化和部分可观察 GUI。也就是说，仅仅做“一个新的多应用长任务 benchmark”已经不够新。turn938797view6
+
+个性化和记忆也在快速拥挤。PersonalAlign 已经研究 GUI Agent 对长期偏好和 routine 的层次化记忆；2026 年的 mobile GUI privacy work 已经把用户隐私偏好转化为不同执行轨迹，并使用偏好优化训练。单纯说“不同用户喜欢不同路径”已经很难形成足够差异。turn938797view4
+
+“指令不完整，agent 应该澄清”也已经出现正面竞争。AmbiBench 明确把 mobile GUI 指令划分为详细、标准、不完整和歧义四级，并引入 user simulator 和 interaction-quality 评估。因此，再做一个 ask-or-act 模型，除非有明显不同的人本构念，否则很危险。
+
+错误检测和回退也在迅速成为标准技术路线。BacktrackAgent、GUI-Reflection、VeriGUI 等工作研究错误发现、自我反思和恢复；TClone 更进一步，将整个 live GUI workspace 的 fork、rollback 和 selective commit 做成系统机制。单纯做“agent 出错后回滚”很难成为 CHI 27 的独特中心。
+
+HCI 侧则开始覆盖 CUA 的 UX taxonomy、oversight strategy 和 dark-pattern susceptibility。IUI 2026 已经系统整理 prompts、explainability、control 和 mental models；Magentic-UI 提供 co-planning、co-tasking、approval、verification 和 memory；CHI 2026 的 dark-pattern work 也直接比较 agent、人类和 human-supervised agent。泛化的“我们给 agent 加一个监督界面”会越来越难投稿。
+
+隐私和安全边界同样迅速细化。除隐私个性化外，AgentCIBench 已经把跨应用信息流的 contextual integrity 做成可执行、确定性评分的 CUA benchmark。因此，若做“agent 是否访问或泄露了不该使用的信息”，必须比现有 contextual disclosure 更具体。
+
+---
+
+# 其他符合你要求的方向：按推荐程度排序
+
+## A 级：值得真正立项
+
+| 方向 | 唯一人本矛盾 | 自然训练模块 | 自动 GT | 判断 |
+|---|---|---|---|---|
+| **用户接管后的修正保持** | 恢复自动化不能覆盖用户刚表达的修改 | GUI intervention → task patch | 接管前后状态、隐藏 correction patch、最终状态 | **首选，最符合你的身份** |
+| **跨应用语义一致性** | 每个 app 都完成，不等于整个工作流符合用户意图 | heterogeneous GUI states → shared semantic relations | 多 app 数据库状态和依赖约束 | **最稳妥备选** |
+| **并行使用时的 GUI 非干扰执行** | agent 完成任务不应破坏用户正在进行的工作 | action + user activity → interference cost | focus、cursor、scroll、clipboard、viewport 状态 | **新颖度很高，工程风险较大** |
+
+## B 级：有潜力，但要控制边界
+
+| 方向 | 核心问题 | 主要风险 |
+|---|---|---|
+| **决策相关的外部状态漂移** | 协作者或后台数据变化后，哪些变化真正使 agent 原计划失效 | 容易变成 dynamic GUI benchmark，必须强调协作和用户理解 |
+| **最小充分验证证据** | 长轨迹中，用户最少需要看哪些 GUI 状态才能发现错误 | 容易被看作 explainability UI，需要强自动 evidence-sufficiency verifier |
+| **共享工作区中的协作者影响** | 为请求者完成任务，可能破坏其他人的计划和约定 | 多用户实验和场景构造较重，更偏 CSCW |
+| **语义选择性取消与清理** | 取消任务时应清理 agent 的临时状态，但保留用户自己的修改 | TClone 等 rollback 工作已经占据系统侧，需要突出 selective semantic cleanup |
+
+## C 级：有价值，但不建议抢 CHI 27 首稿
+
+| 方向 | 不建议现在做的原因 |
+|---|---|
+| 个性化修正的长期泛化范围 | 容易滑回 memory、skill drift 和 broad personalization，2026 已经很拥挤 |
+| 通用指令歧义和主动澄清 | AmbiBench 等直接竞争已经出现 |
+| 通用隐私路径偏好 | 已有 trajectory-induced privacy personalization |
+| 暗黑模式防护 | 已有 CHI 2026 直接研究 |
+| 通用错误回退 | Backtrack、reflection、verification、workspace rollback 都在加速 |
+| “用户需要看到 agent 的过程” | 太宽；必须压缩成最小充分证据或具体错误发现能力 |
+| GUI 与 MCP 谁更可信 | 仍然是媒介比较，而不是用户相关后果比较 |
+
+---
+
+# 第二推荐：跨应用语义一致性
+
+如果你认为“用户接管后的修正保持”在两个月内需要太多交错轨迹工程，我的第二选择是：
+
+> **GUI Agent 在多个应用中分别完成子任务时，是否保持了同一用户意图在不同应用状态中的语义一致性？**
+
+核心表达可以是：
+
+> Local task completion does not guarantee global workflow coherence.
+
+仍然用前面的会议任务：
+
+- Calendar：周四 2 点；
+- TaskBoard：周二前准备；
+- CRM：周二线下会面；
+- Notes：Zoom 链接。
+
+每个应用的局部 verifier 都可能通过，但四个 artifact 互相矛盾。
+
+## 模型为何必要
+
+模型学习：
+
+- Calendar event、TaskBoard task、CRM activity 和 Notes 中哪些字段描述同一个现实实体；
+- 不同表述是否语义一致；
+- 哪些差异是允许的，哪些是矛盾。
+
+例如：
+
+```text
+“Thursday at 2pm”
+“2026-07-23T14:00”
+“下周四下午”
+```
+
+规则可以检查结构化时间相等，但无法可靠覆盖：
+
+- 模糊时间；
+- 文本描述；
+- 隐含依赖；
+- 截图中的非结构化信息；
+- 不同 app 的 entity resolution。
+
+模型输出共享语义图，deterministic verifier 检查图中的约束。
+
+## 优点
+
+- 自动 GT 极强；
+- 数据无需先做人类标注；
+- 多应用 sandbox 非常适合 GitHub 展示；
+- 与 WindowsWorld 等工作形成清晰区别：它们主要评估能否完成跨应用流程，而你评估**完成后的分布式状态是否一致**。WindowsWorld 的结果显示当前 agents 在跨应用任务中仍远弱于单应用任务，但它没有把“局部成功、全局矛盾”作为主要人本构念。
+
+## 缺点
+
+相比“用户修正保持”，它的人机交互张力略弱，需要用户研究证明：
+
+- 人们是否容易发现分布式矛盾；
+- consistency assistant 是否降低审计负担；
+- 哪些跨应用差异对用户真正重要。
+
+因此它是**更稳的自动评估论文，但稍弱的人本论文**。
+
+---
+
+# 第三推荐：Agent 的前台干扰足迹
+
+这是一个非常 GUI-specific、也可能形成强技术壁垒的方向：
+
+> Agent 完成任务时，是否干扰了用户正在进行的另一项工作？
+
+GUI agent 可能：
+
+- 抢走输入焦点；
+- 移动鼠标；
+- 覆盖 clipboard；
+- 改变浏览器 tab；
+- 改变 scroll position；
+- 弹出窗口遮挡内容；
+- 在用户输入时向错误字段写字；
+- 修改 filter、sort、zoom 和 viewport；
+- 触发通知或声音。
+
+传统 task success 完全不测这些。
+
+一个开源 CUA runtime 已经把“background computer use without stealing the cursor or focus”作为明确能力宣传，说明这已经是实际工程痛点，而不是纯理论设想。
+
+## 技术任务
+
+训练一个 interference critic：
+
+```text
+当前用户活动 + GUI 状态 + 候选 agent action
+→ 预计造成的用户干扰
+```
+
+然后：
+
+- 延迟执行；
+- 在后台 workspace 执行；
+- 选择不改变 foreground state 的路径；
+- 将操作放到隔离 tab 或 shadow session；
+- 在用户空闲时批量执行。
+
+## 自动事实
+
+可以直接记录：
+
+- focus ownership；
+- cursor displacement；
+- clipboard overwrite；
+- viewport displacement；
+- keystroke collision；
+- 用户恢复原工作区所需操作数；
+- agent task success 和 latency。
+
+## 风险
+
+这个方向最难的部分不是模型，而是 ecological validity。
+
+只做两个 iframe 会显得玩具化；做真实桌面并发又容易把工程风险推到 OS 层。若你已有 desktop harness，它可能成为很强的方向；若主要 infra 是 Web sandbox，则排在第三。
+
+---
+
+# 第四推荐：决策相关的状态漂移
+
+问题不是“页面发生变化，agent 能否适应”，而是：
+
+> 在 agent 执行期间，其他人或后台系统改变了共享数据；哪些变化真正使原计划过时？
+
+例子：
+
+- agent 正在根据团队日历安排会议；
+- 执行过程中，客户更新了可用时间；
+- 同事把项目 deadline 推迟；
+- TaskBoard 中负责人被换掉；
+- 文档内容被协作者修改。
+
+Agent 面临两种错误：
+
+- 忽略变化，继续执行 stale plan；
+- 对任何变化都重启，造成过度敏感和效率下降。
+
+DynamicGUIBench 已经研究 interruptive UI states、ephemeral references 和动态列表，但主要关注界面的部分可观察动态；你的区别必须是**协作者或外部数据修改是否改变了用户决策依据**。
+
+模型学习：
+
+```text
+external state change + task dependencies
+→ plan still valid / affected subplan
+```
+
+这很适合自动注入 perturbation 和 deterministic verifier，但 HCI 贡献需要落在：
+
+- 用户何时希望被通知；
+- 怎样解释“为什么计划已失效”；
+- 系统是否减少 stale work 和无谓中断。
+
+---
+
+# 第五推荐：最小充分 GUI 证据
+
+这是你如果想更靠近 CHI、但仍保持技术主体时可以做的方向：
+
+> 用户无法监看数百步 agent 轨迹，但最终一句“已完成”又不足以验证。系统应选择最少的一组 GUI 状态，使用户足以判断任务是否正确完成。
+
+不是生成一个漂亮 summary，而是选择**可验证证据**。
+
+例如，agent 完成跨应用会议准备后，只展示：
+
+1. Calendar 最终事件；
+2. TaskBoard 的 deadline 和 assignee；
+3. CRM 中更新后的活动记录；
+4. 一处系统检测到的矛盾。
+
+模型学习：
+
+```text
+trajectory + verifier requirements
+→ minimal evidence checkpoints
+```
+
+自动评估：
+
+- evidence 是否覆盖所有关键状态；
+- 删除任意一个 checkpoint 后是否失去验证能力；
+- compression ratio；
+- error localization；
+- 用户发现 injected error 的准确率。
+
+现有工作已经开始做 agentic GUI verification、history summarization 和 oversight trace，但这些主要服务于模型判断、测试或通用监控；把“人类验证所需的最小充分证据”作为唯一构念，仍有一定空间。turn938797view2
+
+但一定要避免最后变成：
+
+> 做了一个 timeline，参与者说它更透明。
+
+---
+
+# 首选方向的 57 天执行版本
+
+## 第 1 周：冻结问题，不训练
+
+完成：
+
+- 2–3 个 Web app：Calendar、TaskBoard、CRM；
+- 用户接管与 agent resume；
+- 统一 action/state logger；
+- 20 个手写 intervention cases；
+- overwrite 和 retention verifier。
+
+这一周结束时必须能演示：
+
+> 用户改时间 → agent 恢复 → baseline 把时间改回去 → verifier 判错。
+
+如果做不到，不进入模型阶段。
+
+## 第 2 周：自动 benchmark generator
+
+完成：
+
+- latent correction patch sampler；
+- 用户干预脚本生成；
+- navigation noise；
+- intentional / incidental paired cases；
+- replay 和 reset；
+- 约 500–1,000 个可靠 cases。
+
+## 第 3 周：规则和 frontier baselines
+
+先跑：
+
+- naive resume；
+- full replan；
+- all-diff；
+- text restatement；
+- prompted VLM。
+
+这一步很重要：若 prompt VLM 已经几乎满分，就缩小问题到更难的 intentional-vs-incidental distinction，而不是盲目训练。
+
+## 第 4 周：轻量训练
+
+建议训练对象：
+
+- 3B–7B multimodal model 的 QLoRA；
+- 或冻结视觉编码器，只训练 structured patch decoder；
+- 训练 2,000–10,000 个自动生成的 intervention trajectories。
+
+不要训练 executor。
+
+## 第 5 周：OOD 和完整自动实验
+
+完成：
+
+- unseen UI skin；
+- unseen field names；
+- intentional/incidental counterfactual pair；
+- unseen workflow；
+- screenshot/DOM/action ablation；
+- task-success–correction-retention frontier。
+
+## 第 6 周：用户实验 pilot，同时写论文
+
+用户实验界面只需要：
+
+- pause/takeover/resume；
+- 一条系统总结：“我检测到你把会议改到周四 2 点，并将负责人改为 Alex”；
+- 用户可以确认或纠正；
+- 最终结果检查页。
+
+不要加 policy editor、receipt、memory dashboard、skill viewer。
+
+## 第 7 周：正式任务型研究
+
+如果伦理审批路径允许，目标可以是 18–24 人的 within-subject study。
+
+自动实验已经应当独立形成论文主体；用户研究即使样本较小，也用于回答 correction semantics 和交互成本，而不是挽救系统。
+
+## 第 8 周：收敛
+
+删除：
+
+- MCP 主实验；
+- 长期 memory；
+- future reuse；
+- correction personalization；
+- generic trust；
+- 多种风险等级；
+- 大型真实桌面 benchmark。
+
+保留一个清楚主张：
+
+> 现有 takeover/resume 机制允许用户操作界面，却不能保证这些操作成为后续 agent 执行中的持久任务约束；我们的系统通过多模态修正提取与确定性状态传播解决了这一问题。
+
+---
+
+# 这个方向最容易做坏的方式
+
+## 坏版本一：只做 pause 按钮
+
+系统支持用户接管，然后比较有无 pause 条件的 control scale。
+
+问题：
+
+- 没有新的技术任务；
+- 没有自动 benchmark；
+- 没有训练必要性；
+- 不知道 resume 后发生了什么。
+
+## 坏版本二：把所有 state diff 当作用户意图
+
+问题：
+
+- 滚动、筛选、展开面板、临时修改都会被错误解释；
+- 没有语义学习；
+- 规则 baseline 已经等于最终系统。
+
+## 坏版本三：要求用户用文字重新解释
+
+用户接管后，系统问：
+
+> 请描述你刚才修改了什么。
+
+这消除了最有价值的技术问题：从 GUI trajectory 理解隐式修正。
+
+它可以作为 baseline，但不能作为你的系统。
+
+## 坏版本四：扩大成通用 repair framework
+
+加入：
+
+- 失败诊断；
+- rollback；
+- future skill update；
+- policy editing；
+- memory；
+- provenance；
+- cross-user repair。
+
+这样又会回到你不喜欢的“大治理系统”。
+
+## 坏版本五：只评估 patch extraction
+
+模型从轨迹提取修正很准，但没有真正恢复 agent、没有后续执行、没有最终 state verifier。
+
+这会退化成一个多模态信息抽取数据集。
+
+必须执行完整闭环：
+
+```text
+用户修正 → patch → replan → resume → final state → verifier
+```
+
+---
+
+# 最终取舍
+
+我的明确排序是：
+
+1. **用户接管后的修正保持与状态调和**
+   最强的人本–技术交叉，最能体现你的 GUI trajectory、sandbox、state 和 agent harness 壁垒。
+
+2. **跨应用语义一致性**
+   自动实验最稳，GitHub 展示最好，时间风险更低；适合作为首选方向的简化备选。
+
+3. **并行使用时的 GUI 非干扰执行**
+   学术新颖度和产品价值可能最高，但真实环境工程风险也最高。
+
+4. **决策相关的外部状态漂移**
+   技术闭环漂亮，但需要小心区别于现有 dynamic GUI robustness。
+
+5. **最小充分 GUI 验证证据**
+   CHI 味道强，但必须防止退化成 trajectory summary 界面论文。
+
+最不建议现在继续的是：
+
+- 通用澄清；
+- 通用隐私偏好；
+- 泛化 oversight；
+- 通用 rollback；
+- GUI–MCP trust comparison；
+- 再做一个纯跨应用长任务 benchmark。
+
+**最值得立即启动的项目主张可以压缩成一句话：**
+
+> GUI Agent 不仅应允许用户接管；它还必须理解用户在接管期间通过界面作出的任务修正，并在恢复自动化时持续保留这些修正。
+
+这不是提交问题，不要求 MCP，也没有引入新的宏大治理概念，但它可以自然地产生：
+
+```text
+Web sandbox
+→ interleaved human–agent trajectories
+→ multimodal correction model
+→ deterministic propagation
+→ automatic verifier
+→ OOD benchmark
+→ task-based user study
+→ complete open-source system
+```
+
+它目前是我认为最符合你全部约束、同时最有机会形成短期难以复制技术壁垒的 CHI 2027 方向。
+
+
+【提问 轮数4】
+还是不够好玩啊，能不能从头到尾直接掀桌子换个思路
+
+【回答内容 轮数4】
+这次我会彻底放弃“监督、修正、确认、越界”这条线，改从“GUI Agent 能创造什么以前不存在的人机交互形态”出发，先找 2025–2026 的真正空白，再只保留 2–3 个有资格立项的方向。
+
+【回答内容 轮数4】
+已经出现一个真正“掀桌子”的候选：不要再研究 agent 执行时如何被监督，而是让 agent 把现有软件**编译成一个临时、可编辑、可验证的任务界面**；用户操作的是任务变量，agent 再把它翻译回多个真实 GUI。现在我在确认它与现有 generative UI 工作的边界是否足够硬。
+
+【回答内容 轮数4】
+可以。而且我同意：上一版表面上换了问题，本质仍是同一张桌子——**agent 自动执行，人在旁边监督、纠正、恢复控制**。
+
+真正掀桌子，应该连这个默认前提一起扔掉：
+
+> **不要再研究怎样让用户更好地监督一条 agent 轨迹。不要让 agent 一开始就只选择一条轨迹。**
+
+## 我现在最推荐的新方向
+
+# 把 CUA 从“代办员”变成“可执行的未来生成器”
+
+核心机制只有一句话：
+
+> Agent 在多个隔离的 GUI sandbox 分支中，真实执行几种意义上不同的解决方案；用户比较的是几个已经运行出来的未来，而不是阅读计划、回答澄清问题或监督执行过程。
+
+这不是让 agent 问：
+
+> “你更重视时间还是成本？”
+
+而是让它直接展示：
+
+- 重视时间，真实的软件状态最后会变成什么；
+- 重视成本，最后会变成什么；
+- 尽量少影响同事，最后又会变成什么。
+
+用户通过比较具体结果，才发现自己真正关心什么。
+
+论文唯一的人本矛盾是：
+
+> **当前 agent 假设用户在执行前已经能够完整表达偏好；但大量真实偏好只有在看到具体可行结果之后才会形成。**
+
+这与 trust、consent、confirmation、rollback、submission 都不是一条线。
+
+---
+
+# 先看一条完整任务
+
+用户说：
+
+> 帮我把下周腾出两个完整下午写 CHI，但不要让 Orion 项目失控。
+
+当前 sandbox 中有：
+
+- Calendar：会议和个人日程；
+- TaskBoard：任务、截止时间、负责人和依赖；
+- Team Directory：成员及其工作量；
+- Docs：项目计划；
+- Message App：尚未发送的协调消息。
+
+这条指令明显不完整。
+
+“不要让项目失控”可能意味着：
+
+- 不推迟 milestone；
+- 不给 Alex 增加太多任务；
+- 不移动客户会议；
+- 不减少团队同步；
+- 或者只是不想让别人觉得自己突然失联。
+
+普通 agent 有两种做法：
+
+1. 连续问用户十个澄清问题；
+2. 自己猜一种解释，然后执行一个方案。
+
+你的系统不做这两件事。
+
+## 第一步：复制当前工作世界
+
+系统把所有 Web app 的数据库和界面状态复制成三个隔离分支。
+
+这里的“分支”不是模型想象出来的一段文字，而是三个能够独立运行的真实 sandbox：
+
+```text
+当前状态 S0
+├── 分支 A
+├── 分支 B
+└── 分支 C
+```
+
+每个分支都拥有自己的 Calendar、TaskBoard、Docs 和消息状态。
+
+## 第二步：agent 真实执行三个方案
+
+### 分支 A：减少会议碎片
+
+Agent：
+
+- 将两个内部会议移动到周一；
+- 把周三下午和周四下午变成完整写作时间；
+- 不改变任务负责人；
+- 不改变项目截止时间。
+
+### 分支 B：重新分配工作
+
+Agent：
+
+- 保留所有会议；
+- 把两个准备任务分配给空闲成员；
+- 将用户负责的文档工作移到周二；
+- 腾出周三、周四下午。
+
+### 分支 C：把同步工作异步化
+
+Agent：
+
+- 取消一个内部同步会议；
+- 创建异步更新文档；
+- 调整两个任务的依赖关系；
+- 起草一条团队协调消息；
+- 腾出周四和周五下午。
+
+关键不是 agent 生成了三段不同的计划。
+
+关键是它真的在三个副本中执行了这些操作，所以系统能够发现：
+
+- 某位成员实际已经超负荷；
+- 某个任务不能在依赖项之前完成；
+- 某场会议有外部参与者，不能随意移动；
+- 取消会议后需要建立一个异步替代机制；
+- 日历看似腾出了时间，但任务 deadline 仍然挤在同一天。
+
+纯文本规划无法可靠暴露这些实际结果。
+
+## 第三步：用户比较三个“未来”
+
+用户看到的不是完整轨迹，而是结果差异：
+
+| 结果维度 | A：集中会议 | B：重新分工 | C：异步协作 |
+|---|---:|---:|---:|
+| 完整写作时段 | 2 | 2 | 2 |
+| 被移动的会议 | 2 | 0 | 1 |
+| 受影响同事 | 4 | 3 | 7 |
+| 新增他人工作量 | 0h | 5h | 2h |
+| 项目截止变化 | 无 | 无 | 无 |
+| 工作碎片度 | 低 | 中 | 最低 |
+
+用户点击任意分支，可以直接浏览那个分支中的真实 Calendar 和 TaskBoard。
+
+此时用户可能才意识到：
+
+> 我原来不是不能移动会议，我是不想把工作转嫁给同事。
+
+这项偏好并没有预先存在于一句完整、稳定、可直接输入的 prompt 中。它是在比较具体方案时被构造和明确的。
+
+## 第四步：只把选择的分支提交到主世界
+
+用户选择 A。
+
+系统验证：
+
+- A 仍满足硬约束；
+- 分支状态没有因为外部变化过期；
+- 需要写入主环境的状态差异是确定的。
+
+然后将 A 的状态变化应用到主 sandbox。
+
+第一篇论文不要支持任意拼接 A、B、C。那会把项目膨胀成复杂的 merge 系统。
+
+只支持：
+
+- 选择一个分支；
+- 修改其中一两个参数；
+- 重新执行该分支；
+- 提交结果。
+
+---
+
+# 论文真正研究的不是“多生成几个答案”
+
+核心构念应该是：
+
+## 可执行结果空间覆盖
+
+它表示：
+
+> 系统生成的少量分支，是否覆盖了这项任务中真正不同、可行、值得用户比较的结果。
+
+注意，它不衡量：
+
+- 三条轨迹是否点击了不同按钮；
+- 三段文字描述是否语言不同；
+- agent 是否产生了很多“创意”。
+
+例如：
+
+- A 用拖拽移动会议；
+- B 打开编辑窗口修改会议时间。
+
+如果最终 Calendar、任务负责人和项目影响相同，那么它们是同一个结果，不应被算作两个不同方案。
+
+相反：
+
+- 两条执行轨迹可能都成功腾出两个下午；
+- 但一条移动会议，另一条转移工作给同事。
+
+它们在人本意义上不同，应该保留。
+
+因此，你研究的是：
+
+> **outcome diversity，而不是 trajectory diversity。**
+
+---
+
+# 为什么必须是 GUI Agent
+
+有人会质疑：
+
+> 为什么不用 LLM 直接生成三个计划？
+
+因为计划文本无法保证：
+
+- 方案在当前软件状态中可执行；
+- 任务依赖没有被破坏；
+- 日历冲突真的被解决；
+- 界面中的隐含约束得到满足；
+- 多个应用的最终状态互相一致；
+- 用户看到的是实际结果，而不是模型对结果的猜测。
+
+GUI Agent 在这里不是为了展示“会点击”。
+
+它承担三个不可替代的作用：
+
+1. **发现约束**：通过真实应用界面发现不可见于 prompt 的限制；
+2. **渲染未来**：把抽象计划转化成用户能够检查的具体软件状态；
+3. **验证可行性**：执行成功本身构成方案可行性的证据。
+
+没有 GUI 执行，这篇论文会退化成多候选 recommendation。
+
+---
+
+# 轻量训练应该发生在哪里
+
+不要训练一个更强的 executor。
+
+复用现有 CUA 执行每个分支。训练一个小型的：
+
+## 结果差异 critic
+
+它负责判断：
+
+> 两个已执行分支在人本相关后果上，究竟是同一个方案的表面变体，还是值得用户比较的不同未来。
+
+### 模型输入
+
+模型看到：
+
+- 原始用户任务；
+- 初始 GUI 状态；
+- 分支 A 的最终截图、DOM 和结构化 state diff；
+- 分支 B 的最终截图、DOM 和结构化 state diff；
+- 每个分支的简化执行轨迹。
+
+`state diff` 表示分支执行前后数据库或可观察状态的变化，例如：
+
+```json
+{
+  "calendar_events_moved": 2,
+  "task_owner_changes": [
+    {
+      "task": "Prepare benchmark analysis",
+      "from": "user",
+      "to": "Alex"
+    }
+  ]
+}
+```
+
+其中：
+
+- 会议和负责人变化是环境自动计算的事实；
+- 不是模型主观标注；
+- 训练模型用它理解结果；
+- 独立 verifier 仍然使用原始数据库状态评分。
+
+### 模型输出
+
+```json
+{
+  "semantically_distinct": true,
+  "difference_axis": "workload_distribution"
+}
+```
+
+`semantically_distinct` 表示两个分支是否值得作为独立选项展示。
+
+`difference_axis` 表示主要差别是什么，例如：
+
+- 时间安排；
+- 工作量分配；
+- 受影响人数；
+- 沟通方式；
+- 工作碎片程度。
+
+它不是宽泛的“用户价值标签”，而是 sandbox 任务图中已知的结果变量。
+
+## 为什么规则不够
+
+相同的人本差异可以出现在不同应用中：
+
+- TaskBoard 中修改 assignee；
+- Spreadsheet 中修改 owner 单元格；
+- CRM 中修改 account manager；
+- 项目文档中重新分配责任人。
+
+它们的 DOM、字段名和操作方式都不同，但都可能表达：
+
+```text
+workload shifted from user to colleague
+```
+
+相反，相同的字段变化在不同任务中意义可能不同：
+
+- 将任务移给 Alex，可能是合理负载平衡；
+- 也可能让 Alex 超过容量；
+- 还可能只是临时替班，不影响长期责任。
+
+模型要学习的是跨应用的**结果语义**，不是字段名称。
+
+---
+
+# 自动数据怎样产生
+
+## 1. 环境事实
+
+每个任务实例带有一个隐藏的状态图：
+
+- 日历事件；
+- 任务依赖；
+- 成员容量；
+- deadline；
+- 外部与内部参与者；
+- 可移动与不可移动项目。
+
+这些全部由 sandbox 数据库提供。
+
+## 2. 研究操作化
+
+你需要明确规定哪些变量构成这个 benchmark 的主要选择空间，例如：
+
+- 时间集中程度；
+- 被打扰的人数；
+- 工作量转移；
+- deadline 变化；
+- 同步与异步协作比例。
+
+这不是声称它们是普遍真理。
+
+它们是针对“知识工作重新安排”这一任务族的透明操作化。
+
+## 3. 自动生成可行分支
+
+使用约束求解器或模板先生成不同的目标状态，再让 GUI executor 实现：
+
+```text
+目标 A：最小化日程碎片
+目标 B：最小化会议移动
+目标 C：最小化用户工作量
+```
+
+因此你知道每个训练分支原本针对哪个结果维度生成。
+
+模型的标签不是由另一个 LLM 凭空判断，而是来自：
+
+- 隐藏任务图；
+- 目标状态；
+- 真实执行后的环境 diff。
+
+## 4. 人类只做 grounding
+
+人类用于验证：
+
+- benchmark 认为不同的结果，人是否也认为值得比较；
+- 哪些自动定义的差异对人没有实际意义；
+- 三个还是五个分支更容易决策；
+- 用户是否通过比较发现了此前没有表达的标准。
+
+人类不需要逐条标注几千个分支对。
+
+---
+
+# 自动评估是主体
+
+## 1. 分支可行率
+
+展示给用户的分支中，有多少真正：
+
+- 完成基本任务；
+- 满足硬约束；
+- 没有产生跨应用矛盾。
+
+## 2. 结果覆盖率
+
+benchmark 已知存在若干主要 trade-off。
+
+系统的三个分支覆盖了多少。
+
+例如可行空间中存在：
+
+- 少移动会议；
+- 少转移工作；
+- 少影响他人；
+- 最完整的深度工作时间。
+
+系统不能生成三个都在移动会议的方案。
+
+## 3. 结果冗余率
+
+有多少分支看似执行方式不同，但最终状态基本相同。
+
+这是普通 LLM “给我三个方案”最容易出现的问题。
+
+## 4. 劣势分支率
+
+如果一个分支在所有已定义维度上都比另一个差，它就是严格劣势分支。
+
+例如：
+
+- 写作时间更少；
+- 影响的人更多；
+- 转移的工作更多；
+- deadline 还更差。
+
+这种分支不应浪费用户注意力。
+
+## 5. 选择提交正确率
+
+用户选择 B 后，主环境是否准确得到 B 的状态，而没有混入 A 或 C。
+
+## 6. 自动化成本
+
+同时记录：
+
+- 分支生成耗时；
+- GUI action 数；
+- 模型调用成本；
+- sandbox fork 成本；
+- 相比单轨执行增加的计算量。
+
+最终展示的不是“更多分支永远更好”，而是：
+
+> 三个分支带来的结果空间覆盖，与额外计算成本之间的 frontier。
+
+---
+
+# 用户研究回答什么
+
+用户研究不需要证明“这个界面看起来很酷”。
+
+比较三个条件：
+
+1. **单结果 Agent**：直接执行它认为最好的方案；
+2. **澄清式 Agent**：先用文字询问用户偏好；
+3. **可执行未来 Agent**：真实执行三个分支供用户比较。
+
+主要行为指标：
+
+- 用户最终修改了多少次结果；
+- 用户在执行前后新增表达了多少决策标准；
+- 最终方案违反角色约束的数量；
+- 选择后是否反悔；
+- 完成决策所需时间；
+- 用户需要检查多少个应用。
+
+核心假设是：
+
+> 对偏好不完全明确的任务，比较真实可行的结果，比预先回答抽象问题更容易帮助用户形成有效约束。
+
+这里“偏好通过比较形成”是**待验证假设**，不能在论文中预先写成事实。
+
+---
+
+# 它与现有工作的硬边界
+
+现有工作已经有 agent 内部的分支探索。`Fork, Explore, Commit` 提供 OS 级分支，让 agent 并行尝试多条路径，但目标是让 agent 最后选择一个成功分支，不是把多个结果保留下来作为人类的交互介质。citeturn241369academia47
+
+ProAct 等 lookahead 工作同样让 agent 推演未来，但未来主要服务于模型自己的规划决策，而不是帮助用户形成和表达偏好。
+
+AXIS 使用 counterfactual simulation 生成多智能体行为解释，重点仍是解释已经发生的决策，而不是在真实 GUI 副本中执行多个可提交结果。
+
+DuetUI 会随任务进展生成任务导向界面；DOMSteer 会重组现有 DOM 来帮助用户理解和操作复杂界面；MAESTRO 会根据偏好对 GUI 做排序、筛选和高亮。这些工作都说明“agent 不只是点击器，也可以改造交互界面”正在成为重要方向，但它们没有把**多个经过真实执行验证的未来状态**作为用户形成偏好的主要媒介。
+
+所以你的论文不是：
+
+- 生成新 UI；
+- 修改现有 UI；
+- 解释 agent；
+- 提供 rollback；
+- 让 agent 内部做 tree search。
+
+你的独特主张是：
+
+> **Agent 的探索分支不应全部隐藏在推理系统内部；其中少量意义不同的可行未来，可以成为一种新的人机交互界面。**
+
+这才是真正掀桌子的地方。
+
+---
+
+# 为什么它能形成壁垒
+
+普通 HCI 团队可以生成三张 mockup，但难以实现：
+
+- 多应用状态的即时 fork；
+- 每个分支中的真实 GUI 执行；
+- 独立数据库和副作用隔离；
+- 跨应用效果图；
+- 结果语义归一化；
+- branch redundancy 检测；
+- 约束验证；
+- 选择分支的原子提交；
+- 大规模自动 benchmark。
+
+普通 AI 团队可以做 best-of-N planning，但通常只关心：
+
+- 是否有一个分支成功；
+- 哪个分支 reward 最高；
+- agent 自己如何选择。
+
+它们很少研究：
+
+- 哪几个成功分支值得同时展示；
+- 结果差异是否对应人的选择维度；
+- 用户是否通过比较发现新的标准；
+- agent 如何用有限的三个分支覆盖可行结果空间。
+
+你的壁垒是：
+
+```text
+GUI trajectory
++ cloneable multi-app sandbox
++ counterfactual execution
++ semantic state diff
++ learned outcome critic
++ deterministic verifier
++ interactive branch gallery
+```
+
+这比再做一个 policy checker 难复制得多，也更适合 demo。
+
+---
+
+# 第一篇论文必须主动删除的东西
+
+不要加入：
+
+- trust；
+- consent；
+- risk level；
+- provenance；
+- memory；
+- future reuse；
+- tool permission；
+- generic rollback；
+- arbitrary branch merging；
+- 多用户实时协作；
+- 通用 OS；
+- 所有知识工作领域。
+
+只研究一个任务族：
+
+> **多应用知识工作重排。**
+
+例如固定为：
+
+- Calendar；
+- TaskBoard；
+- Team Capacity；
+- Project Document。
+
+任务可以覆盖：
+
+- 腾出深度工作时间；
+- 应对临时缺席；
+- 提前 milestone；
+- 调整团队工作量；
+- 将部分同步工作转为异步。
+
+问题足够丰富，但共享同一个状态和 trade-off 结构。
+
+---
+
+# 最快的否决实验
+
+不要先训练。
+
+十天内做出这个最小闭环：
+
+1. 一个含 Calendar、TaskBoard 和 Team Capacity 的 Web sandbox；
+2. 一个任务：“为用户腾出两个下午”；
+3. 一个可复制三份状态的 branch manager；
+4. 三个手写目标函数；
+5. 现有 CUA 分别执行；
+6. deterministic verifier 检查约束；
+7. 一个页面并排展示三个最终 Calendar 和工作量变化；
+8. 选择一个分支写回主状态。
+
+然后找 5–8 个人使用。
+
+唯一需要判断的问题是：
+
+> 人们看到三个真实结果时，是否会表达出他们在原始 prompt 中没有表达、但确实影响选择的标准？
+
+如果不会，这个方向立即终止。
+
+如果会，再训练 outcome critic。
+
+---
+
+# 两个同样“掀桌子”的备选
+
+## 备选一：用“编辑未来”代替写 prompt
+
+不是让 agent 生成三个分支，而是先生成一个可编辑的未来工作区。
+
+用户直接：
+
+- 拖动未来日历中的会议；
+- 移动任务卡；
+- 修改负责人；
+- 调整 deadline。
+
+这些控件可以来自多个应用的统一临时视图。
+
+Agent 解决的是逆问题：
+
+> 给定当前多应用状态和用户画出的目标状态，推导一条能够在真实 GUI 中实现它的执行程序。
+
+这可以称为：
+
+> **Outcome Sketching：用户画结果，agent 编译过程。**
+
+它的人本问题是：
+
+> 人往往更容易展示“我希望世界变成什么样”，而不是精确描述 agent 应该如何做。
+
+自动评估非常干净：
+
+- target-state satisfaction；
+- 最少动作数；
+- 无关状态变化；
+- unseen app 和 unseen widget 泛化；
+- 从目标状态到 GUI trajectory 的规划成功率。
+
+但它与 task-oriented generative UI、DuetUI 和 in-situ interface transformation 更接近，文献竞争会比“可执行未来”更直接。
+
+## 备选二：Agent 不操作界面，而是临时重编译界面
+
+Agent 观察多个现有 app，然后生成一个临时任务界面，只保留当前任务真正有影响的控制变量。
+
+例如“安排团队 offsite”不再让用户穿梭于：
+
+- Calendar；
+- Venue；
+- Budget；
+- TaskBoard；
+- Directory。
+
+系统生成一个临时控制面：
+
+- 日期；
+- 最低参会率；
+- 远程或线下；
+- 预算；
+- 房间容量；
+- 受影响项目。
+
+用户修改控件，系统将其双向映射回真实软件。
+
+研究问题是：
+
+> Agent 能否从复杂软件中发现并编译出一个完整但最小的任务决策界面？
+
+这个方向视觉效果非常强，但 DuetUI、DOMSteer、MAESTRO 和更广泛的 Generative UI 已经逼近这片空间，必须靠严格的语义完整性、双向映射和自动 verifier 拉开距离。
+
+---
+
+# 最终判断
+
+三者中，我会这样排：
+
+1. **可执行未来：让 agent fork 并真实运行多个 GUI 世界，用户通过比较结果形成偏好。**
+2. **Outcome Sketching：用户编辑目标世界，agent 反向编译执行过程。**
+3. **任务界面编译器：agent 从多个现有软件中合成一个临时决策界面。**
+
+第一个最好玩，也最不像现有的“agent 治理论文”。
+
+它的根本变化是：
+
+```text
+旧范式：
+用户表达完整目标
+→ agent 选择一条路径
+→ 用户监督或检查
+
+新范式：
+用户给出不完整方向
+→ agent 执行多个真实未来
+→ 用户通过比较形成目标
+→ 系统提交选择的未来
+```
+
+最短的一句话是：
+
+> **不要让 GUI Agent 猜用户想要哪个未来；让它先把几个真实可行的未来运行出来。**
+
+
+【提问 轮数5】
+基本原则
+```
+我的研究偏好与核心诉求
+
+一、我的研究定位：以 GUI Agent 技术为根基，做人本问题驱动的 AI × HCI
+
+我的核心背景和竞争力来自 Agentic AI，尤其是 GUI Agent、Computer Use Agent、多模态交互轨迹、GUI 与 MCP/tool 的混合执行、sandbox、harness 和自动评估。因此，我不希望为了进入 HCI，把论文做成一个以用户访谈和界面设计为主、技术系统只是支撑材料的工作。
+
+但我同样不希望做成一篇纯 AI benchmark，只在最后加入几个用户问卷，借用 HCI 的语言包装算法贡献。
+
+我真正想要的是：
+
+由一个具体、真实的人本问题定义技术任务，再用足够扎实的 AI、系统和工程方法解决它。
+
+所谓 tech-heavy human-centric，对我而言不是“技术多一点、用户研究也多一点”，而是：
+
+人本问题决定模型要预测什么；
+
+用户价值决定 benchmark 如何构造；
+
+用户边界决定 verifier 如何评分；
+
+技术系统必须真正改善用户的理解、控制、决策或纠错能力；
+
+用户研究用于验证这些人本目标，而不是给一个已经完成的 AI 系统补合法性。
+
+我希望 GUI Agent / CUA 成为我的长期技术护城河。相比已经非常拥挤的通用 coding agent，GUI Agent 涉及视觉感知、页面状态、轨迹理解、跨模态执行、工具调用和真实环境副作用，更能体现我的既有积累，也更难被普通 HCI 研究者快速复制。
+
+因此，除非研究问题天然属于 coding agent，否则我不希望为了开发方便，把工作退化成普通的 IDE 插件或代码助手研究。
+
+二、我对研究问题的偏好：问题要窄、真实、有张力，但不能概念膨胀
+
+我喜欢前沿且具有原则性的研究问题。它最好来自当前真实产品正在发生的变化，例如：
+
+agent 从逐步 GUI 操作转向高压缩的 MCP/tool shortcut；
+
+agent 从即时执行转向持久技能、记忆和长期复用；
+
+agent 在提高效率时，可能跳过原本属于用户的检查、确认或决定机会；
+
+agent 的执行过程越来越不可见，但能够造成的外部影响越来越大。
+
+这些现象在 Codex、Claude Code、Computer Use、MCP 等产品中具有明确的工业意义，也能让产品经理、交互设计师和开发者直接理解为什么值得研究。
+
+但是，我不喜欢一个选题同时容纳大量构念。一个方向即使包含很多有趣关键词，也不能让它们全部成为主线。
+
+例如，一篇论文不应该同时把以下内容都作为主要问题：
+
+trust；
+
+consent；
+
+skill drift；
+
+provenance；
+
+GUI–MCP mode shift；
+
+data-use drift；
+
+completion drift；
+
+dark patterns；
+
+memory；
+
+active perception；
+
+future reuse；
+
+repair。
+
+这会产生一种“什么都讨论了，所以好像很充实”的假象，实际上会让研究失去中心。
+
+我理想中的论文应当只有：
+
+一个主要人本矛盾，一个核心构念，一套技术闭环，一条清楚的评估逻辑。
+
+可以有多个模块，但每个模块都必须直接服务于同一个问题，而不是每增加一个模块就引入一个新的研究主题。
+
+我喜欢问题的表达足够漂亮、有理论张力，例如强调“目标完成并不等于过程符合用户意图”“自动化效率不应以消除用户决定权为代价”。但这种表达必须能够进一步落到可执行、可测量、可构造数据的问题上，而不能停留在哲学或伦理口号层面。
+
+三、我对论文形态的要求：必须是一个完整、可运行、可验证的技术项目
+
+我不接受论文主体是：
+
+一个界面原型 + 用户觉得不错 + 若干访谈主题。
+
+这类工作无法充分体现我的技术背景，也很难形成对求职有价值的工程成果。
+
+我需要的完整形态是：
+
+受控的 GUI–MCP 环境→ 明确的数据与状态表示→ 一个确实有必要的模型或 framework→ 自动 verifier→ 规模化自动实验→ 小规模但扎实的用户研究→ 可运行、可复现的 GitHub 项目。
+
+1. 自动化评估必须是主体，而不是补充
+
+用户研究可以回答：
+
+用户是否看懂了系统；
+
+用户是否更准确地发现问题；
+
+用户是否能更好地设置或修复边界；
+
+用户是否保留了控制感和决定权。
+
+但论文还必须自动回答：
+
+agent 是否完成任务；
+
+是否产生不合适的状态变化；
+
+是否错误放行危险行为；
+
+是否错误阻止合理自动化；
+
+是否增加过多确认负担；
+
+是否能迁移到未来任务和未见工具；
+
+系统在 utility 与用户价值之间处于什么位置。
+
+我不希望只报告 task success，因为一个 agent 完全可能高质量完成任务，却在完成过程中改变了收件人、提交状态、权限、发布范围或其他用户本应决定的事项。
+
+因此，自动评估不能只衡量“任务做没做完”，而应衡量：
+
+任务完成得是否符合用户认可的边界，以及系统在降低越界的同时保留了多少自动化收益。
+
+2. GitHub 项目必须是真正的可交付成果
+
+最终项目应该能够独立运行和展示，而不是一组无法复现的实验脚本。
+
+它至少应呈现出一条完整链路：
+
+一个 Web-based sandbox；
+
+GUI 操作路径与 MCP/tool 路径；
+
+可重置的环境状态；
+
+轨迹和状态变化记录；
+
+benchmark cases；
+
+自动 verifier；
+
+baselines；
+
+训练或推理代码；
+
+自动评测脚本；
+
+可视化或治理界面；
+
+清晰的 README 和 demo。
+
+我希望这个项目在求职中能够证明，我不仅能提出 HCI 概念，也能把问题转化为数据、模型、系统、实验和产品机制。
+
+四、我对训练的态度：可以轻量训练，但必须“非训练不可”
+
+我并不要求每篇论文一定训练模型。train-free framework 如果足够新、足够系统化、自动实验足够扎实，也可以成立。
+
+但是，如果论文中引入训练，训练必须非常自然。理想状态是审稿人看到问题后，会认为：
+
+“这里存在一个规则难以可靠表达的映射，确实应该学习；作者也确实训练了。”
+
+我不接受为了显得 tech-heavy，额外训练一个没有必要的分类器。
+
+例如，直接训练模型根据工具名输出：
+
+allow / ask / block
+
+并不是我喜欢的训练方式。因为在工具集合预定义时，模型很可能只是记住：
+
+send_email 风险高；
+
+read_file 风险低；
+
+merge_pr 需要确认。
+
+这种情况下，静态规则或 allowlist 可能更简单、更稳定，也更容易解释。训练没有证明必要性。
+
+更符合我偏好的训练对象应当依赖：
+
+当前任务状态；
+
+工具的具体参数；
+
+工具执行后可能造成的 effect；
+
+GUI 轨迹中原本存在的中间状态或检查机会；
+
+用户此前认可的执行边界；
+
+不同工具之间共享的后果语义。
+
+换句话说，模型应学习的是：
+
+行为在当前语境中会造成什么用户相关后果，或者两条执行路径是否在人本意义上等价。
+
+而不是：
+
+某个工具名称通常安不安全。
+
+训练还必须通过专门的实验排除记忆和捷径：
+
+同一个工具，因参数不同得到相反判断；
+
+不同工具，因为造成相同 effect 得到相同判断；
+
+工具重命名或 schema 改写后仍然有效；
+
+未见工具和未见任务上的 OOD 测试；
+
+与规则、prompt、静态 policy 等简单基线比较；
+
+必要时使用规则–模型混合，而不是让模型承担所有确定性判断。
+
+我更偏好轻量 SFT、QLoRA 或小型 critic，而不是在有限时间里训练一个更强的 GUI executor。executor 可以复用现有模型；我的创新更适合放在 effect understanding、cross-path comparison、policy inference 或 human-relevant critic 上。
+
+五、我对 HCI 与人工数据的要求：人类必须定义价值，但不能阻塞全部技术流程
+
+我重视人本构念的正当性，因此不接受凭空在数据里写入几个 GT 字段，然后假设它们天然代表用户价值。
+
+例如：
+
+finality_escalated = true audience_escalated = true reversibility_reduced = true
+
+这些字段不能只因为研究者或大模型这样标记，就被当作无争议事实。
+
+我会追问：
+
+这个字段来自环境的真实状态变化吗？
+
+是研究者制定的操作化规则吗？
+
+是大模型自动判断的吗？
+
+还是来自真实用户的偏好和判断？
+
+部署时是否能够获得同样的信息？
+
+但另一方面，我也不接受把大规模人工调查和逐条标注放在全部技术工作的最前面。如果必须先完成大量访谈，才能获得标签、生成数据、开始训练和运行 benchmark，那么整个项目会被人类研究流程严重拖慢。
+
+我理想中的分工是三层：
+
+第一层：环境事实
+
+尽量直接由 sandbox 和状态数据库提供，例如：
+
+邮件是否从 draft 变成 sent；
+
+是否新增外部收件人；
+
+是否提交表单；
+
+是否发布内容；
+
+是否更改权限；
+
+是否删除对象；
+
+是否写入长期存储；
+
+操作是否可以回滚。
+
+这些是可重复、可自动获取的事实，不需要人逐条标注。
+
+第二层：研究操作化
+
+研究者明确说明：
+
+哪些状态变化代表一种用户相关边界；
+
+为什么这样定义；
+
+哪些情况规则能够确定；
+
+哪些情况存在歧义；
+
+规则变化时结果是否稳健。
+
+这一层不是“绝对真理”，但必须透明、可审计、能做 sensitivity analysis。
+
+第三层：有限的人类 grounding
+
+人类用于验证：
+
+这些边界是否真的对用户重要；
+
+不同用户是否存在系统性差异；
+
+哪些情况不能用统一规则判断；
+
+系统的解释是否符合用户理解；
+
+用户能否使用系统修正和表达自己的边界。
+
+因此，我并不是不要人工数据，而是希望：
+
+人类负责定义、校准和个性化价值；环境负责规模化生成事实；模型只学习规则难以覆盖的语义部分。
+
+用户研究最好是后置、增量、非阻塞的。在用户实验开始之前，sandbox、benchmark、verifier、baselines 和主要自动实验应当已经能够独立跑通。
+
+六、这一个 GUI–MCP 工作中，我希望兼顾的核心元素
+
+这篇工作的技术对象应继续围绕 GUI Agent，而不是泛化到任意 agent。
+
+我关心的核心关系是：
+
+用户通过 GUI 所看到、检查或参与的执行过程，与 agent 通过 MCP/tool shortcut 实际造成的状态变化之间，是否存在重要差异。
+
+因此，适合保留的关键词包括：
+
+hybrid GUI–MCP execution；
+
+multimodal GUI trajectory；
+
+DOM / screenshot / action / state；
+
+GUI path 与 tool path；
+
+tool schema 与参数；
+
+before/after state diff；
+
+dry-run、shadow state 或 transactional execution；
+
+deterministic verifier；
+
+cross-mode comparison；
+
+unseen tools 与 tool OOD；
+
+automation utility；
+
+用户决定权、控制、纠错和后果理解。
+
+其中，active perception 可以复用已有 infra，但不应自动成为这篇 CHI 的主问题。主动感知是另一篇 AI 能力评估工作的核心；当前工作只应复用它的日志、DOM、截图和 harness，除非感知选择直接服务于唯一的人本问题。
+
+环境方面，我更偏好：
+
+受控、简单、可验证的 Web sandbox，而不是复杂、脆弱的真实桌面系统。
+
+任务本身不必难。可以是邮件、表单、任务管理、文件分享、项目协作等小应用。操作难度可以简单，但人本矛盾不能简单，评估也不能只做 toy demonstration。
+
+Web 环境必须支持：
+
+reset；
+
+replay；
+
+读取内部状态；
+
+捕获副作用；
+
+分离 executor failure 与 governance failure；
+
+GUI 与 tool 两种路径完成相同或相近任务。
+
+大型 OS benchmark 可以作为外部验证，但不应该成为九周项目的主要工程风险。
+
+我明确不喜欢的过往方向
+
+以下方向不一定完全错误，但它们可以作为负样本，帮助以后迅速排除不符合我偏好的方案。
+
+负样本一：研究“GUI 是否比 MCP 更值得信任”
+
+这个问题建立在过度简化的假设上。
+
+GUI 操作同样可能：
+
+删除数据；
+
+发送邮件；
+
+改变权限；
+
+完成付款。
+
+MCP 操作也可能：
+
+只读；
+
+可撤销；
+
+被严格限制；
+
+比人工 GUI 操作更可靠。
+
+如果研究只比较两种媒介带来的主观信任，最后很容易变成：
+
+让参与者观看 GUI 操作和 MCP 日志，然后填写 trust scale。
+
+这既缺少扎实的自动评估，也无法产生自然的训练任务，更难形成具有技术深度的 GitHub 项目。
+
+我真正关心的不是 GUI 和 MCP 谁更可信，而是：
+
+两条执行路径是否保留了相同的用户相关后果和决定机会。
+
+负样本二：把 Skill Drift 做成包罗万象的治理系统
+
+过去讨论过同时研究：
+
+scope drift；
+
+mode shift；
+
+data-use drift；
+
+completion drift；
+
+provenance；
+
+future reuse；
+
+repair；
+
+policy editing。
+
+这些内容各自都有意义，但放在一篇论文里会导致系统不断增加模块：
+
+version diff；
+
+provenance viewer；
+
+timeline；
+
+receipt；
+
+policy editor；
+
+future probe；
+
+repair compiler。
+
+最终看起来内容很多，却没有一个足够深的中心问题。自动 benchmark 也很难用一套统一 GT 支撑所有 drift 类型。
+
+因此，我不希望继续发展一个“治理所有 agent 演化问题”的大框架。应当从中选择一种最重要、最可验证的矛盾，把它做透。
+
+负样本三：宽泛的 Procedural Consent
+
+“用户同意 agent 完成目标，是否等于同意它采用任意执行方式”是一个有启发性的 motivation，但如果直接把 procedural consent 作为模型标签，会产生严重问题：
+
+consent 太抽象；
+
+不同用户边界不同；
+
+很难自动得到 GT；
+
+容易依赖大量前置人工标注；
+
+论文可能滑向伦理讨论；
+
+系统容易退化成权限弹窗、receipt 和 policy editor。
+
+因此，procedural consent 可以作为高层解释，但不能直接成为一个未经操作化的万能标签。
+
+更好的方向必须把它压缩成：
+
+一类可以通过环境状态观察、又确实代表用户决定权的具体差异。
+
+负样本四：训练 allow / ask / block 分类器
+
+如果工具是预定义的，直接预测三分类很可能只是在学习工具名风险。
+
+这类工作只有在以下条件成立时才有说服力：
+
+相同工具在不同参数下需要不同决策；
+
+不同工具产生相同 effect 时应得到相同决策；
+
+模型在工具重命名和未见工具上仍然有效；
+
+明确证明规则和静态 policy 无法覆盖问题；
+
+模型输入包含状态、参数、轨迹和 effect，而不是只有 tool name。
+
+否则，训练只是装饰，并不符合我对“这里就该训练”的要求。
+
+负样本五：只在工具执行后发现 violation
+
+执行 MCP 后再查看 state diff，适合 benchmark verifier，却不足以成为真实治理系统。
+
+如果行为不可撤销，事后发现错误已经太晚。实际系统至少需要一种执行前或安全执行机制：
+
+dry-run；
+
+shadow state；
+
+transactional execution；
+
+rollback；
+
+effect manifest；
+
+高风险操作回退 GUI；
+
+先生成候选 action，再由 checker 决策。
+
+因此，必须区分：
+
+评估时的真实执行后 verifier；
+
+部署时的执行前治理机制。
+
+负样本六：全用户访谈，或者让用户研究成为全部工作的前置条件
+
+这类方案不符合我的时间、技术和职业目标。
+
+如果研究流程是：
+
+先访谈和人工标注→ 定义所有 GT→ 才能生成数据→ 才能训练→ 才能做自动实验，
+
+那么项目风险过高，也会削弱技术主体。
+
+用户研究必须有意义，但它应该验证已经成形的系统，而不是成为整个系统能否开始开发的先决条件。
+
+负样本七：把所有已有 infra 都硬塞进同一篇论文
+
+已有主动感知、成本统计、多模态轨迹和 harness，并不意味着这些都必须成为 CHI 论文的贡献。
+
+复用基础设施是优势，但强行复用研究问题会使论文失焦。
+
+我的原则应该是：
+
+复用代码和环境，但只保留直接服务于当前人本问题的模块。
+
+最终核心诉求
+
+我想做的是一篇真正属于 AI × HCI 交叉地带的 GUI Agent 工作：
+
+它围绕一个极窄但真实的人本问题展开；这个问题必须能够被清楚地操作化，而不是依赖宽泛的 trust 或 consent 概念。技术上要有受控 Web sandbox、GUI–MCP 双路径、状态与轨迹表示、自动 verifier、扎实的自动实验，以及一个规则无法完全解决、因而自然需要轻量训练的模块。用户研究用于 grounding、校准和验证，而不是逐条制造全部 GT，也不能阻塞前期开发。最终成果必须是一个可运行、可开源、可演示的 GitHub 项目，既能被 CHI 审稿人认可其人本价值，也能体现我在 GUI Agent、模型、系统和工程上的技术壁垒，并直接服务于大厂产品、设计、算法和开发岗位的求职。
+
+以后判断一个方向是否值得继续，只需要抓住四个问题：
+
+它是否只有一个清楚、真实的人本矛盾？
+
+技术模块是否都是解决这个矛盾所必需的？
+
+自动评估和训练是否自然成立，而不是为了显得复杂？
+
+最终是否能形成一套真正可运行、可展示的项目？
+
+只要其中一个问题回答不清楚，就不应该继续增加概念和模块。八、你的核心诉求最终版
+
+我要在有限时间内完成一篇真正属于 AI+HCI 交叉地带的 GUI Agent 论文。它必须从一个清晰、真实的人类问题出发，但不能依赖大规模前置人工标注或全用户访谈；必须能够先搭出 Web-based GUI–MCP sandbox、自动 verifier、benchmark、轻量模型和完整自动实验，再用后置的小规模任务型用户研究验证构念、解释和个性化修正。训练必须发生在规则确实不够、审稿人自然期待模型学习的地方，并通过 OOD 与反记忆实验证明不是背工具名。最终必须形成一个可复现、可开源、可演示的 GitHub 项目，既让 CHI 审稿人看到真正的用户控制与人本价值，也让 AI 研究者看到技术深度，并能成为我申请大厂产品、设计和开发岗位时的强项目证明。
+
+再压缩成最短的一句：
+
+一个人本问题驱动、自动评估为主体、轻量训练自然成立、用户研究后置不阻塞、Web 工程完全可落地、能开源也能求职展示的 tech-heavy GUI Agent HCI 项目。
+
+
+
+
+
+我对于 AI 回答方式的偏好
+
+这一部分与研究方向无关，描述的是我希望 AI 如何呈现和解释复杂概念。
+
+一、先讲主线，再讲细节
+
+我不喜欢回答一开始就罗列大量术语、模块、字段和指标。即使每项都正确，平铺在一起也会让我看不出重点。
+
+回答应先说明：
+
+核心问题是什么，为什么存在，准备通过什么关键机制解决，以及如何验证。
+
+理想顺序是：
+
+问题 → 核心矛盾 → 解决思路 → 具体例子 → 完整流程 → 必要细节。
+
+不要先给我一张零件清单，最后才解释这些零件要做什么。
+
+二、抽象概念必须结合一条具体任务讲
+
+涉及模型输入、标签、训练、验证或用户行为时，应先选一条具体任务，从头走一遍。
+
+例如：
+
+用户要求 agent 根据会议记录创建任务并起草邮件，但不要发送；GUI 路径停留在草稿页面，而 MCP shortcut 准备直接发送。
+
+然后依次说明：
+
+系统观察到什么；
+
+信息分别来自 GUI、工具还是环境状态；
+
+模型输入和标签是什么；
+
+标签由谁、通过什么方式得到；
+
+训练阶段学习什么；
+
+验证阶段如何判断对错；
+
+人类在哪一步参与。
+
+先讲清“一条数据怎么走”，再抽象成通用框架。
+
+三、字段和术语出现时必须立即解释
+
+我不反对 JSON、公式或结构化表示，但每个关键字段第一次出现时都要说明：
+
+它是什么意思、从哪里来、在哪个阶段使用、部署时是否可获得。
+
+例如，出现：
+
+{   "audience_changed": true }
+
+需要立刻解释：
+
+它表示影响对象是否从内部扩展到了外部；这里由执行前后的收件人状态自动计算，不是大模型主观打标；它用于 verifier，而不是模型输入。
+
+不要默认字段名本身已经完成了解释，也不要创造术语后让我从后文猜它的含义。
+
+四、明确区分不同性质的内容
+
+回答应区分：
+
+环境事实：可以直接观察，例如邮件由 draft 变成 sent。
+
+操作化定义：研究者把该变化定义为 finality 提高。
+
+待验证假设：用户可能认为草稿页提供了重要检查机会。
+
+研究目标或预期主张：希望验证模型能否识别这种差异。
+
+不能把设计选择、假设和已经验证的事实写成同一种肯定语气。
+
+五、信息要有层级，不能全部平铺
+
+详细不等于把所有内容列成同一级别。回答应主动区分：
+
+必须解决的核心问题；
+
+完成闭环所需的关键模块；
+
+有时间再做的增强项；
+
+虽然相关但当前应删除的内容。
+
+重点不是靠加粗产生的，而是靠明确取舍产生的。
+
+我需要的是保留足够信息密度，同时删除重复内容、次要分支和不影响判断的实现细节。
+
+六、必须通过负样本说明边界
+
+只告诉我“应该怎么做”还不够，还要指出哪些看似合理的做法其实不合适，以及具体错在哪里。
+
+例如：
+
+不好的方式
+
+同时研究 trust、consent、skill drift、provenance 和 future reuse，并设计 inspector、receipt、policy editor 和 repair module。
+
+问题是概念和模块不断扩张，没有唯一主线。
+
+更好的方式
+
+只研究 GUI 路径中的一种用户检查机会是否被 MCP shortcut 跳过，其余概念只有在服务该问题时才出现。
+
+负样本要具体，不能只说“不要太散”。
+
+七、不要频繁换名字包装同一个问题
+
+当我指出一个方案有问题时，不要只是更换系统名、概念名或论文标题，然后重新表达同一套逻辑。
+
+在研究问题稳定前，系统叫什么并不重要。应该优先稳定：
+
+研究对象；
+
+输入与输出；
+
+数据和 GT 来源；
+
+训练必要性；
+
+评估闭环；
+
+人类参与的位置。
+
+这些没有讲清楚时，不要急着创造新的 acronym。
+
+八、流程要体现依赖关系
+
+我希望看到的不只是“系统包含什么”，而是：
+
+前一步为什么必须先做，它会为下一步提供什么。
+
+例如：
+
+环境产生可验证的状态变化 → 研究者定义透明的操作化规则 → 自动生成规模化数据 → 模型学习规则难覆盖的语义映射 → 独立 verifier 在测试集上评分 → 用户研究验证这些规则是否符合真实理解
+
+这比单纯列出“数据模块、模型、verifier、用户实验”更容易理解。
+
+九、训练和验证必须分开讲
+
+涉及模型时，需要分别说明：
+
+训练阶段
+
+输入是什么；
+
+标签是什么；
+
+标签如何获得；
+
+正负样本如何构造；
+
+哪些信息仅训练时可见。
+
+验证阶段
+
+测试时模型能看到什么；
+
+测试的是未见任务、未见工具还是未见参数；
+
+独立 GT 来自哪里；
+
+verifier 如何评分；
+
+如何排除工具名记忆和数据泄漏。
+
+尤其不能让同一个模型生成标签，再用这些标签证明自己有效。
+
+十、回答应主动做判断，而不是不断增加选项
+
+我不希望每次收到五个方向、四种模型和三套实验，然后由我重新完成全部筛选。
+
+信息足够时，AI 应直接判断：
+
+最推荐 A，原因是什么；B 为什么暂时放弃；C 为什么不符合时间或技术约束。
+
+可以保留一个备选，但回答的作用应是减少决策负担，而不是扩大选择空间。
+
+总结
+
+我希望 AI：
+
+先给出核心判断，再用一个具体任务建立理解；按照因果和依赖关系讲清完整流程；字段和标签出现时立即解释来源与作用；明确区分事实、假设和设计选择；保留必要的信息密度，同时主动删掉重复概念、平级模块和无关扩展；并通过具体负样本说明边界。
+
+最直白地说：
+
+先告诉我这台机器为什么存在，再用一个任务展示它如何运行，最后才介绍每个零件。
+```
+
+
+了解我的以上所有个人偏好，然后启动你最好的调研能力ICML/NIPS/ICLR/CHI/UIST/UBICOMP/CSCW/IUI/CVPR/AAAI/ECCV/ICCV/ACMMM/AAAI/ACL/EMNLP，告诉我2026年期间，目标投稿CHI27的话，还有什么是符合以上要求能做的相关GUI agent、CUA方向，可以森罗万象，因为满足以上要求的其实比较严苛
+
+务必让我的优势成为我和其他投稿之间短时间难以逾越的技术壁垒
+
+我不想再做提交相关的了，这个问题确实明确，但是太窄了，不是非得引入MCP，有没有其他可以做的：这次我会彻底放弃“监督、修正、确认、越界”这条线，改从“GUI Agent 能创造什么以前不存在的人机交互形态”出发，先找 2025–2026 的真正空白，再只保留 2–3 个有资格立项的方向。
+
+已经出现一个真正“掀桌子”的候选：不要再研究 agent 执行时如何被监督，而是让 agent 把现有软件编译成一个临时、可编辑、可验证的任务界面；用户操作的是任务变量，agent 再把它翻译回多个真实 GUI。现在我在确认它与现有 generative UI 工作的边界是否足够硬。
+
+Worked for 3m 11s
+
+可以。而且我同意：上一版表面上换了问题，本质仍是同一张桌子——agent 自动执行，人在旁边监督、纠正、恢复控制。
+
+真正掀桌子，应该连这个默认前提一起扔掉：
+
+不要再研究怎样让用户更好地监督一条 agent 轨迹。
+
+
+我想找一些有意思的，灵动的让人一看就觉得眼前一亮的并且能符合以上要求的选题，但是我不想再新瓶装旧酒了，而是要研究GUI （MCP hybrid）Agent带来的新交互问题，不是以前的交互问题在GUI Agent之下的新的小差异。但是我又不喜欢直接比人类偏好或是在人类交互过程中逐渐完善模糊意图，因为这一方面又会在方法论上就很human-heavy而非tech-heavy（诶等等，是不是可以用agent建模人类用户来迭代方法？但是这个其他很多领域都做过啊，不是说不能做，但是有没有更眼前一亮的交互问题呢），另一方面这个这个确实在其他领域都出现过，而且和chatLLM不同，GUI Agent是为了完成任务，这个限制下，就不像是对话那么自由了，因为对话要求让用户满意，而aGENT既要完成任务又要让用户满意，这其实也更难吧
+
+人机交互的合作性范式都有什么呢？除了监督以外，没有其他类型了吗？无聊无聊无聊！
+
+【回答内容 轮数5】
+I’ll map 2025–2026 work by the human’s role, then retain 2–3 genuinely new cross-application interaction paradigms with automated evaluation and nine-week engineering defensibility.
+
+【回答内容 轮数5】
+The emerging gap is executable software projection: interfaces bound to synchronized real states, or multiple runnable future states users directly manipulate and compose.
+
+【回答内容 轮数5】
+# 核心判断
+
+**有，而且监督只是人机合作中最保守、也最容易做无聊的一种。**
+
+你现在应该把研究问题从：
+
+> 人在 agent 的执行轨迹中何时介入？
+
+彻底改成：
+
+> **GUI Agent 让什么原本不可操作的东西，第一次变成了可直接操作的交互对象？**
+
+对 GUI Agent / CUA 而言，真正特殊的能力不是“会自动点击”，而是它能够：
+
+1. 读取原本彼此隔离的现有软件；
+2. 把视觉界面、工具 schema 和软件状态翻译成统一语义；
+3. 在多个应用中制造、复制和同步真实状态；
+4. 把用户在新界面中的操作重新编译回原软件。
+
+因此，我认为目前只有下面三个方向真正有资格继续立项：
+
+| 排名 | 新交互范式 | 一句话 |
+|---|---|---|
+| **1** | **现有软件的可执行任务投影** | 用户操作任务，不再操作应用 |
+| **2** | **跨应用对象代数** | 用户组合对象，不再描述流程 |
+| **3** | **可执行的平行软件世界** | 用户编辑未来，不再监督轨迹 |
+
+我的明确推荐是：**主做方向一；方向二是更窄、更灵动的备选；方向三最“掀桌子”，但九周内风险最高。三者不能塞进同一篇论文。**
+
+CHI 2027 官方 full-paper deadline 是 **2026 年 9 月 10 日 AoE，且没有 abstract deadline**。从今天算只有约 57 天，因此现在需要的是一个可以迅速冻结的研究主轴，而不是继续扩大 design space。
+
+---
+
+# 一、合作当然不只有监督
+
+人机合作至少可以分成五类。
+
+### 1. 围绕过程合作
+
+包括目标委托、计划共建、步骤分工、轮流执行、动态接管和监督。
+
+Cocoa 已经把“共同规划、动态分配步骤、规划与执行交错”做得很完整；Magentic-UI 也已经覆盖 co-planning、co-tasking、multi-tasking、action guards 等机制。这个区域不是不能做，而是现在再进入，很容易只是增加一种 plan representation 或 delegation control。turn863481academia23
+
+### 2. 围绕共享产物合作
+
+人和 agent 编辑同一个设计稿、文档、画布或结构化 artifact，可以轮流，也可以同时。
+
+2026 年的 CLEO 已经明确研究了人在 Figma 中与 agent 并发工作、agent 如何理解用户同时发生的操作，以及何时 hand off、何时共同工作。也就是说，“从串行协作走向同一工作区并发协作”本身也已经有人占位。
+
+### 3. 围绕意图和帮助合作
+
+agent 观察人正在做什么、推断为什么这样做，再决定何时提供帮助。
+
+这正是 GUIDE 的中心问题。它已经收集了 120 名用户、67.5 小时、多种专业软件中的开放 GUI 操作，并设置行为状态、意图预测和帮助预测任务。你现在再做“agent 建模模糊用户意图并主动帮助”，不仅 human-heavy，而且会直接进入这个已经快速拥挤的赛道。
+
+### 4. 围绕表示合作
+
+agent 不只是完成操作，而是**改变人和软件之间的表示层**：
+
+- 把应用界面翻译成任务界面；
+- 把多个应用对象翻译成可组合对象；
+- 给人和 agent 分别提供不同但同步的表示。
+
+这是我认为最适合你的区域。
+
+### 5. 围绕可能性空间合作
+
+agent 不直接给一个答案或执行一条轨迹，而是构造一组可以探索、修改、组合的未来状态。
+
+这里的人不是 supervisor，而是 explorer、composer 或 world editor。
+
+已有 2026 年 position paper 把这一思想称为 simulation-in-the-loop，主张人应探索多条未来轨迹，而不只是审批下一步。但它目前主要还是概念框架，尚未解决真实软件环境中的状态分叉、执行真实性、编辑和合并。turn135172view1
+
+所以，合作不只有监督。更关键的是：
+
+> **监督围绕 agent 的动作组织交互；更有意思的新范式，是围绕 agent 新创造出来的表示、对象和世界组织交互。**
+
+---
+
+# 二、先承认一个现实：单纯的“Agent 生成任务界面”已经不够新
+
+到 2026 年，“不要只聊天，让 agent 生成一个交互界面”已经成为明显趋势。
+
+DuetUI 让 agent 分解任务并生成界面 scaffold，再让用户通过直接操作反向影响后续生成；Mirage 根据自然语言目标，从开发者预先声明的组件和 typed schema 中组织临时界面；Jelly 使用可演化的 task-driven data model 驱动界面；Software as Content 更直接把动态应用定义为人与 agent 之间持续、双向的交互媒介；PSI 则用 shared-state bus 连接多个 AI 生成的 instrument。turn447866view2turn845775view0turn118767view0
+
+因此，下面这句话已经不足以成为论文贡献：
+
+> “我们让 agent 根据当前任务生成一个可交互界面。”
+
+真正还有硬边界的，不是 **UI generation**，而是：
+
+> **能否把任意现有软件中的真实、持续变化的状态，反向编译成一个可操作的任务表示，并保证两边在执行语义上始终一致？**
+
+Software as Content 自己也明确承认，目前主要是技术存在性和场景演示，尚未建立 agentic application 的 benchmark、系统化指标或受控用户比较。
+
+这正好留下了适合你的空位：**不是再提出 dynamic UI 的愿景，而是把它做成一个有 compiler、runtime、verifier、OOD benchmark 和模型学习的真实系统问题。**
+
+---
+
+# 三、方向一：把现有软件编译成“活的任务界面”
+
+## 核心问题
+
+> **GUI Agent 能否把多个现有应用反向编译成一个临时任务界面，使用户在其中进行的每次操作，都能被可靠地翻译成真实软件中的等价状态变化？**
+
+这里的主矛盾不是 trust、consent 或 control。
+
+而是：
+
+> **用户思考的是一个完整任务，但软件把任务切割成多个应用、页面、数据结构和操作过程。**
+
+传统软件只能由开发者提前设计界面。GUI Agent 第一次使“根据当前任务和当前软件状态，运行时生成一个新的任务表示”成为可能。
+
+### 这篇论文唯一的核心构念
+
+我建议叫它：
+
+**可执行投影保真性，executable projection fidelity。**
+
+“投影”是指：临时任务界面中的对象、属性和关系，对应一个或多个真实应用中的状态。
+
+“可执行”是指：用户改变这些对象后，系统能够把变化重新落到真实软件中。
+
+“保真性”是指：
+
+1. 用户要求改变的状态确实发生；
+2. 用户没有要求改变的状态保持不变；
+3. 原软件后来发生变化时，任务界面也能正确更新。
+
+这不是主观 trust，也不是一个模型生成的标签，而是可以用 sandbox 内部状态自动验证的技术性质。
+
+---
+
+## 用一条具体任务走完整流程
+
+用户正在安排三名同事的两天客户访问。
+
+相关信息分散在四个应用中：
+
+- Calendar：每个人的空闲时间和会议；
+- Travel：列车、酒店和预算；
+- Tasks：会议前需要完成的准备工作；
+- Drive：共享行程表和客户材料。
+
+用户并不想依次打开四个应用。用户真正想操作的是：
+
+- 谁在星期几见哪个客户；
+- 每场会议前后留多少交通时间；
+- 总预算是否超限；
+- 哪些准备任务必须在会议前完成；
+- 哪份材料对应哪场会议。
+
+系统生成一个临时任务界面：左侧是人员，中央是两天时间轴，下面是预算和依赖关系。它不是一个漂亮的 summary dashboard，而是一个**活的任务状态**。
+
+用户把“客户 B 会议”从星期二拖到星期三。
+
+系统随后：
+
+1. 更新 Calendar 中的会议时间；
+2. 更换 Travel 中与之冲突的车次；
+3. 调整 Tasks 中两个准备事项的截止时间；
+4. 更新 Drive 行程表中的对应条目；
+5. 将四个应用的新状态同步回任务界面。
+
+用户操作的是一个会议块，但系统完成的是一组跨应用、语义相关的状态变化。
+
+---
+
+## 一条数据在系统中怎样流动
+
+### 第一步：观察现有软件
+
+系统读取：
+
+- screenshot：用户能看到的视觉状态；
+- DOM / accessibility tree：页面中的结构化元素；
+- GUI trajectory：进入当前状态的操作历史；
+- tool schema：应用如果提供 tool/MCP 时，其操作和参数；
+- read-only observation：工具能够读取的当前实体。
+
+这些都是部署时可获得的信息。
+
+### 第二步：构造任务状态
+
+系统产生一个 `task_state`。
+
+例如：
+
+```text
+meeting_2:
+  participants = [Alice, Bob]
+  start_time = Wednesday 10:00
+  location = Client B
+
+constraint_1:
+  travel_arrival <= meeting_2.start_time - 30 minutes
+```
+
+`task_state` 表示当前任务中的实体、属性、关系和约束。
+
+它不是直接从内部数据库抄出来的；部署时需要从 GUI、DOM 和工具读取结果中抽取。
+
+在 benchmark 中，内部数据库可以提供独立 GT，用来判断抽取结果是否正确，但**不能作为模型输入**。
+
+### 第三步：建立可执行绑定
+
+系统为任务变量生成 `binding`：
+
+```text
+meeting_2.start_time
+    ↔ Calendar.event[id=event_72].start
+```
+
+`binding` 表示任务界面中的一个变量，具体对应真实软件中的什么状态，以及应通过什么 GUI 或工具操作读写。
+
+它在部署时必须可获得，因为系统真正执行用户操作需要它。
+
+### 第四步：用户直接操作任务变量
+
+用户拖动会议块，产生一个明确的结构化事件：
+
+```text
+move(meeting_2, Wednesday 14:00)
+```
+
+这里不需要模型猜用户是不是“想调整安排”。用户已经通过界面明确操作了对象和参数。
+
+### 第五步：编译为跨应用执行
+
+系统根据 binding 和当前状态产生候选执行方案：
+
+```text
+Calendar.update_event(event_72, start=Wednesday 14:00)
+Tasks.update_due(task_19, due=Wednesday 11:00)
+Drive.update_row(row_8, meeting_time=Wednesday 14:00)
+```
+
+某些操作可以走工具，某些必须走 GUI。MCP 是执行 backend，不是论文中的人本构念。
+
+### 第六步：在 sandbox 中执行
+
+执行器使用：
+
+- GUI 路径；
+- tool/MCP 路径；
+- 或两者混合。
+
+系统记录 before/after state、DOM、截图和 action trace。
+
+### 第七步：独立 verifier 评分
+
+benchmark 生成器提前持有 `expected_diff`：
+
+```text
+Calendar.event_72.start:
+  Wednesday 10:00 → Wednesday 14:00
+
+Tasks.task_19.due:
+  Wednesday 09:00 → Wednesday 11:00
+```
+
+`expected_diff` 是任务生成器根据环境状态和任务规则得到的预期变化，只存在于 benchmark verifier 中。
+
+它不是模型生成的，也不在推理时提供给模型。
+
+verifier 比较：
+
+- 预期变化是否发生；
+- 是否遗漏必要的关联变化；
+- 是否改变了无关状态；
+- 任务界面是否重新同步到真实状态。
+
+这样，训练标签、模型预测和最终验证三者是分离的。
+
+---
+
+# 四、这里为什么自然需要轻量训练
+
+规则能够解决：
+
+- 类型是否匹配；
+- ID 是否存在；
+- 时间是否合法；
+- 参数是否符合 schema；
+- 执行后状态是否满足确定性约束。
+
+规则难以稳定解决的是：
+
+> **一个任务层语义对象，究竟对应不同软件里的哪些对象、字段和操作？**
+
+例如，“负责人”可能对应：
+
+- Task app 中的 assignee；
+- Calendar 中的 organizer；
+- Drive 中的 file owner；
+- CRM 中的 account manager；
+- 文档中的一个普通文本字段。
+
+字段名字可能相似，但语义不同；字段名字可能完全不同，但产生相同任务后果。
+
+因此，适合训练的不是 allow/ask/block classifier，而是一个小型的 **binding critic**。
+
+## 训练阶段
+
+输入：
+
+- 当前任务描述；
+- screenshot / DOM；
+- task-state candidate；
+- tool schema 和具体参数；
+- 一个候选 binding；
+- 必要的历史轨迹。
+
+输出：
+
+- 这个 binding 是否能准确表达当前任务变量；
+- 或者对多个候选 binding 进行排序。
+
+标签生成方式：
+
+1. 在克隆的 sandbox 状态中应用一个测试编辑；
+2. 执行候选 binding；
+3. 用内部数据库比较实际 state diff 和预期 state diff；
+4. 完全匹配则为正例；
+5. 错字段、错实体、缺少关联变化或产生额外变化则为 hard negative。
+
+所以标签来自环境事实，不是 LLM 自评。
+
+可以做轻量 SFT、QLoRA，或者训练一个较小的 multimodal ranker。确定性约束仍由规则处理。
+
+## 验证阶段
+
+测试必须包含：
+
+- 同一个工具，因为参数和当前状态不同，对应不同 binding；
+- 不同工具，因为实际 effect 相同，对应相同任务语义；
+- tool 和字段重命名；
+- schema 描述改写；
+- 未见应用；
+- 未见任务组合；
+- 有工具和无工具两种执行路径；
+- GUI 观察与 tool 观察发生不完全一致的情况。
+
+这会直接排除“模型只是记住 Calendar.update_event”这种捷径。
+
+---
+
+# 五、自动评估应该怎样闭环
+
+这篇论文不应主要评估生成界面是否漂亮，而应评估它是不是一个正确的交互 runtime。
+
+核心自动指标可以压缩为六项：
+
+### 1. 任务状态覆盖率
+
+任务中真正需要操作的变量，有多少被临时界面表示出来。
+
+GT 来自参数化任务生成器。
+
+### 2. 投影准确率
+
+界面中的变量是否对应正确的真实应用实体和字段。
+
+### 3. 往返执行保真性
+
+用户改变界面变量后，真实软件是否产生预期 state diff。
+
+### 4. 非干扰性
+
+用户没有操作的任务状态和无关应用状态是否保持不变。
+
+### 5. 双向同步保真性
+
+真实应用被外部改变后，临时任务界面能否恢复到一致状态。
+
+### 6. 自动化收益
+
+在保持保真性的条件下：
+
+- 减少多少 GUI action；
+- 减少多少 application switch；
+- 减少多少执行时间；
+- 在未见应用和工具上保留多少收益。
+
+基线不需要很多，但必须有针对性：
+
+1. 原始多应用 GUI；
+2. 静态或一次性 GenUI，没有真实双向 binding；
+3. 只依赖 schema/type 的规则编译器；
+4. prompt-only VLM/LLM binding；
+5. 规则 + 训练 critic；
+6. 人工编写 binding 的上界。
+
+---
+
+# 六、用户研究在这篇论文中的正确位置
+
+用户研究不是用来标注 binding，也不是用来判断每一个 state diff 是否“符合价值”。
+
+在主要自动实验完成后，做一个 18–24 人的任务型实验即可。
+
+比较三种条件：
+
+- 原始多应用；
+- 静态聚合界面；
+- 可执行任务投影。
+
+用户研究验证的是待验证的人本假设：
+
+> 当任务状态不再按应用边界分割时，用户是否能更准确地理解、修改和检查一个跨应用任务？
+
+主要因变量：
+
+- 完成时间；
+- application switch 次数；
+- 最终状态错误；
+- 对当前任务状态问题的回答准确率；
+- 修改跨应用依赖关系的成功率；
+- workload；
+- 用户是否能正确解释一个界面操作最终改变了哪些任务对象。
+
+这里要明确区分三种性质：
+
+- **环境事实**：Calendar event、task due date、文件链接是否真的改变；
+- **研究操作化**：我们把界面与软件状态的一致程度定义为 executable projection fidelity；
+- **待验证假设**：这种任务投影能减少跨应用心智拼接，并提升任务状态理解。
+
+---
+
+# 七、这个方向与现有工作的硬边界
+
+不能把论文写成“我们提出一种动态任务 UI”。这个 claim 已经太弱。
+
+你需要明确写成：
+
+> **我们研究的不是如何生成一个界面，而是如何把多个正在运行的现有应用反向编译成一个可执行、双向同步、可自动验证的任务投影。**
+
+边界如下。
+
+### 与 DuetUI 的区别
+
+DuetUI 的重点是 agent scaffold 与用户直接操作之间的 bidirectional generation loop，主要服务于模糊意图和界面共同生成。你的核心对象应当是**既有软件的真实状态及其跨应用执行绑定**，而不是用户如何逐渐塑造一个生成界面。
+
+### 与 Mirage 的区别
+
+Mirage 依赖开发者预先声明可复用组件、语义描述和 typed schema，再由 LLM 选择和组合组件。你的系统不能要求开发者为每个任务提前设计 task component；最多只允许评估环境具有通用的 state adapter。
+
+### 与 Software as Content 的区别
+
+SaC 已经提出动态应用作为持续交互媒介，因此“artifact becomes medium”不能再作为主要 novelty。你的增量必须是：
+
+- arbitrary existing applications；
+- runtime reverse compilation；
+- cross-app executable binding；
+- deterministic round-trip verifier；
+- benchmark 和 OOD generalization。
+
+SaC 当前的公开版本也明确把 benchmark 和受控实证评价列为尚待解决的问题。turn313426view3
+
+### 与 agent-native interface 的区别
+
+From Imperative to Declarative 一类工作把人类 GUI 转换成更适合 agent 使用的声明式接口；AUI-Gym 则让 CUA 作为 judge，优化 agent 使用的生成 UI。它们的方向是 **software → agent-friendly interface**。你的方向是相反的：**agent 把既有软件重新组织成 human task-facing interface**。
+
+---
+
+# 八、为什么它能形成你的技术壁垒
+
+这个项目不是普通 GenUI 研究者做一个 React demo 就能复制的，因为真正困难的部分是：
+
+- multimodal GUI state extraction；
+- 跨页面和跨应用的 entity identity；
+- GUI trajectory 与 tool schema 对齐；
+- task-state graph；
+- executable binding；
+- GUI/tool hybrid execution；
+- snapshot、reset、replay；
+- state-diff verifier；
+- 未见工具和未见应用测试。
+
+这也是真实的技术难点。WindowsWorld 的 181 个专业任务中有 78% 天然涉及多个应用，现有领先 computer-use agents 在多应用任务上的成功率仍低于 21%。与此同时，MCPWorld 证明 white-box app、GUI/tool 双路径、内部状态查询和程序化 verifier 可以组成可复现的混合 CUA testbed。turn447866view8
+
+换句话说，你的壁垒不是“我们会生成一张更好的卡片”，而是：
+
+> **我们构建了一个可以把活的软件世界编译成新交互表面的 runtime。**
+
+---
+
+# 九、方向二：跨应用对象代数
+
+这是我认为最灵动、最适合做高质量 demo 的备选。
+
+## 核心问题
+
+> **GUI Agent 能否让原本困在不同应用里的对象，成为可以直接组合的交互操作数？**
+
+一句话：
+
+> 用户组合对象，不再描述流程。
+
+传统 direct manipulation 只在一个应用的局部对象空间中成立：
+
+- 在 Calendar 中拖会议；
+- 在 Trello 中拖卡片；
+- 在 Drive 中拖文件。
+
+但是一个真实任务中的对象并不属于单一应用。
+
+例如：
+
+- 一场会议；
+- 一个项目；
+- 一组参与人；
+- 一份文件；
+- 一个任务；
+- 一个地点。
+
+这些对象虽然语义相关，却被软件边界锁住了。
+
+## 具体交互
+
+用户在 Calendar 中把“客户 B 会议”抓取为一个临时 semantic capsule。
+
+`semantic capsule` 是一个由 agent 生成的、带稳定身份和类型的对象代理；它不是截图，也不是复制的文字。
+
+用户把它拖到 Tasks 中的“上海客户访问”项目上。
+
+系统显示有限的、typed operator：
+
+- `link to project`：把会议与项目建立关联；
+- `derive preparation tasks`：根据会议材料生成准备任务；
+- `assign attendees`：把参与者映射为项目成员；
+- `schedule dependencies`：为准备事项设置会议前截止时间。
+
+用户选择的是一个明确关系，而不是确认 agent 的某个风险动作。
+
+agent 随后把这个关系编译成多个真实应用状态变化。
+
+### 唯一核心构念
+
+**跨应用语义可组合性。**
+
+它表示两个来自不同应用的对象，是否能够通过一个明确操作符组合，并产生正确、可验证的跨应用状态变化。
+
+---
+
+## 自然的训练任务
+
+模型不负责猜“用户大概想干什么”。
+
+用户已经通过 source object、target object 和 operator 明确表达了操作。
+
+模型学习的是：
+
+> `schedule_dependencies(meeting, project)` 在当前几个应用中，具体对应哪些实体、字段和动作？
+
+输入包括：
+
+- source object 的 screenshot、DOM 和状态；
+- target object 的 screenshot、DOM 和状态；
+- 用户明确选择的 operator；
+- tool schema；
+- 当前 task context。
+
+输出是跨应用 binding 或执行计划。
+
+GT 同样来自 cloned sandbox 中的 deterministic state diff。
+
+OOD 测试可以做：
+
+- 同一个 operator 作用于不同对象类型；
+- 不同应用中语义相同的对象；
+- app、field 和 tool 重命名；
+- 两步和三步 operator composition；
+- source 来自 GUI、target 来自 tool observation，反之亦然。
+
+---
+
+## 为什么它没有退化成旧 direct manipulation
+
+DirectGPT 操作的是模型生成输出；TaskArtisan 允许用户用 sketch 和 voice 生成 task-specific widget，再把数据放入这些 widget；DragOn 关注 agent 对低层 drag action 的 grounding。它们都与这个方向相邻，但根据我检索到的公开工作，我没有看到一个系统把**任意现有应用中的 live objects 作为共同操作数，并将对象间关系编译成可验证的跨应用状态迁移**。这是一个需要在最终投稿前继续做系统性 novelty check 的判断，而不是绝对的不存在声明。
+
+### 不好的版本
+
+用户从 Calendar 拖一段文字到 Tasks，然后 agent 自动生成一张卡片。
+
+这只是语义增强 copy-paste。
+
+### 合格版本
+
+一个跨应用 operator：
+
+- 具有明确类型；
+- 可以作用在未见应用中的等价对象上；
+- 对应一组可验证 state effects；
+- 可以与其他 operator 组合；
+- 不依赖 app name 和 tool name 记忆；
+- 能显著压缩原本的跨应用过程。
+
+这个方向比完整 task compiler 更窄，九周内反而可能更稳。它有很强的 UIST 气质；若把研究问题落在“用户如何形成并操作跨应用任务关系”，也完全可以投 CHI。
+
+---
+
+# 十、方向三：可执行的平行软件世界
+
+这是三个方向里最“眼前一亮”的，但也是最高风险的。
+
+## 核心问题
+
+> **GUI Agent 能否把一个跨应用任务的多个可能未来，变成用户可以直接编辑、比较和合并的真实软件状态？**
+
+一句话：
+
+> 用户编辑未来，不再监督轨迹。
+
+还是前面的访问安排。
+
+系统不是生成三段文字：
+
+- 方案 A：最便宜；
+- 方案 B：最少日程干扰；
+- 方案 C：最短交通时间。
+
+而是把当前 sandbox 分叉为三个真实 branch。
+
+每个 branch 中都有独立的：
+
+- Calendar 状态；
+- Travel 状态；
+- Task 状态；
+- Drive 行程状态。
+
+用户进入方案 B，把方案 A 中的某个车次拖进来，再把方案 C 的人员安排合并进来。
+
+系统计算最小 semantic diff，产生一个新的可执行 branch。
+
+这时用户不是在“批准 agent 的方案”，而是在多个真实未来之间进行 world editing。
+
+---
+
+## 这个方向的硬技术闭环
+
+它至少需要：
+
+1. 环境 snapshot；
+2. 多 branch 隔离执行；
+3. branch state graph；
+4. 语义 state diff；
+5. branch 间对象 identity；
+6. 跨 branch edit 和 merge；
+7. 冲突检测；
+8. replay 和 deterministic verifier。
+
+ParallelEnv 已经证明可以用 immutable environment snapshot 和状态图支持 agent 在多个容器或 VM 中并行分叉执行，但它的目的主要是 agent 侧搜索和 test-time scaling，不是把 branch 暴露为人可直接编辑的软件世界。
+
+同时，simulation-in-the-loop 已经提出人应探索多条未来而非只看单一路径。因此你不能再声称“首次提出让用户看多个未来”。合格的 claim 必须是：
+
+> **首次把 CUA 的 counterfactual trajectories 实现为隔离、可重放、可编辑、可合并、由真实应用状态支持的软件分支。**
+
+turn135172view1
+
+## 自然的训练模块
+
+训练一个 **branch-set selector**。
+
+它不预测用户最终喜欢哪一个方案。
+
+它负责从大量可行 branch 中选出一个小集合，使这个集合：
+
+- 都可执行；
+- 不被其他方案完全支配；
+- 覆盖不同任务 trade-off；
+- 彼此不是近重复；
+- 能暴露不同约束和依赖关系。
+
+标签可以主要由环境生成：
+
+- task success；
+- constraint satisfaction；
+- Pareto dominance；
+- state-diff distance；
+- objective coverage；
+- branch replayability。
+
+少量人类数据只用来校准：哪些 state differences 对人有解释价值，不能直接用状态距离衡量。
+
+### 不好的版本
+
+生成三个 plan card，让用户点选一个。
+
+这是普通 recommender 或 plan comparison。
+
+### 合格版本
+
+每个选项都是一个真实的软件状态；用户可以进入、修改、复制局部对象和进行语义合并；verifier 可以证明分支隔离和 merge correctness。
+
+## 为什么暂时排第三
+
+它最有视觉冲击力，但需要同时解决 snapshot、branch execution、semantic diff、merge 和界面设计。
+
+在仅剩约八周的情况下，除非你已经有可快速克隆的 Web sandbox 和稳定 state engine，否则它很容易把项目拖成系统基础设施工程。
+
+更稳的做法是把它作为下一篇，或者只把任务限制在一个非常明确的组合优化领域，例如 scheduling/resource allocation，而不是泛化到所有跨应用任务。
+
+---
+
+# 十一、Agent 模拟用户可以用，但不能成为论文的新意
+
+你的直觉是对的：可以用 agent 模拟用户，加速方法迭代。
+
+但这不应该成为主贡献。
+
+GIDEA 已经用生成式 agent 复现了十项 human-assistant interaction study；Pare 把 active user simulator 放进 stateful digital applications。与此同时，RealUserSim 和 Lost in Simulation 等 2026 工作发现，LLM 用户模拟与真实用户之间仍存在明显 style、robustness 和跨模型偏差。
+
+最合理的定位是：
+
+> **模拟用户是风洞，不是乘客。**
+
+在你的项目里，它们可以：
+
+- 自动生成任务界面中的 edit sequence；
+- 压测同步、branch 和 merge；
+- 产生不同速度、局部性和操作顺序的用户轨迹；
+- 搜索系统容易产生失败的交互状态；
+- 进行大规模回归测试。
+
+它们不能用来证明：
+
+- 用户真正理解了界面；
+- 用户觉得这种任务表示自然；
+- 用户因此获得了更好的 task awareness；
+- 某个交互真的优于原软件。
+
+这些仍由最后的小规模真实用户实验回答。
+
+---
+
+# 十二、最终选择
+
+## 第一名：现有软件的可执行任务投影
+
+**最符合你的完整诉求。**
+
+- 一个清楚矛盾：用户操作任务，软件却强迫用户操作应用；
+- 一个核心构念：executable projection fidelity；
+- 一个自然训练对象：跨应用 semantic binding critic；
+- 环境可以自动产生大部分 GT；
+- GUI、DOM、截图、tool schema、state diff 都真正必要；
+- 可以完整落成 Web sandbox、compiler、runtime、verifier 和 benchmark；
+- 用户研究后置；
+- 工程项目在求职中非常强。
+
+它唯一的危险是和 GenUI/SaC 过近。解决方式不是换名字，而是把论文的重心牢牢压在：
+
+> **existing software、cross-app binding、bidirectional state synchronization、round-trip verification 和 OOD generalization。**
+
+## 第二名：跨应用对象代数
+
+**最灵动、最适合 demo，也最容易快速收窄。**
+
+它的论文主张不是“生成一个新界面”，而是：
+
+> GUI Agent 把 application-local direct manipulation 扩展成了 cross-application semantic manipulation。
+
+若完整 task compiler 在第一周发现范围过大，这应当是首选收缩方向。
+
+## 第三名：可执行的平行软件世界
+
+**最有“掀桌子”感，但不是当前最稳的 CHI 2027 选择。**
+
+它已经有 simulation-in-the-loop 的概念先行工作，必须靠真实环境分叉、可编辑 branch 和 merge correctness 拉开硬边界。
+
+---
+
+# 十三、我建议冻结的 CHI 2027 论文主线
+
+不要先起系统名，也不要把三个方向拼起来。
+
+先固定以下六句话：
+
+### 人本矛盾
+
+**用户的任务跨越多个应用，但现有交互要求用户自行维护一个分散的任务心智模型。**
+
+### 新交互
+
+**GUI Agent 将正在运行的多个应用编译为一个临时、可直接操作的任务投影。**
+
+### 核心技术问题
+
+**如何让任务投影中的编辑，与真实应用中的跨应用状态变化保持可验证的语义等价。**
+
+### 学习问题
+
+**模型学习任务实体、界面对象、工具参数和真实 effect 之间规则难以表达的 semantic binding。**
+
+### 自动评估
+
+**用 white-box Web sandbox 验证 projection coverage、round-trip fidelity、non-interference、synchronization 和 OOD generalization。**
+
+### 人本验证
+
+**验证用户能否更准确地理解和修改跨应用任务状态，而不是验证他们是否“信任 agent”。**
+
+---
+
+# 十四、九周内必须做的取舍
+
+最合理的初始范围是：
+
+- 一个任务族：协调与资源编排；
+- 四个简单 Web 应用；
+- 40–60 个基本任务模板；
+- 每个模板参数化为多个初始状态；
+- GUI 与 tool 双路径；
+- 一个规则系统；
+- 一个 prompt-only baseline；
+- 一个轻量 binding critic；
+- 一套 deterministic verifier；
+- 一个 18–24 人后置实验。
+
+不要加入：
+
+- parallel worlds；
+- skill reuse；
+- memory；
+- policy editor；
+- provenance system；
+- trust；
+- consent；
+- mode-selection optimization；
+- active perception 作为独立贡献；
+- arbitrary desktop generalization。
+
+前五天只做一个 kill test：
+
+> **一个用户在生成任务界面中改变一个变量，系统能否跨三个应用执行，并由独立 verifier 证明预期变化全部发生、无关变化没有发生、界面随后重新同步？**
+
+这个 round trip 能跑通，方向就成立。
+
+如果做不通，不应增加更多界面和模型；应立刻收缩成方向二的少量 typed cross-app operators。
+
+如果规则系统在 tool/app OOD 上已经和模型一样好，就删除训练，不要为了 tech-heavy 强行保留模型。
+
+如果只有为每个任务手工写 React 页面和 binding 才能运行，就说明你做的是定制 dashboard，不是 software compiler，应当停止。
+
+最终最值得追求的不是一个新的 agent 管理面板，而是这样一台机器：
+
+> **它把已有软件当成执行基底，把人的任务当成交互表面，并保证两者之间的每一次往返都真实、可执行、可验证。**
+
+这比“如何监督 agent”大了一个交互范式，也最能把你的 GUI Agent、混合执行、sandbox、轨迹、状态、模型和评估能力变成短期内难以复制的技术壁垒。
+
+
+【提问 轮数6】
+哦？所以你是混用了构建GUI的agent和操作GUI的CUA？不过我并不反感这种混用，甚至我感觉它可以在一个更宏观更高层级的视角下统一起来？但是我更擅长GUI automation CUA（UI-TARS，GUI-Owl，UI-Venus这类的），GenUI并不是我擅长的，但是agentic coding可以帮助我补全这个短板。我感觉这个很有意思啊？就是说给定一条任务，我们让agent生成一个跨应用甚至于说是跨设备的（任务特异的）统一界面，让人来操作这个高度简化的统一界面，我作为用户会觉得很激动啊，这把复杂的操作变成了玩？理想最简化情况下，我只要一直往右拖拽一个“任务进度条”就能完成一系列GUI操作并达到任务目的？先别管具体会面临的很多问题，就这个交互范式我作为用户感觉很有意思啊？这是极简风格的，也可以做的很花哨的UI，完全取决于用户的喜好？
+
+那其实相当于，我们可以在设备和人之间再形成一个agent的抽象层，这样agent甚至可以跨设备（类似于branch），我们只操作一个agent，把人的位置更加抬高了？
+
+是这样吗？我理解的有问题吗？先不考虑具体如何实现，就这个交互范式而言，你能泼下来最冷的冷水是什么（就是那种，靠着提高agent model或是framework的能力也解决不了的，该交互范式根本性存在的问题）？这可以帮助我确定这个交互范式对用户可见的“上限”最多能做到什么程度
+
+【回答内容 轮数6】
+你理解得基本对：这不是“一个会生成 UI 的 agent + 一个会操作 GUI 的 agent”，而是把两者统一成**人—任务—设备之间的语义运行时**。下面我只讨论它作为交互范式的天花板，不谈工程实现。
+
+【回答内容 轮数6】
+你的理解**基本正确**，而且这里确实存在一个比“GenUI + CUA”更高层的统一视角：
+
+> **Agent 不再只是使用软件，也不只是生成软件，而是在人的任务意图与现有数字世界之间，动态构造一个可操作的任务抽象层。**
+
+人在这个层里操作“会议、人员、预算、文件、进度、方案”这些任务对象；agent 向下把操作编译成不同应用、设备、GUI 和 API 中的动作，向上再把底层状态重新聚合成用户能够理解的任务状态。
+
+所以你可以说：
+
+- GenUI 负责生成**人可以操作的上层表示**；
+- CUA 负责执行**下层真实世界的状态迁移**；
+- agent runtime 负责维持两层之间的绑定、同步和编译。
+
+这确实会把人的位置抬高：用户不再是应用操作员，而更像任务导演。
+
+但这里有一盆非常冷、而且不是靠更强模型就能消除的冷水。
+
+# 最根本的问题：抽象得越成功，agent 越在替用户定义任务
+
+这个范式存在一个几乎无法消除的三难关系：
+
+1. **界面必须高度简化**，否则它没有价值；
+2. **界面必须保留未来可能重要的细节**，否则用户会失去选择；
+3. **agent 不应替用户决定什么细节重要**。
+
+三者很难同时满足。
+
+因为所谓“简化”，本质就是删除区别。
+
+而删除哪些区别，本身就是一种价值判断。
+
+例如，用户说：
+
+> 帮我安排下周去东京的出差。
+
+系统可以生成一个极简界面：
+
+```text
+成本低  ←────────●────────→  舒适度高
+                   [完成行程]
+```
+
+用户向右拖动，agent 自动完成：
+
+- 航班；
+- 酒店；
+- 日历；
+- 报销申请；
+- 与同事共享行程；
+- 机场交通。
+
+体验确实像玩游戏。
+
+但这个界面隐藏了大量区别：
+
+- 是否允许红眼航班；
+- 酒店是否支持取消；
+- 是否介意中转；
+- 是否需要积累某家航空公司的里程；
+- 是否愿意住得离客户近但离同事远；
+- 是否应该把具体行程共享给全部同事；
+- 是否需要为签证或公司差旅政策留出时间；
+- 是否愿意为了更早到达而牺牲星期日。
+
+关键问题不只是 agent 能否猜对。
+
+有些偏好在用户看到具体选项前，**根本还不存在**。
+
+用户可能直到看到“周日晚上出发”和“周一早上出发”两个真实方案，才意识到自己不愿意牺牲周日晚上的家庭时间。这不是模型从历史数据中恢复一个隐藏变量的问题，而是偏好在与具体情境交互时才被构造出来。
+
+所以最深层的限制是：
+
+> **任务抽象层无法只做中性的压缩。它在选择表示什么、隐藏什么时，必然参与定义用户正在完成的任务。**
+
+更强的模型可以减少明显错误，却不能消除这个结构性问题。
+
+---
+
+# 你的“进度条”为什么既令人兴奋，又可能是危险幻觉
+
+一直向右拖一个进度条，隐含了三个假设：
+
+1. 任务进度可以被压缩成一个标量；
+2. 任务是单调向前的；
+3. 越接近终点，状态越好。
+
+大量真实任务不满足这些条件。
+
+## 第一，任务通常不是一维的
+
+例如“组织一次产品发布”至少同时包含：
+
+- 完成度；
+- 风险；
+- 成本；
+- 覆盖范围；
+- 时间；
+- 可逆性；
+- 团队共识。
+
+你很难定义一个唯一的“向右”。
+
+某个动作可能：
+
+- 让任务更接近发布；
+- 同时提高风险；
+- 同时减少未来选择；
+- 同时增加其他人的工作。
+
+因此，进度不是一个数，而更像一个偏序状态空间。
+
+## 第二，很多任务不是单调执行，而是探索
+
+研究、设计、招聘、旅行规划、项目管理都可能经历：
+
+```text
+探索 → 发现问题 → 回退 → 重构目标 → 再探索
+```
+
+在这类任务中，“回退”不等于进度下降，甚至可能是最有价值的进展。
+
+如果界面坚持把所有事情表现为向右推进，它会制造一种假的确定性。
+
+## 第三，任务完成不完全由用户或 agent 控制
+
+例如：
+
+- 等待别人回复；
+- 等审批；
+- 等付款到账；
+- 等设备上线；
+- 等供应商确认库存。
+
+agent 可以完成自己负责的操作，但不能把社会世界和外部世界也变成一个确定性的状态机。
+
+因此，一个从 80% 推到 100% 的动画，可能只是表达“我们已经做完了自己能做的部分”，而不是任务真的完成了。
+
+所以进度条可以成为某些任务的极佳交互，但不能成为普遍的任务隐喻。
+
+---
+
+# 第二个根本问题：软件状态可以统一，社会意义不能完全统一
+
+跨应用、跨设备的技术状态可以被 agent 映射：
+
+- Calendar event；
+- Email thread；
+- Task object；
+- File permission；
+- Travel reservation。
+
+但同一个状态变化在不同环境中的社会含义可能完全不同。
+
+例如，“把 Alice 加入项目”可能意味着：
+
+- 给她分配一个任务；
+- 让她成为文件协作者；
+- 邀请她参加会议；
+- 把她加入一个保密项目；
+- 使她承担一个正式责任；
+- 仅仅让她接收通知。
+
+底层都可能表现为“add member”，但社会意义不等价。
+
+不存在一个天然、无争议的跨应用统一 ontology，可以把所有这些操作还原成同一个任务对象。
+
+agent 可以建立一个实用映射，但总会遇到两种结果：
+
+- 抽象层泄漏大量应用特有细节，逐渐重新变复杂；
+- 抽象层强行统一不同语义，开始丢失重要区别。
+
+因此，跨设备抽象的上限并不是“所有应用彻底消失”。
+
+更现实的状态是：
+
+> 大部分常规区别被吸收到任务层，但在语义不一致、责任变化或异常发生时，底层应用边界会重新出现。
+
+---
+
+# 第三个根本问题：操作变得像玩，不代表后果也变成了游戏
+
+你提到“把复杂操作变成玩”，这正是最令人兴奋的地方，但也是最危险的地方。
+
+交互摩擦过去承担了两个角色：
+
+- 一部分是无意义的操作负担；
+- 一部分是在提醒用户：某件事情具有真实后果。
+
+例如，过去订机票需要经历多个页面、输入信息、查看规则和最终确认。绝大部分流程确实可以压缩。
+
+但当购买一张不可退款机票，也像拖动一个积木一样轻盈时，会出现一个结构性错位：
+
+> **交互成本被压缩了，但经济、法律和社会责任没有被压缩。**
+
+这不只是“需要加一个确认按钮”。
+
+更深的问题是：交互形式会改变人对行为性质的直觉判断。
+
+- 拖动通常给人可撤销、局部、轻量的感觉；
+- 现实动作却可能是不可撤销、跨组织、具有金钱后果的。
+
+因此，花哨、游戏化、极简化不能完全由用户审美偏好决定。
+
+UI 不是皮肤。UI 的形式在暗示：
+
+- 这个动作有多重；
+- 是否可撤销；
+- 是否只是试探；
+- 是否会影响别人；
+- 用户此刻操作的是建议、草稿、模拟状态还是真实状态。
+
+这意味着一个成熟的任务抽象层不可能永远保持统一的“轻盈感”。它必须在某些时候主动改变交互质感。
+
+---
+
+# 第四个根本问题：用户摆脱了应用，但可能被困在 agent 的世界观里
+
+你说“人的位置更加抬高了”，这只对了一半。
+
+用户确实相对于应用被抬高：
+
+```text
+过去：
+人 → Calendar / Email / Drive / Jira
+
+现在：
+人 → 任务抽象层 → agent → 各种应用和设备
+```
+
+但同时，agent 成为了一个新的中心化中介。
+
+用户不再被 Calendar 的数据模型限制，却开始被 agent 选择的任务模型限制。
+
+例如 agent 将一次项目合作表示成：
+
+```text
+目标
+负责人
+截止时间
+依赖关系
+完成状态
+```
+
+但用户可能真正关心的是：
+
+```text
+谁真正承诺了什么
+谁只是口头表示支持
+哪些事项存在政治阻力
+哪些任务形式上完成但实际没有共识
+```
+
+这些东西可能无法直接从 GUI 状态中读取，也无法自然压缩成结构化任务变量。
+
+所以这个范式并不是消除了界面权力，而是转移了界面权力：
+
+> 从固定软件设计者，转移给动态生成任务表示的 agent。
+
+这不必然是坏事，但它意味着 agent abstraction layer 本身会成为一个新的“操作系统级权力中心”。
+
+---
+
+# 第五个根本问题：有些任务的价值正来自具体操作过程
+
+你的范式对“过程只是达到结果的摩擦”类任务极其强大。
+
+例如：
+
+- 安排行程；
+- 对齐日历；
+- 整理文件；
+- 配置设备；
+- 填写重复表格；
+- 跨系统同步信息。
+
+但不是所有过程都是冗余的。
+
+在一些任务中，操作过程本身就是思考：
+
+- 浏览大量候选人时，用户逐渐形成招聘标准；
+- 手动排列设计元素时，设计师逐渐发现审美结构；
+- 阅读不同来源时，研究者逐渐改变问题定义；
+- 在表格中清洗数据时，分析者逐渐理解数据异常；
+- 整理照片时，用户逐渐形成自己的叙事。
+
+如果 agent 直接生成“任务特异的最简界面”，它可能把原本支持反思、偶然发现和认知形成的过程一并消掉。
+
+这里也不是模型不够强。
+
+问题是：
+
+> agent 无法提前知道哪些看似低效的操作，实际上正在帮助用户形成判断。
+
+因此，这个范式最适合**执行型任务**，而不是所有认知型任务。
+
+---
+
+# 这个交互范式真正的可见上限
+
+它的上限不是：
+
+> 所有任务都被压缩成一根进度条，人永远不再看具体应用。
+
+更可信、也更强的上限是：
+
+> **Agent 为每个任务生成一个临时控制表面，把已经明确、稳定、可验证的部分压缩成极简直接操作；把尚未确定、需要比较、涉及其他人或会改变任务定义的部分保留为可展开的分支。**
+
+也就是说，一个理想系统会把任务分成三类内容。
+
+## 第一类：可以完全压缩的内容
+
+特征：
+
+- 目标状态明确；
+- 操作结果可自动验证；
+- 用户偏好稳定；
+- 影响范围有限；
+- 状态基本可逆。
+
+这些内容真的可以变成：
+
+- 滑块；
+- 拖拽；
+- 一个按钮；
+- 自动执行；
+- 跨设备同步。
+
+例如：“将这五个会议重新安排到所有人都空闲的时间，并更新会议室。”
+
+## 第二类：可以压缩，但必须保留几个显式维度
+
+特征：
+
+- 存在明确 trade-off；
+- 不同方案都合理；
+- 用户选择决定结果。
+
+这些内容适合变成：
+
+- 二维或三维控制空间；
+- 几个方案分支；
+- 可直接操作的任务对象；
+- 平行状态；
+- 局部拼接。
+
+例如出差规划中的：
+
+```text
+成本 ↔ 舒适度
+时间 ↔ 日程干扰
+灵活性 ↔ 价格
+```
+
+## 第三类：无法安全压缩成任务控制
+
+特征：
+
+- 用户偏好在过程中生成；
+- 涉及复杂社会关系；
+- 目标本身仍在变化；
+- 过程提供不可替代的认知价值；
+- 结果无法被机器状态完整表示。
+
+这些任务中，agent 最多能提供材料、视图和局部工具，不能诚实地把整个任务包装成“向右拖即可完成”。
+
+---
+
+# 最重要的边界判断
+
+你的设想绝不是新瓶装旧酒。它有可能是一种真正不同的交互范式：
+
+> 传统 GUI 是开发者预先决定人如何操作应用；
+> 对话 agent 是人用语言委托任务；
+> 你设想的是 agent 在运行时生成一个任务特异的直接操作空间，再把其中的操作编译回真实数字世界。
+
+但它不能承诺“消除复杂性”。
+
+它最多能做到：
+
+> **把机器产生的偶然复杂性吸收掉，把人类真正需要决定的复杂性重新显形。**
+
+这可能也是该范式最漂亮、最有原则性的定义。
+
+最冷的一句话是：
+
+> **Agent 可以替人消除操作，但不能替人消除世界中真实存在的多义性、权衡、社会关系和正在形成的偏好。任何声称可以把它们也压缩掉的统一界面，都只是在把决定藏起来。**
+
+因此，这条路线的真正研究高度，不是生成最少控件，而是回答：
+
+> **一个任务的哪些维度可以被安全编译掉，哪些维度必须继续作为人可见、可操作的自由度存在？**
+
+这会决定这种交互范式最终是一个真正的人类任务操作系统，还是一个非常漂亮、但替用户过早关闭可能性的自动化外壳。
+
+
+【提问 轮数7】
+哦？所以你是混用了构建GUI的agent和操作GUI的CUA？不过我并不反感这种混用，甚至我感觉它可以在一个更宏观更高层级的视角下统一起来？但是我更擅长GUI automation CUA（UI-TARS，GUI-Owl，UI-Venus这类的），GenUI并不是我擅长的，但是agentic coding可以帮助我补全这个短板。我感觉这个很有意思啊？就是说给定一条任务，我们让agent生成一个跨应用甚至于说是跨设备的（任务特异的）统一界面，让人来操作这个高度简化的统一界面，我作为用户会觉得很激动啊，这把复杂的操作变成了玩？理想最简化情况下，我只要一直往右拖拽一个“任务进度条”就能完成一系列GUI操作并达到任务目的？先别管具体会面临的很多问题，就这个交互范式我作为用户感觉很有意思啊？这是极简风格的，也可以做的很花哨的UI，完全取决于用户的喜好？
+
+那其实相当于，我们可以在设备和人之间再形成一个agent的抽象层，这样agent甚至可以跨设备（类似于branch），我们只操作一个agent，把人的位置更加抬高了？
+
+是这样吗？我理解的有问题吗？先不考虑具体如何实现，就这个交互范式而言，你能泼下来最冷的冷水是什么（就是那种，靠着提高agent model或是framework的能力也解决不了的，该交互范式根本性存在的问题）？这可以帮助我确定这个交互范式对用户可见的“上限”最多能做到什么程度
+
+【回答内容 轮数7】
+我先把这个范式准确地抽象出来，再专门找那些“不是模型更强就能解决”的结构性天花板。重点会放在：用户到底失去了什么、哪些任务不能被压缩、以及跨设备统一是否会引入不可消解的语义冲突。
+
+【回答内容 轮数7】
+最冷的一盆水已经很明确：**极简统一界面与语义完整性之间不是工程缺口，而是不可消除的压缩矛盾。**“一直向右拖”只有在任务本身接近一维时成立；任务一旦含有真实取舍、他人权利或路径依赖，进度条必然是在替用户偷偷决定。
+
+【回答内容 轮数7】
+## 核心判断
+
+**你的理解基本正确，而且这不是随意混用两类 agent，而是把它们放进了同一个更高层的闭环。**
+
+- **GenUI / coding agent**负责把任务状态投影成一个人能直接操作的新界面。
+- **CUA / MCP agent**负责把用户在新界面中的操作落实到原来的应用和设备。
+- 中间的 task model、binding 和 verifier 负责保证“两边表达的是同一件事”。
+
+它可以被理解为一个：
+
+> **位于人和现有数字设备之间的、任务级双向抽象层。**
+
+底层不再是“手机上的 Calendar、电脑上的 Jira、平板上的 Drive”，而是一个统一任务世界；用户操作的是“会议、人员、预算、截止时间、任务进度”，agent 再决定去哪个设备、哪个应用、走 GUI 还是 MCP 实现。
+
+现有 GenUI 工作已经开始生成任务导向界面，Software as Content 甚至把动态应用定义为持续的人机交互媒介；所以“agent 生成界面”本身已经不是空白。你真正可能推进的是：**让这种界面绑定到既有应用与设备的真实状态，成为可执行、双向同步、可验证的任务控制层。**turn331152view2
+
+不过，我要泼的最冷一盆水是：
+
+> **这个范式的终极上限不是“所有任务都变成一个按钮或一根进度条”，而是“系统能够自动找到这个任务可以被安全压缩到的最低维度”。**
+
+这两个目标差别非常大。
+
+---
+
+# 先澄清：你想象的这台机器是什么
+
+假设用户说：
+
+> 帮我完成下个月去上海参加会议的全部安排。
+
+底层世界包括：
+
+- 手机上的航班和酒店应用；
+- 公司电脑上的报销与差旅审批；
+- Calendar；
+- 邮件；
+- 微信或 Slack；
+- Drive 里的会议材料；
+- 手表上的出行提醒。
+
+传统交互要求用户在这些应用之间自己维护任务状态。
+
+你的系统可以生成一个临时界面：
+
+```text
+上海参会
+━━━━━━━━━━━━━━━━━━ 62%
+
+日期        8 月 12–15 日
+预算        ¥4,800 / ¥6,000
+航班        已选择，未出票
+酒店        已预留
+审批        等待经理
+材料        缺少最终版海报
+日程冲突    1 项
+```
+
+用户拖动日期，航班、酒店、请假、报销和会议日程随之重新计算。用户继续向右推进“任务进度”，系统逐步完成当前已确定、可安全执行的操作。
+
+这确实能让复杂操作产生一种“玩”的感觉。经典 direct manipulation 之所以有吸引力，正是因为对象可见、操作增量化、结果即时反馈，并且最好可逆。
+
+但这根进度条并不是任务本身。
+
+它只是底层巨大状态空间的一种投影。
+
+所有根本问题都从这里开始。
+
+---
+
+# 最冷的一盆水：不存在“既极简又完整”的通用任务界面
+
+假设真实软件世界包含状态集合 $W$，生成界面包含用户可见状态集合 $U$。
+
+为了简化，系统必须做一个映射：
+
+$$
+
+P: W \rightarrow U
+
+$$
+
+如果界面真的比底层世界简单很多，那么必然有：
+
+$$
+
+|U| \ll |W|
+
+$$
+
+也就是说，许多不同的真实世界状态会被压缩成同一个界面状态。
+
+例如，进度条都显示 70%，但底层可能分别是：
+
+- 航班已出票，酒店可免费取消；
+- 航班未出票，酒店不可取消；
+- 航班和酒店都完成，但公司审批可能拒绝；
+- 一切已完成，但会议日期刚被主办方修改；
+- 所有个人事项完成，但同事尚未同意替你值班。
+
+它们对用户下一步决策完全不同，却可能被统一表示为：
+
+```text
+进度：70%
+```
+
+**模型更强无法消除这个问题。**
+
+模型只有三种选择：
+
+1. 隐藏这些差异，保持界面极简，但用户无法基于差异做决定；
+2. 展示这些差异，保持语义完整，但界面不再极简；
+3. 猜测哪些差异对用户不重要，但这个猜测可能在未来某一步突然失效。
+
+因此，最根本的天花板是：
+
+> **任何抽象都会丢弃信息；任何不丢弃重要信息的抽象，都必须允许复杂性在必要时重新出现。**
+
+这不是当前模型能力不足，而是压缩本身的性质。
+
+---
+
+# 第二盆冷水：很多任务根本没有一条“向右”的进度轴
+
+一根进度条隐含了三个非常强的假设：
+
+1. 任务状态可以被全序排列；
+2. 每向右一步都更接近完成；
+3. 用户只需要决定前进多少，而不需要决定朝哪个方向前进。
+
+但大量任务的真实结构不是一条线，而是一个带分支的部分有序图。
+
+例如安排上海差旅时：
+
+```text
+便宜航班
+    ↘ 更早起床
+     ↘ 需要前一晚住宿
+
+直飞航班
+    ↘ 更贵
+     ↘ 减少错过会议风险
+
+晚一天返回
+    ↘ 酒店费用增加
+     ↘ 可以参加会后 workshop
+```
+
+这些方案不存在统一的“更靠右”。
+
+它们是 Pareto trade-off：每个方案在某些维度更好，在另一些维度更差。
+
+更强的 agent 可以更准确地计算这些取舍，却不能让取舍消失。除非系统偷偷替用户指定一个效用函数，例如：
+
+```text
+总成本权重 = 0.4
+时间权重 = 0.3
+舒适度权重 = 0.2
+风险权重 = 0.1
+```
+
+一旦这样做，进度条看似极简，实际上内部藏着一整套价值判断。
+
+所以：
+
+> **进度条适合单调任务；分支、地图、时间轴和多个控制旋钮适合多目标任务。**
+
+真正智能的系统不是永远生成最少的控件，而是判断当前任务最低需要几维才能不扭曲它。
+
+---
+
+# 第三盆冷水：任务没有唯一正确的“语义骨架”
+
+你可能设想 agent 从底层应用中抽取：
+
+```text
+person
+meeting
+deadline
+budget
+document
+progress
+```
+
+再生成统一界面。
+
+问题是，同一组软件状态可以对应完全不同的任务理解。
+
+例如用户说：
+
+> 帮我把项目拉回正轨。
+
+系统可以把任务建模成：
+
+### 模型 A：进度恢复
+
+```text
+减少延期
+解决 blocker
+重新分配任务
+```
+
+### 模型 B：团队健康
+
+```text
+降低成员过载
+恢复沟通
+避免继续加班
+```
+
+### 模型 C：客户关系
+
+```text
+保护核心交付
+及时沟通风险
+维持客户预期
+```
+
+三个任务界面都可能忠实反映底层数据，但它们突出的是不同现实。
+
+这里没有一个隐藏的、等待更强模型发现的“正确界面”。
+
+**界面选择哪些对象、变量和关系，本身就在定义问题。**
+
+这也是为什么你不能把它简单理解成：
+
+> agent 自动把复杂应用变简单。
+
+更准确的是：
+
+> agent 提出一种对当前任务的可操作解释。
+
+用户的位置确实可以被抬高，但前提是用户还能修改这种解释。否则权力并没有从应用交给用户，而是从应用开发者转移给了生成 task model 的 agent。
+
+---
+
+# 第四盆冷水：很多任务的过程本身就是价值，而不是可以删除的摩擦
+
+对一些任务，用户只关心最终状态：
+
+- 给这些文件统一改名；
+- 把会议移动到空闲时间；
+- 汇总三份表格；
+- 配置一组重复设置。
+
+这些任务非常适合被压缩。
+
+但另一些任务中，过程不是实现结果的成本，而是结果的一部分：
+
+- 学习一个新工具；
+- 创作和探索；
+- 阅读研究资料并形成判断；
+- 与同事谈判；
+- 设计产品方案；
+- 诊断一个复杂问题；
+- 建立和维护人际关系。
+
+假设 agent 把“阅读 20 篇论文并形成研究判断”变成：
+
+```text
+研究理解度 ━━━━━━━━━━ 100%
+```
+
+即使最终生成的笔记完美，用户也不一定真正获得了研究判断力。
+
+同样，团队冲突的任务目的可能不只是让 Calendar 和 TaskBoard 达到某个最终状态，而是让参与者彼此理解、形成承诺和重新协商责任。
+
+因此存在一个无法由模型能力解决的边界：
+
+> **当人的参与过程是价值的生产机制时，删除过程就是改变任务，而不是优化任务。**
+
+自动化研究反复发现，过度自动化可能把人的角色从生产转成事后评价、削弱技能，并让容易的部分更容易、困难的异常部分更难。turn917038academia39
+
+---
+
+# 第五盆冷水：跨设备不等于跨权力边界
+
+“一个 agent 控制所有设备”在技术图上很优雅，但真实世界中的设备和应用属于不同主体：
+
+- 你的个人手机；
+- 公司的受管电脑；
+- 客户的 CRM；
+- 同事的 Calendar；
+- 酒店和航空公司的系统；
+- 医疗设备；
+- 智能家居中其他家庭成员的账户。
+
+这些不只是不同 API。
+
+它们代表不同的：
+
+- 所有权；
+- 身份；
+- 权限；
+-责任；
+- 组织规则；
+- 法律关系。
+
+例如用户向右拖动“项目进度”，系统可能认为应该：
+
+- 移动同事的任务；
+- 延后客户交付；
+- 取消一场会议；
+- 将文件分享给承包商。
+
+从任务优化角度，它们可能是合理动作；但用户并不必然拥有替其他主体作出这些决定的权力。
+
+更强的模型可以识别冲突，却不能替合法主体消除冲突。
+
+因此跨设备抽象层最多可以统一：
+
+> **可见性、建议、模拟和用户确实拥有权限的执行。**
+
+它无法把多主体协商天然压缩成一个人的控制面板。否则“把人的位置抬高”实际上是在把其他人的位置压低。
+
+---
+
+# 第六盆冷水：不存在真正原子的“跨应用世界状态”
+
+你可以在自建 sandbox 中实现：
+
+```text
+begin transaction
+修改 Calendar
+修改 Jira
+修改 Drive
+commit
+```
+
+但独立真实系统通常不会共享同一个事务协议。
+
+执行过程中可能发生：
+
+1. Calendar 更新成功；
+2. Jira 更新成功；
+3. Drive 登录过期；
+4. 手机离线；
+5. 同事同时修改会议时间；
+6. 航班价格发生变化。
+
+此时不存在一个简单的“全部成功或全部失败”。
+
+系统可以使用：
+
+- 重试；
+- compensation；
+- rollback；
+- saga；
+- version check；
+- shadow execution；
+
+来降低问题，但无法在不受你控制的应用和物理设备之间凭空创造全局原子性。
+
+所以用户拖动统一界面的一个元素时，底层并不是一个连续、同步的动作，而是：
+
+> 一串可能部分完成、可能过时、可能不可逆的分布式操作。
+
+跨设备交互本来就需要处理设备组合、连接、分布和迁移；agent 可以动态承担这些工作，却无法消除设备生态的异质性。
+
+这意味着统一界面必须承认一种状态：
+
+```text
+部分实现 / 等待同步 / 需要补偿
+```
+
+如果为了极简而隐藏它，界面就在说谎。
+
+---
+
+# 第七盆冷水：越“魔法”，单次错误的爆炸半径越大
+
+传统 GUI 中，用户点错一个按钮，通常影响一个应用中的一个对象。
+
+在你的抽象层中，用户移动一个会议块，agent 可能同时：
+
+- 改 Calendar；
+- 重订交通；
+- 改报销预算；
+- 更新任务截止日期；
+- 通知同事；
+- 修改会议材料。
+
+这正是系统的魅力，也是它最大的结构性风险。
+
+**抽象层不仅压缩了操作数量，也压缩了错误传播距离。**
+
+即使未来模型达到 99.9% binding 准确率，剩余 0.1% 的错误也可能跨多个设备扩散。
+
+为防止这种情况，系统需要：
+
+- 即时反馈；
+- 可逆的增量操作；
+- 清楚显示受影响对象；
+- exception indicators；
+- 必要时展开到底层视图。
+
+但你会发现，每增加一层可理解性和恢复能力，界面就离“只有一条进度条”更远一步。
+
+这是第二个不可消除的张力：
+
+> **交互压缩率越高，单个操作的因果范围越大；因果范围越大，用户越需要结果可见性。**
+
+历史上的直接操作原则强调可见、增量和可逆，正是为了控制这种因果距离。
+
+---
+
+# 第八盆冷水：视觉风格可以任意，交互语法不能任意
+
+你说极简或花哨完全取决于用户喜好——**视觉层面基本成立，语义层面不成立。**
+
+可以个性化：
+
+- 配色；
+- 动画；
+- 密度；
+- 卡片或时间轴；
+- 信息展开程度；
+- 是否游戏化；
+- 声音和触觉反馈。
+
+但下面这些最好保持稳定：
+
+- 什么表示未执行、执行中、已完成；
+- 什么操作会产生外部效果；
+- 如何撤销；
+- 异常如何显示；
+- 对象如何选择；
+- 跨设备状态如何区分；
+- 同一个操作符的语义。
+
+如果每次任务都生成一套全新的交互语法，用户无法积累：
+
+- 肌肉记忆；
+- 操作预期；
+- 错误恢复经验；
+- 可迁移技能；
+- 与他人沟通这套系统的共同语言。
+
+自适应界面研究长期面对 predictability 和 comprehensibility 问题；近期动态应用工作也强调尽量增量更新稳定布局，而不是每轮彻底重生成，以保存用户的方向感。turn331152view2
+
+所以它可以做到：
+
+> **每个任务都有独特内容和布局。**
+
+但不应做到：
+
+> **每个任务都重新发明按钮、状态、撤销和因果关系。**
+
+---
+
+# 你真的把人的位置抬高了吗？
+
+**可以，但不是自动成立。**
+
+这套范式可以把人从三个层级中抬升：
+
+```text
+底层：动作层
+点击按钮、切换应用、复制粘贴
+
+中层：对象层
+移动会议、分配任务、修改预算
+
+高层：约束与结果层
+保留两个下午、预算不超限、不给同事增加负担
+```
+
+CUA 负责动作层，生成任务界面让用户工作在对象层甚至约束层。
+
+这确实是一个很漂亮的变化。
+
+但人在界面上“看得更高”，不一定拥有更多权力。
+
+如果 agent 决定：
+
+- 哪些变量可以看见；
+- 哪些取舍被隐藏；
+- 进度如何定义；
+- 什么算完成；
+- 哪些操作自动联动；
+
+那么用户可能只是被放到了一个更高、但更狭窄的平台上。
+
+所以真正的判断标准不是：
+
+> 用户点得更少了吗？
+
+而是：
+
+> 用户是否能在更高抽象层表达重要决定，同时仍能在必要时看到和修改被抽象层隐藏的假设？
+
+---
+
+# 这个范式对用户可见的真正上限
+
+我认为它最多会发展成三个层级，而不是一个万能界面。
+
+## 第一层：原生界面的替代品
+
+适用任务：
+
+- 结构化；
+- 状态完全数字化；
+- 变量少；
+- 目标稳定；
+- 单一主体拥有权限；
+- 操作大多可逆；
+- 路径不重要。
+
+例如：
+
+- 跨应用安排一次差旅；
+- 创建并配置一个项目；
+- 批量整理文件和任务；
+- 同步多个设备的设置；
+- 准备活动材料。
+
+在这里，临时统一界面可以几乎完全替代底层应用。
+
+甚至真的可以是一个进度条。
+
+但这根进度条严格来说表示的不是“完成百分比”，而是：
+
+> **沿着一条已经计算并验证过的单调执行路径，允许系统推进到哪个状态。**
+
+---
+
+## 第二层：任务驾驶舱
+
+适用任务：
+
+- 有数个重要取舍；
+- 包含跨应用依赖；
+- 仍然有明确结构；
+- 需要异常处理或少量协商。
+
+例如：
+
+- 团队资源重排；
+- 会议与项目协调；
+- 采购和预算分配；
+- 活动策划。
+
+这里的上限不是一根进度条，而是：
+
+- 3–7 个稳定任务变量；
+- 一个时间轴或关系图；
+- 少量分支方案；
+- 明确的异常和影响提示；
+- 必要时进入原生应用。
+
+它能消除应用切换，但不能消除决策复杂性。
+
+---
+
+## 第三层：任务透镜，而不是控制器
+
+适用任务：
+
+- 开放式探索；
+- 创造性工作；
+- 学习；
+- 高风险专业判断；
+- 多方谈判；
+- 过程本身有价值。
+
+系统可以：
+
+- 聚合相关状态；
+- 显示依赖；
+- 提供模拟；
+- 定位冲突；
+- 导航到正确应用；
+- 保存上下文。
+
+但不应试图把整个任务压缩为几个控件。
+
+在这一层，生成界面是帮助人观察复杂世界的**透镜**，不是替人操纵复杂世界的遥控器。
+
+---
+
+# 最终结论
+
+你的宏观理解是成立的：
+
+> **GenUI 和 CUA 可以被统一成一个双向的任务级 interaction runtime：CUA 把软件世界读进来，GenUI 把它投影成人可操作的任务世界，CUA 再把人的操作写回不同应用和设备。**
+
+跨设备也是自然延伸，但它与 branch 不完全相同：
+
+- 跨设备是同一个现实状态分布在不同执行端；
+- branch 是多个反事实状态同时存在。
+
+它们可以共享 snapshot、binding、execution 和 verifier 基础设施，但代表两种不同的“多世界”。
+
+最冷的结论则是：
+
+> **它无法把所有复杂性消灭，只能重新决定复杂性在哪里出现。**
+
+它能消灭：
+
+- 应用边界；
+- 重复操作；
+- 导航成本；
+- 参数搬运；
+- 大量机械流程。
+
+它不能消灭：
+
+- 真实取舍；
+- 合法分歧；
+- 多主体权力；
+- 过程价值；
+- 分布式不一致；
+- 抽象必然造成的信息损失。
+
+因此，这个范式最可信、也最令人激动的终局，不是：
+
+> 所有设备和任务都变成一根向右拖的进度条。
+
+而是：
+
+> **每个任务自动获得它能够诚实承受的最简单界面；简单任务是一根进度条，复杂任务是一间驾驶舱，而不可压缩的任务只得到一副更好的透镜。**
+
+这恰恰可以成为非常深的研究问题：不是研究 agent 能否生成更炫的 UI，而是研究它能否判断——**一个真实任务究竟可以被安全地压缩到什么程度。**
+
+
+【提问 轮数8】
+[文件不支持导出]
+那么这个可以实例化形成一个吸引用户的产品吗？可以和DuetUI拉开差距吗（请查看我们的txt）？可以进一步抽象化成一种交互范式吗？值得做吗？能投CHI吗？除了软件界面和framework搭建，还需要AI侧的contribution吗？比如训练一个模型？或是直接API调用最强的agent比如GPT和Claude？
+
+【回答内容 轮数8】
+我先给结论：
+
+**这个方向值得继续，而且比“提交边界”“监督”“修正保持”更有机会形成一个真正新的交互范式。**
+
+但必须非常小心：你现在描述的东西，其实已经跨过了三个不同层次：
+
+1. **产品幻想层**
+> “以后用户只操作一个 agent 界面，不碰 App。”
+
+2. **交互范式层**
+> “从 application-centric interaction 转向 agent-mediated task interaction。”
+
+3. **论文技术层**
+> “如何从跨应用执行状态自动编译一个可执行、可验证、可持续同步的任务空间。”
+
+前两个非常吸引人，第三个决定 CHI 能不能收。
+
+而且，我认为你现在真正抓到的点，比 DuetUI 更远一点。
+
+我看完你上传的 DuetUI 总结后，它的核心仍然是：
+
+> Agent 根据任务结构生成 UI，用户通过 UI 操作反馈意图，Agent 更新任务和界面。
+
+它的中心单位是：
+
+```
+Task
+ └── Subtask
+      └── Data
+```
+
+然后映射：
+
+```
+Navigation
+ └── Page
+      └── Component
+```
+
+它解决的是：
+
+> 用户不会写 prompt，所以让 UI 成为 prompt。
+
+你的想法实际上是在往另一个方向：
+
+> **UI 不再是 prompt 的替代，而是 Agent 执行世界的控制平面。**
+
+这两个不是一个东西。
+
+---
+
+# 1. 你的想法真正是什么？
+
+我觉得最准确的描述不是 GenUI。
+
+甚至不是 CUA。
+
+而是：
+
+# Agent-mediated Operating Layer
+
+或者：
+
+# Task-centric Computing Interface
+
+中文：
+
+> **任务中心计算层**
+
+现在计算机世界：
+
+```
+人
+ |
+应用 A
+应用 B
+应用 C
+应用 D
+```
+
+应用是人和机器交互的边界。
+
+
+你的未来：
+
+```
+                Gmail
+                  |
+Calendar ---- Agent Runtime ---- ERP
+                  |
+               Browser
+
+                  ↑
+
+              Human Task Space
+```
+
+应用退到后台。
+
+人不再操作：
+
+- Gmail
+- Excel
+- Jira
+- Photoshop
+- SAP
+
+人操作：
+
+- 客户关系
+- 项目状态
+- 出差计划
+- 产品方案
+- 财务目标
+
+
+这其实非常接近计算范式变化：
+
+以前：
+
+```
+file-centric computing
+```
+
+后来：
+
+```
+app-centric computing
+```
+
+现在：
+
+```
+task-centric computing
+```
+
+这就是它真正“掀桌子”的地方。
+
+---
+
+# 2. 这个能不能成为产品？
+
+我的答案：
+
+## 能，而且比普通 agent 更像产品。
+
+因为现在 Agent 最大的问题不是：
+
+> 不会做事。
+
+而是：
+
+> 用户不知道它正在做什么，也不知道应该如何参与。
+
+现在所有 agent 产品：
+
+Claude Computer Use：
+
+```
+用户：
+帮我订酒店
+
+Agent:
+打开浏览器
+点击...
+点击...
+```
+
+用户还是被迫进入：
+
+“观看机器人鼠标操作”的位置。
+
+
+你的范式：
+
+用户看到：
+
+```
+旅行任务
+
+███████░░░ 70%
+
+已完成:
+✓ 找到会议地点
+✓ 检查公司政策
+✓ 生成三个方案
+
+等待:
+○ 选择预算策略
+
+风险:
+! 周五航班超过预算
+```
+
+这更像：
+
+- 游戏控制台；
+- 项目驾驶舱；
+- 任务 IDE。
+
+
+我认为这比“聊天 + agent”更符合长期产品方向。
+
+---
+
+# 3. 但是最冷的问题来了：
+
+## 这个产品最大的敌人不是技术，而是：
+
+# 用户真的想操作任务，还是想要结果？
+
+这是第一个生死问题。
+
+---
+
+假设未来：
+
+你的系统：
+
+```
+任务驾驶舱
+```
+
+很好看：
+
+```
+项目推进:
+75%
+
+风险:
+2
+
+下一步:
+选择供应商
+```
+
+用户：
+
+“很好。”
+
+然后点击：
+
+“自动完成。”
+
+那么你的交互范式退化成：
+
+> 一个漂亮的 loading dashboard。
+
+因为绝大部分用户其实不想管理任务空间。
+
+他们想：
+
+```
+输入目标
+获得结果
+```
+
+所以你的系统必须证明：
+
+为什么用户需要这个中间层？
+
+---
+
+答案不能是：
+
+“因为 agent 不可靠。”
+
+这又回监督去了。
+
+更高级的答案应该是：
+
+> **因为现实任务不是单目标执行，而是持续变化的状态管理。**
+
+例如：
+
+“安排旅行”
+
+不是：
+
+```
+start → finish
+```
+
+而是：
+
+```
+需求变化
+价格变化
+朋友回复
+审批变化
+天气变化
+时间变化
+```
+
+用户不是监督 agent。
+
+用户是在维护一个持续存在的世界。
+
+这时候 task workspace 才有价值。
+
+---
+
+# 4. 第二个冷水：
+
+## 统一抽象可能比 App 更难学
+
+你现在觉得：
+
+App 很碎：
+
+```
+Calendar
+Email
+ERP
+Drive
+```
+
+统一起来更简单。
+
+但是：
+
+App 虽然碎，但它们有一个优势：
+
+> 每个应用已经经过几十年设计，形成稳定语义。
+
+例如：
+
+Excel：
+
+- cell
+- formula
+- sheet
+
+Calendar:
+
+- event
+- attendee
+- availability
+
+Photoshop:
+
+- layer
+- mask
+
+Jira:
+
+- issue
+- sprint
+
+
+而你的 Agent UI 必须创造：
+
+```
+任务对象
+```
+
+问题：
+
+什么是一个任务对象？
+
+例如：
+
+“客户会议”
+
+到底是什么？
+
+Calendar:
+
+```
+event
+```
+
+CRM:
+
+```
+account activity
+```
+
+Email:
+
+```
+conversation thread
+```
+
+Docs:
+
+```
+meeting notes
+```
+
+Slack:
+
+```
+channel message
+```
+
+Agent 必须创造一个新的抽象：
+
+```
+Customer Meeting Entity
+```
+
+然后绑定：
+
+```
+Calendar.event
+CRM.activity
+Slack.thread
+Doc.section
+```
+
+这其实是一个超级难的问题：
+
+# Semantic Entity Binding
+
+也就是：
+
+> 跨软件世界中的对象统一。
+
+
+这可能才是你的 AI contribution。
+
+---
+
+# 5. 所以需要训练模型吗？
+
+这里非常关键。
+
+我的判断：
+
+## 不要训练 GUI executor。
+
+完全没必要。
+
+UI-TARS、GUI-Owl、Claude Computer Use 这些已经在做。
+
+你的创新不是：
+
+“更会点击。”
+
+而是：
+
+“知道多个软件里的东西其实是同一个任务对象。”
+
+---
+
+真正需要模型的是：
+
+# Task World Compiler
+
+输入：
+
+```
+用户目标
+
++
+当前应用状态
+
++
+GUI observation
+
++
+tool schema
+
++
+execution trajectory
+```
+
+输出：
+
+```
+Task Graph
+```
+
+例如：
+
+输入：
+
+```
+用户：
+准备上海客户拜访
+```
+
+系统发现：
+
+Gmail:
+
+```
+邮件:
+客户确认 4/18 上午会议
+```
+
+Calendar:
+
+```
+event_123
+```
+
+Drive:
+
+```
+proposal.pdf
+```
+
+CRM:
+
+```
+customer=Tesla China
+```
+
+模型生成：
+
+```
+Entity:
+CustomerMeeting_001
+
+Bindings:
+Calendar:event_123
+CRM:activity_889
+Drive:file_77
+Email:thread_55
+
+Attributes:
+time
+location
+customer
+materials
+```
+
+这不是 UI 生成。
+
+这是：
+
+# Cross-Application Task Representation Learning
+
+这个我认为非常符合你的背景。
+
+---
+
+# 6. 那和 DuetUI 怎么拉开？
+
+这个必须非常明确。
+
+否则审稿人会说：
+
+> DuetUI already generates task interfaces.
+
+区别：
+
+## DuetUI
+
+问题：
+
+> 如何让用户通过 UI 表达任务需求？
+
+核心：
+
+```
+Task → Interface
+```
+
+---
+
+## 你的系统
+
+问题：
+
+> 如何让 Agent 把分散软件状态编译成人可操作的任务世界？
+
+核心：
+
+```
+Applications
++
+Trajectory
++
+State
+↓
+Task World
+↓
+Interactive Workspace
+```
+
+方向相反。
+
+DuetUI：
+
+```
+任务
+生成
+界面
+```
+
+你：
+
+```
+软件世界
+抽象
+任务界面
+```
+
+一个是 top-down generation。
+
+一个是 bottom-up compilation。
+
+---
+
+# 7. 那和 Software as Content 撞吗？
+
+这里要非常谨慎。
+
+因为它确实接近。
+
+Software as Content：
+
+核心：
+
+> application itself becomes a dynamic interaction medium.
+
+你的：
+
+> existing software is compiled into a task interaction layer.
+
+区别：
+
+SaC：
+
+```
+生成新的 agent-native application
+```
+
+你：
+
+```
+不改造原软件
+把已有软件重新投影
+```
+
+这是巨大区别。
+
+例如：
+
+SaC：
+
+Agent 创建：
+
+```
+Trip Planner App
+```
+
+你的：
+
+Agent 发现：
+
+已有：
+
+```
+Google Calendar
+Booking
+Expense
+Email
+Drive
+```
+
+然后生成：
+
+```
+Trip Task Space
+```
+
+并且修改：
+
+真实 Calendar
+真实 Booking
+真实 Expense
+
+所以你的关键词应该避免：
+
+- generative UI
+- dynamic application
+
+而强调：
+
+- existing software compilation
+- task-space abstraction
+- cross-application semantic binding
+- agent-mediated interaction layer
+
+---
+
+# 8. CHI 能不能投？
+
+我认为：
+
+## 可以。
+
+甚至比很多纯 agent safety 更像 CHI。
+
+因为 CHI 喜欢：
+
+> 新的人机关系。
+
+你的 claim 可以不是：
+
+“我们提高 agent accuracy。”
+
+而是：
+
+> GUI Agent enables a shift from application-centric interaction to task-centric interaction.
+
+这是交互范式贡献。
+
+
+但是必须有技术主体。
+
+否则会变成：
+
+“我们做了一个未来 UI。”
+
+危险。
+
+
+---
+
+# 9. AI contribution 要不要有？
+
+我的判断：
+
+## 必须有，但不是训练一个大模型。
+
+至少需要一个 AI 核心。
+
+我会建议：
+
+## Model 1（最推荐）
+
+### Task World Compiler
+
+学习：
+
+```
+Application state
+↓
+Task-level semantic representation
+```
+
+类似：
+
+```
+DOM + screenshot + trajectory
+        ↓
+semantic object graph
+```
+
+
+---
+
+## Model 2（可选）
+
+### Adaptive Interface Generator
+
+学习：
+
+```
+Task graph
++
+current trajectory state
+↓
+what should human see now?
+```
+
+例如：
+
+Agent 正在订票：
+
+不显示：
+
+```
+clicked button 27
+```
+
+显示：
+
+```
+等待：
+航班选择
+
+关键差异：
+价格 vs 时间
+```
+
+---
+
+## Model 3（不建议）
+
+UI code generation。
+
+原因：
+
+太容易变成：
+
+“又一个 GenUI”。
+
+---
+
+# 10. 如果只调用 GPT/Claude API，可以吗？
+
+可以做 prototype。
+
+但 CHI main contribution 不够。
+
+因为审稿人会问：
+
+> 你的系统为什么不是 GPT-5 + browser automation + React dashboard?
+
+所以至少需要一个不可替代模块：
+
+例如：
+
+```
+Task Compiler
+```
+
+哪怕是：
+
+- QLoRA；
+- VLM fine-tuning；
+- contrastive learning；
+- graph prediction model；
+
+都可以。
+
+重点不是模型大。
+
+重点：
+
+> 这个映射不能靠 prompt 完成。
+
+---
+
+# 11. 我认为最值得做的版本
+
+不要做：
+
+“万能 agent OS。”
+
+太大。
+
+
+做一个：
+
+## Task-Centric Workspace for Cross-Application GUI Agents
+
+范围：
+
+一个任务族。
+
+例如：
+
+### Knowledge work coordination
+
+包含：
+
+- Gmail
+- Calendar
+- Drive
+- Jira
+
+
+任务：
+
+- 安排会议
+- 推进项目
+- 准备发布
+
+
+系统：
+
+```
+Apps
+ ↓
+Task Compiler
+ ↓
+Task Workspace
+ ↓
+Human Interaction
+ ↓
+GUI/tool execution
+ ↓
+Verifier
+```
+
+---
+
+# 12. 最终一句判断
+
+我觉得你现在终于接近一个真正“不是新瓶装旧酒”的方向。
+
+之前：
+
+- trust
+- consent
+- oversight
+- correction
+
+都是：
+
+> Agent 已经存在，人如何适应 agent。
+
+而这个：
+
+> **Agent 出现以后，计算机应该不应该继续以 App 为组织单位？**
+
+这是更大的问题。
+
+
+如果成功，它不是：
+
+“一个更好的 GUI Agent。”
+
+而是：
+
+> **GUI Agent 让 application-centric computing 过渡到 task-centric computing 的一种可能路径。**
+
+这才是有“范式变化”味道的东西。
+
+但最大的风险也非常明确：
+
+**不要做成未来主义 UI demo。**
+
+必须把真正困难的 AI 问题钉死：
+
+> 如何从真实跨应用 GUI 世界中自动学习、构建并维护一个可执行的任务世界模型。
+
+如果你能把这个问题做成 benchmark + model + runtime + user study，这个项目的技术壁垒会比之前所有“agent supervision”方向强很多。
+
+【回答内容 轮数8】
+我觉得你这个问题其实到了**真正决定是否值得投入的节点**。
+
+前面讨论的是“这个想法有没有意思”，现在应该问三个更残酷的问题：
+
+1. **它能不能变成一个用户真的想用的产品？**
+2. **它和 DuetUI 的边界是否足够清楚？**
+3. **作为 CHI27 论文，它除了搭系统，还需要什么 AI 贡献？**
+
+我先给结论：
+
+> **可以成为产品，也可以抽象成新的交互范式；但论文不能卖“agent 生成 UI”，因为 DuetUI 已经占了这个叙事。你的真正机会不是 GenUI，而是“Agent as an interaction layer / Task Operating System”：让用户不再操作 App，而是操作 Agent 维护的任务世界。**
+
+不过，这个方向最大的危险也很明显：
+
+> 如果最后只是“把多个 App 卡片聚合到一个 dashboard”，会死得很惨。
+> 如果只是“LLM 生成一个漂亮界面”，会被 DuetUI、GenUI、Software-as-Content 吃掉。
+> 真正有价值的是：**这个界面必须成为跨应用任务状态的可执行抽象层。**
+
+下面展开。
+
+---
+
+# 1. 首先回答：这能不能成为吸引用户的产品？
+
+我的判断：
+
+**非常可能，而且比很多 agent 产品更符合普通用户直觉。**
+
+原因是它改变了一个非常深层的软件交互痛点：
+
+现在的软件世界：
+
+```
+用户
+ |
+ | 打开 App
+ |
+ +-- Gmail
+ |
+ +-- Calendar
+ |
+ +-- Slack
+ |
+ +-- Jira
+ |
+ +-- Drive
+ |
+ +-- ERP
+```
+
+软件组织方式是：
+
+> 按公司、功能、数据库边界组织。
+
+但是人的任务不是这样的。
+
+人想的是：
+
+> “我要完成一次客户拜访。”
+
+而不是：
+
+- 打开邮箱；
+- 查会议时间；
+- 去地图找地点；
+- 去差旅系统订票；
+- 去 Jira 建任务；
+- 去 Drive 找资料。
+
+
+所以你的核心产品价值不是：
+
+> AI 帮我操作软件。
+
+而是：
+
+> **软件终于按照人的任务，而不是公司的产品结构组织。**
+
+这是非常强的产品叙事。
+
+---
+
+## 一个普通用户版本
+
+今天：
+
+> “帮我准备明天的客户会议。”
+
+用户需要：
+
+- 查邮件；
+- 找附件；
+- 打开日历；
+- 看客户历史记录；
+- 更新 CRM；
+- 准备 PPT；
+- 发提醒。
+
+未来：
+
+打开 Agent Workspace：
+
+```
+客户会议：Apple Q3 Review
+
+状态：
+
+████████░░ 80%
+
+✓ 找到会议背景
+✓ 总结客户历史
+✓ 准备会议材料
+
+⚠ 两个问题：
+
+1.
+客户新增了一个问题
+[查看]
+
+2.
+PPT缺少最新销售数据
+[补充]
+
+下一步：
+
+[自动补齐]
+[自己修改]
+[让我看看来源]
+```
+
+这个东西用户确实可能喜欢。
+
+因为它不是“另一个聊天框”。
+
+它是：
+
+> 我的任务操作系统。
+
+---
+
+# 2. 但是：它和 DuetUI 撞不撞？
+
+这里需要非常精确。
+
+我看了你上传的 DuetUI 总结。它的核心是：
+
+> Agent 根据任务结构生成界面，用户通过操作界面反馈意图，Agent 根据反馈重新生成任务结构和界面。
+
+它的中心对象是：
+
+```
+Task Structure
+      ↓
+Interface Structure
+      ↓
+User Action
+      ↓
+Updated Task Understanding
+```
+
+fileciteturn0file0
+
+
+也就是说：
+
+DuetUI 解决的问题：
+
+> 用户不知道如何表达需求，Agent 如何通过动态界面帮助用户逐渐表达需求。
+
+它关注：
+
+- 意图形成；
+- UI 共创；
+- task decomposition；
+- interface generation。
+
+fileciteturn0file0
+
+
+---
+
+你的方向如果这样说：
+
+> “我们让 Agent 生成跨应用统一 UI。”
+
+那确实撞。
+
+因为 DuetUI 已经证明：
+
+> UI 可以成为 Agent 和人的共同语言。
+
+---
+
+但是，如果换成：
+
+> **我们研究如何把正在运行的跨应用 Agent 执行过程编译成一个持久任务空间，让用户直接操作任务状态，而不是操作应用。**
+
+区别巨大。
+
+---
+
+## 两者核心对象不同
+
+DuetUI：
+
+```
+用户目标
+ ↓
+任务拆解
+ ↓
+生成界面
+ ↓
+用户调整目标
+```
+
+你的：
+
+```
+用户目标
+ ↓
+Agent执行
+ ↓
+跨App状态变化
+ ↓
+形成任务世界模型
+ ↓
+生成任务控制层
+ ↓
+用户修改未来状态
+```
+
+一句话：
+
+DuetUI 是：
+
+> UI 是意图沟通媒介。
+
+你的：
+
+> UI 是 Agent 执行世界的操作媒介。
+
+---
+
+# 3. 我觉得你真正应该避免的词：GenUI
+
+因为 GenUI 会害你。
+
+为什么？
+
+因为别人听到：
+
+> Agent generated UI
+
+第一反应：
+
+- DuetUI；
+- Mirage；
+- dynamic apps；
+- Software as Content。
+
+然后你的贡献空间变小。
+
+你的关键词应该换。
+
+不是：
+
+❌ Generative UI
+
+而是：
+
+✅ Agentic Task Workspace
+
+或者：
+
+✅ Task Operating Layer
+
+或者：
+
+✅ Agent-mediated Computing Environment
+
+
+因为你的核心不是生成 UI。
+
+UI只是结果。
+
+真正的东西是：
+
+> Agent 在软件和人之间创造了一个新的计算层。
+
+---
+
+# 4. 可以抽象成新的交互范式吗？
+
+我觉得可以。
+
+而且这是最有趣的部分。
+
+现在的人机交互基本有几个范式：
+
+---
+
+## 第一代：Application-centric interaction
+
+80年代到现在：
+
+```
+用户
+ |
+App
+ |
+Database
+```
+
+人适应软件。
+
+---
+
+## 第二代：Command / Conversation interaction
+
+ChatGPT时代：
+
+```
+用户
+ |
+自然语言
+ |
+Agent
+ |
+工具
+```
+
+人通过语言表达意图。
+
+---
+
+## 第三代：Agent-mediated task interaction（你的方向）
+
+```
+             Apps
+              |
+              |
+用户 ←→ Agent Task Layer ←→ Tools
+              |
+              |
+           Devices
+```
+
+人的交互对象变成：
+
+> Agent维护的任务世界。
+
+不是：
+
+- 文件；
+- 页面；
+- App。
+
+而是：
+
+- 项目；
+- 目标；
+- 状态；
+- 约束；
+- 结果。
+
+---
+
+这其实类似：
+
+数据库出现以后，人不操作磁盘。
+
+操作系统出现以后，人不操作 CPU。
+
+浏览器出现以后，人不操作网络协议。
+
+你的想法：
+
+> 人不操作 App。
+
+App成为：
+
+> Agent执行环境。
+
+这个宏观叙事非常强。
+
+---
+
+# 5. 但是我要泼最大的冷水
+
+这个方向最大的根本问题：
+
+## 任务世界不是天然存在的
+
+你假设：
+
+> Agent 可以把现实任务抽象出来。
+
+但是：
+
+什么叫“客户会议准备”？
+
+可能包含：
+
+- 找资料；
+- 修改 PPT；
+- 联系客户；
+- 调整销售策略；
+- 安排团队。
+
+不同人理解不同。
+
+所以 Agent 不是发现一个隐藏真实世界。
+
+它是在创造一个任务模型。
+
+这个问题类似：
+
+> 操作系统是不是“发现”了文件？
+
+不是。
+
+文件系统是一个抽象。
+
+它很好用，但是有代价。
+
+---
+
+所以你的产品不能承诺：
+
+> 我给你真实世界。
+
+应该承诺：
+
+> 我给你一个可操作的任务视图。
+
+---
+
+# 6. 第二个冷水：极简 UI 的天花板
+
+你之前说：
+
+> 最理想是不是一个进度条？
+
+这里我要非常反对。
+
+进度条适合：
+
+```
+下载文件
+安装软件
+训练模型
+```
+
+因为目标单一。
+
+但是：
+
+“完成一次旅行”
+
+不是：
+
+```
+0 -------- 100
+```
+
+而是：
+
+```
+价格
+ ↑
+ |
+舒适 ---- 时间
+ |
+风险
+```
+
+很多任务是多目标优化。
+
+所以未来最好的界面可能不是：
+
+一个进度条。
+
+而是：
+
+> 一个动态任务地图。
+
+例如：
+
+```
+             成本
+              ↑
+
+    方案A       方案B
+
+
+时间 ←────────→ 舒适
+
+              方案C
+```
+
+Agent负责生成这个空间。
+
+人负责选择方向。
+
+---
+
+# 7. 那 CHI27 能不能投？
+
+我的判断：
+
+## 可以。
+
+但是不能写：
+
+> We generate interfaces for GUI agents.
+
+太弱。
+
+
+应该写：
+
+> We introduce a task-centric interaction layer that allows humans to operate agent-mediated workflows across existing applications without interacting with application-specific interfaces.
+
+这个像 CHI。
+
+---
+
+CHI 会问：
+
+## HCI问题是什么？
+
+不是：
+
+“怎么生成UI？”
+
+而是：
+
+> 当前软件以应用为中心，但人的任务跨应用。Agent是否可以成为新的任务级交互层？
+
+这是一个真正 HCI 问题。
+
+---
+
+# 8. 需要 AI contribution 吗？
+
+这里非常关键。
+
+我的答案：
+
+**需要，但是不要训练一个大模型。**
+
+你最不应该做：
+
+```
+输入任务
+输出UI
+```
+
+因为：
+
+- DuetUI；
+- GenUI；
+- GPT-4o；
+- Claude
+
+都可以。
+
+---
+
+你的 AI contribution 应该来自：
+
+## Task World Model
+
+或者：
+
+## Trajectory Compiler
+
+
+核心问题：
+
+Agent如何从：
+
+```
+GUI observations
++
+tool calls
++
+state changes
++
+execution history
+```
+
+构建：
+
+```
+Task Graph
+```
+
+例如：
+
+原始世界：
+
+```
+Calendar
+event123
+
+Slack
+message456
+
+Drive
+file789
+
+Jira
+ticket999
+```
+
+转换：
+
+```
+Client Meeting
+
+Participants:
+ Alice Bob
+
+Preparation:
+ PPT
+ Agenda
+ Budget
+
+Dependencies:
+ PPT before meeting
+ Budget after approval
+```
+
+这个映射很难。
+
+---
+
+# 9. 是否需要训练模型？
+
+我的建议：
+
+## 第一版不要训练。
+
+原因：
+
+这个项目最大风险不是模型能力。
+
+是：
+
+> 这个交互范式是否成立。
+
+所以先：
+
+GPT-5 / Claude / Gemini API
+
+作为 backbone。
+
+然后训练：
+
+## Task Abstraction Model
+
+作为第二贡献。
+
+---
+
+训练什么？
+
+不是：
+
+```
+text → UI
+```
+
+而是：
+
+```
+trajectory → task representation
+```
+
+例如：
+
+输入：
+
+```
+screenshot sequence
+DOM
+actions
+tool calls
+state diff
+```
+
+输出：
+
+```
+Task Entity Graph
+```
+
+比如：
+
+```
+entity:
+ meeting
+
+attributes:
+ time
+ participants
+ location
+
+dependencies:
+ slides -> meeting
+ travel -> location
+```
+
+---
+
+为什么需要训练？
+
+因为规则不够。
+
+同一个：
+
+```
+"Alex"
+```
+
+可能：
+
+- Calendar attendee
+- Jira owner
+- Slack mention
+
+模型需要理解语义角色。
+
+
+---
+
+# 10. 最强版本是什么？
+
+我觉得最有潜力的是：
+
+## Agentic Task Operating Layer
+
+系统：
+
+```
+             Human
+               |
+               |
+      Task Workspace
+               |
+    -------------------
+    |        |        |
+ Gmail    Jira    Calendar
+    |        |        |
+    -------------------
+             |
+          Agent Runtime
+```
+
+三个核心模块：
+
+---
+
+## 1. Task Compiler
+
+把：
+
+App state
+
+变成：
+
+Task state
+
+
+---
+
+## 2. Workspace Generator
+
+把：
+
+Task state
+
+变成人操作界面。
+
+
+---
+
+## 3. Execution Engine
+
+把：
+
+用户修改
+
+编译回：
+
+App actions。
+
+
+---
+
+# 11. 最终判断
+
+如果问：
+
+## “值得做吗？”
+
+我的答案：
+
+**值得，而且比提交边界、监督类问题更像一个新的交互范式。**
+
+---
+
+## “能不能和 DuetUI 拉开？”
+
+可以。
+
+但必须放弃：
+
+> 动态生成 UI
+
+这个叙事。
+
+改成：
+
+> 动态生成任务世界。
+
+---
+
+## “需要AI贡献吗？”
+
+需要。
+
+但不是：
+
+训练 UI generator。
+
+而是：
+
+> 学习从 heterogeneous GUI/tool trajectories 中抽象任务世界，并支持双向编译。
+
+---
+
+## “最强产品想象是什么？”
+
+不是：
+
+ChatGPT帮你点网页。
+
+而是：
+
+> 未来软件不再以 App 为入口，而以 Agent-maintained Task Space 为入口。
+
+用户打开：
+
+```
+My Work
+My Travel
+My Project
+My Life
+```
+
+不是：
+
+Gmail、
+Calendar、
+Excel。
+
+---
+
+我觉得这是目前你讨论过的所有方向里，**第一次真正接近“重新定义 GUI Agent 应该是什么”的方向。**
+
+但它最大的风险也很明确：
+
+> 如果做成“漂亮 dashboard”，必死；如果做成“task-space compiler + executable runtime”，才有可能成为 CHI + 求职双赢项目。
+
+【回答内容 轮数8】
+我先给一个明确判断：
+
+**这个方向有产品潜力，也有 CHI 潜力，但目前的“统一 Agent UI”叙事还不够锋利。真正值得做的不是“给 CUA 加一个漂亮前端”，而是提出一种新的交互范式：**
+
+> **从 Application-Centric Interaction（以应用为交互单位）转向 Task-State-Centric Interaction（以任务状态为交互单位）。**
+
+也就是：
+
+以前：
+
+```
+人
+ ↓
+App UI
+ ↓
+数据和操作
+```
+
+未来：
+
+```
+人
+ ↓
+Agent-generated Task World
+ ↓
+Agent
+ ↓
+多个 App / Device / API
+```
+
+这个想法非常有意思。
+
+但是我要先泼冷水：**它和 DuetUI 有一条很近的河流，你不能简单说“我们生成跨应用 UI，所以不同”。**
+
+我看完你提供的 DuetUI 材料后，我认为它的核心不是“step UI”，而是：
+
+> **Task structure ↔ Interface structure 的双向生成循环。**
+
+它维护：
+
+```
+Task
+ └─ Subtask
+     └─ Data
+
+Interface
+ └─ Page
+     └─ Component
+```
+
+然后用户操作 UI，Action History 回流给 TaskAgent，再生成新的 UI。fileciteturn0file0
+
+所以如果你的论文说：
+
+> “我们让 Agent 根据任务生成一个统一界面，用户不用操作多个 app。”
+
+审稿人很可能会说：
+
+> “这和 DuetUI 的 task-oriented interface generation 有什么本质区别？”
+
+你的突破点必须换。
+
+---
+
+# 一、先回答你的四个问题
+
+## 1. 能不能形成吸引用户的产品？
+
+答案：
+
+**可以，而且产品形态非常强。**
+
+甚至我认为这是目前 GUI Agent 最有希望产生“用户一眼觉得未来来了”的方向之一。
+
+原因是：
+
+现在 AI Agent 产品的问题不是不会执行。
+
+而是：
+
+> 用户不知道 Agent 正在一个什么世界里工作。
+
+例如今天的 CUA：
+
+用户：
+
+> 帮我安排一次商务旅行。
+
+Agent：
+
+打开 Gmail。
+
+搜索。
+
+打开 Calendar。
+
+打开 Expedia。
+
+填写。
+
+返回。
+
+用户感觉：
+
+“我把任务交给一个黑盒。”
+
+你的范式：
+
+用户看到：
+
+```
+Business Trip Workspace
+
+目的地:
+上海
+
+时间:
+Apr 18-20
+
+Budget:
+$1500
+
+Status:
+━━━━━━━━━━ 70%
+
+Pending:
+ Resolve calendar conflict
+ Choose flight
+ Submit reimbursement
+
+Impact:
+Calendar +2 events
+Email +1 draft
+Expense +1 report
+```
+
+用户不是监督 agent。
+
+用户是在操作一个“任务世界”。
+
+这个体验确实非常像：
+
+- 游戏中的任务面板；
+- CAD 中的设计空间；
+- 飞机驾驶舱；
+- 项目管理 cockpit。
+
+这是一个新的产品范式。
+
+---
+
+# 二、但是“统一 UI”不是最强卖点
+
+因为“统一 UI”听起来像：
+
+> dashboard。
+
+Dashboard 太旧。
+
+Salesforce、Notion、Linear、Jira 都在做。
+
+如果你的论文定位：
+
+> We aggregate multiple apps into one interface.
+
+危险。
+
+因为这只是：
+
+```
+App A
+App B
+App C
+
+↓
+
+Dashboard
+```
+
+这是 2000 年代企业软件。
+
+---
+
+真正有意思的是：
+
+## Agent 不只是聚合信息
+
+而是：
+
+## Agent 创建一个不存在的软件
+
+这是巨大区别。
+
+---
+
+传统软件：
+
+开发者决定：
+
+```
+Calendar UI
+Email UI
+ERP UI
+```
+
+用户适应软件。
+
+
+你的范式：
+
+任务出现：
+
+```
+安排一次跨公司会议
+```
+
+Agent 临时创造：
+
+```
+Meeting Coordination World
+```
+
+任务结束：
+
+这个 UI 消失。
+
+它不是 app。
+
+它是：
+
+> **ephemeral software（瞬时软件）**
+
+或者：
+
+> **task-native software**
+
+这个概念比 GenUI 更强。
+
+---
+
+# 三、和 DuetUI 的真正差异在哪里？
+
+我认为应该这样切。
+
+## DuetUI：
+
+核心问题：
+
+> 用户不知道如何表达需求，Agent 如何帮助用户逐渐形成任务需求？
+
+
+所以它关注：
+
+```
+intent formation
+```
+
+用户：
+
+“我想旅游。”
+
+Agent：
+
+生成旅行 UI。
+
+用户：
+
+点选。
+
+Agent：
+
+越来越理解偏好。
+
+
+它本质：
+
+**AI-assisted requirement elicitation**
+
+---
+
+你的方向：
+
+核心问题：
+
+> 用户不应该被迫理解软件世界，Agent 如何把跨应用执行世界重新投影成人可操作的任务世界？
+
+你的核心：
+
+```
+execution abstraction
+```
+
+不是：
+
+“我要什么？”
+
+而是：
+
+“这个任务现在到底发生在哪里？”
+
+---
+
+举例。
+
+DuetUI：
+
+用户：
+
+我要去日本旅游。
+
+生成：
+
+- 日期组件
+- 酒店组件
+- 景点组件
+
+重点：
+
+帮助用户定义旅行。
+
+
+你的：
+
+用户：
+
+我要去日本旅游。
+
+Agent 已经开始：
+
+- 查签证；
+- 看日历；
+- 查航班；
+- 查预算；
+- 看公司政策。
+
+然后生成：
+
+```
+Japan Trip World
+
+Visa:
+done
+
+Flight:
+3 options
+
+Calendar:
+conflict
+
+Budget:
+85%
+
+Documents:
+missing passport scan
+```
+
+重点：
+
+帮助用户理解和操控一个正在运行的任务。
+
+---
+
+一句话区别：
+
+> DuetUI 让 UI 帮助 Agent 理解人。
+>
+> 你的方向让 UI 帮助人理解 Agent 正在改变的世界。
+
+这个差异非常重要。
+
+---
+
+# 四、但是最大的冷水：不要把“trajectory”作为第一性对象
+
+这里我要反驳一下之前的说法。
+
+“Trajectory-centric”听起来技术味很强。
+
+但作为 HCI 核心构念，有风险。
+
+为什么？
+
+因为用户通常不想操作 trajectory。
+
+用户不关心：
+
+```
+Step 17:
+Clicked Gmail button
+Step 18:
+Called Calendar API
+Step 19:
+Parsed JSON
+```
+
+trajectory 是 agent 内部概念。
+
+如果你把它暴露给用户：
+
+很可能失败。
+
+---
+
+真正应该成为第一性对象的是：
+
+## Task State
+
+不是 trajectory。
+
+
+Trajectory 是：
+
+Agent 如何改变世界。
+
+Task State 是：
+
+世界现在是什么样。
+
+---
+
+所以我会改名：
+
+不要：
+
+> Trajectory-Centric Workspace
+
+
+更好：
+
+> **Task-State-Centric Agent Workspace**
+
+或者：
+
+> **Agent-Mediated Task World**
+
+---
+
+结构：
+
+```
+Underlying Apps
+
+Gmail
+Calendar
+Drive
+ERP
+
+
+        Agent
+
+        ↓
+
+
+Task World
+
+Meeting
+People
+Budget
+Deadline
+Risk
+Dependencies
+
+
+        ↓
+
+
+Human
+```
+
+---
+
+# 五、那 AI contribution 在哪里？
+
+这是关键。
+
+如果只是：
+
+- GPT API
+- Claude API
+- 生成 React UI
+
+不够。
+
+CHI 可以接受系统，但必须有技术核心。
+
+我认为你至少需要一个 AI contribution。
+
+但不是训练大模型。
+
+---
+
+## 不推荐：
+
+训练：
+
+“根据任务生成 UI”
+
+原因：
+
+DuetUI 已经做了。
+
+---
+
+## 推荐方向：
+
+训练：
+
+# Task World Compiler
+
+也就是：
+
+把：
+
+```
+App world
++
+GUI observations
++
+tool schemas
++
+execution traces
+
+↓
+
+Task world
+```
+
+---
+
+这是一个非常自然的 AI 问题。
+
+因为：
+
+软件世界：
+
+```
+Calendar:
+event.start_time
+
+Task:
+deadline
+
+Email:
+meeting confirmation
+```
+
+人类世界：
+
+```
+会议
+时间
+参与者
+地点
+状态
+```
+
+之间存在 semantic gap。
+
+---
+
+模型学习：
+
+## Semantic grounding
+
+输入：
+
+```
+Screenshot
+DOM
+Accessibility tree
+Tool schema
+Current trajectory
+Task description
+```
+
+输出：
+
+```
+Task Object Graph
+```
+
+例如：
+
+```json
+{
+ "object":"client_meeting",
+ "attributes":{
+   "time":"2026-04-18 10:00",
+   "participants":["Alice"],
+   "location":"Shanghai"
+ },
+ "bindings":[
+   {
+    "app":"calendar",
+    "field":"event.start"
+   },
+   {
+    "app":"email",
+    "field":"thread.date"
+   }
+ ]
+}
+```
+
+---
+
+这里为什么需要训练？
+
+因为规则无法写：
+
+```
+if field name == "owner":
+   map to person
+```
+
+现实：
+
+Slack:
+
+```
+channel_admin
+```
+
+Jira:
+
+```
+assignee
+```
+
+Drive:
+
+```
+owner
+```
+
+CRM:
+
+```
+account manager
+```
+
+可能表示：
+
+- 同一个概念；
+
+也可能不是。
+
+这是 semantic grounding。
+
+很适合 VLM / LLM critic。
+
+---
+
+# 六、第二个 AI contribution：UI generation 不做，而做 UI compression
+
+这个更有趣。
+
+问题：
+
+如果所有状态都显示：
+
+失败。
+
+因为又变成 dashboard。
+
+所以核心 AI 问题：
+
+> 当前任务中，人真正需要看到哪些状态？
+
+也就是：
+
+Task-aware information projection。
+
+
+输入：
+
+```
+Task State Graph
+Execution State
+User Role
+Current Goal
+```
+
+输出：
+
+```
+Visible Task Interface
+```
+
+例如：
+
+后台：
+
+200 个状态。
+
+用户看到：
+
+```
+Flight conflict
+Budget issue
+Missing document
+```
+
+不是：
+
+```
+17 API calls completed
+32 database records updated
+```
+
+---
+
+这也是你的核心产品魔法。
+
+不是生成 UI。
+
+而是：
+
+> 生成“这个任务此刻最小但足够的控制面”。
+
+---
+
+# 七、是否需要训练模型？还是 API 调 GPT/Claude？
+
+我的判断：
+
+## 第一版不要训练 foundation model。
+
+原因：
+
+你的贡献不是模型能力。
+
+你的贡献是：
+
+新的 agent-human interaction architecture。
+
+---
+
+但是：
+
+不能完全 API glue。
+
+最佳方案：
+
+## Hybrid
+
+### 使用 GPT/Claude：
+
+负责：
+
+- planning；
+- reasoning；
+- execution；
+- natural language.
+
+### 自己训练：
+
+一个小模型：
+
+Task World Compiler。
+
+例如：
+
+- QLoRA 7B VLM；
+- multimodal encoder + structured decoder；
+- ranking model。
+
+训练目标：
+
+不是：
+
+“完成任务”。
+
+而是：
+
+“把软件状态翻译成人类任务语义”。
+
+---
+
+这会非常符合你的背景：
+
+UI-TARS / GUI-Owl / UI-Venus。
+
+因为你的优势不是 GenUI。
+
+你的优势：
+
+```
+GUI perception
++
+trajectory understanding
++
+environment interaction
+```
+
+刚好变成：
+
+> Agent 如何理解软件世界，并重新组织成人类世界。
+
+---
+
+# 八、能投 CHI27 吗？
+
+我的判断：
+
+## 作为“生成统一 UI”：
+
+风险中等。
+
+可能被说：
+
+- DuetUI；
+- GenUI；
+- Software as Content。
+
+---
+
+## 作为：
+
+# Task-State-Centric Agent Workspace
+
+强很多。
+
+因为贡献变成：
+
+1. 新交互范式：
+
+从 app-centric → task-centric。
+
+
+2. 新 AI 问题：
+
+software world → task world compilation。
+
+
+3. 新系统：
+
+cross-app executable runtime。
+
+
+4. 新 benchmark：
+
+测试：
+
+- state grounding；
+- projection fidelity；
+- cross-app consistency；
+- task completion。
+
+
+5. 用户研究：
+
+证明：
+
+用户不是更喜欢 UI。
+
+而是：
+
+- 更少 app switching；
+- 更准确理解任务状态；
+- 更少认知负担；
+- 更容易发现问题。
+
+
+---
+
+# 九、我认为最强的论文标题方向
+
+不是：
+
+“Generating Unified Interfaces for GUI Agents”
+
+太像 DuetUI。
+
+
+更像：
+
+## Task Worlds: Compiling Existing Software into Agent-Mediated Interfaces for Cross-Application Work
+
+或者：
+
+## Beyond Apps: Task-State-Centric Interfaces for Computer-Use Agents
+
+
+一句话：
+
+> We introduce task worlds, a new interaction paradigm where GUI agents compile fragmented application states into executable, task-centric interfaces that allow humans to interact with outcomes rather than applications.
+
+---
+
+# 十、最后给最冷判断
+
+这个方向值得做。
+
+但必须避免三个坑：
+
+## 坑 1
+
+“我们生成漂亮 UI。”
+
+死。
+
+因为 GenUI 太拥挤。
+
+---
+
+## 坑 2
+
+“我们让用户不用看 agent。”
+
+危险。
+
+因为用户最终还是需要理解。
+
+---
+
+## 坑 3
+
+“我们统一所有软件。”
+
+过大。
+
+九周死。
+
+---
+
+真正的小而硬版本：
+
+不要做：
+
+```
+所有设备
+所有任务
+所有应用
+```
+
+做：
+
+```
+一个任务族：
+
+knowledge work coordination
+
+三个 Web apps:
+
+Calendar
+Email
+Task Manager
+
+
+一个核心能力:
+
+Task World Compilation
+
+
+一个核心指标:
+
+Task State Fidelity
+```
+
+---
+
+我认为这是目前你讨论过的方向里，**第一个真正有机会跳出“agent supervision / trust / consent / confirmation”范式的方向。**
+
+它不是研究：
+
+> 人如何控制 Agent。
+
+而是研究：
+
+> 当 Agent 成为软件世界和人的中间层后，人应该操作什么？
+
+这个问题本身就比“如何监督 Agent”高一个抽象层。
+
+【回答内容 轮数8】
+# 核心判断
+
+**值得做，而且确实可以形成一个吸引人的产品和新的交互范式。**
+
+但论文和产品都不能把核心写成：
+
+> Agent 根据任务生成一个统一界面。
+
+这已经与 DuetUI、Software as Content、A2UI 和新出现的 GenUI 模型明显重叠。DuetUI 已经把任务分解、动态界面和用户直接操作形成双向循环；Software as Content 已经明确提出动态软件可以成为人—Agent 的持续交互层；Google A2UI 正在把跨平台、Agent 生成界面做成开放协议；Macaron-A2UI 甚至已经训练专门的 GenUI 模型并建立 benchmark。
+
+你真正有机会占住的位置是：
+
+> **Agent 把多个正在运行的既有应用，实时编译成一个任务特异的、可直接操作的界面；用户修改这个界面，系统再把修改可靠地编译回真实应用。**
+
+不是单向的：
+
+```text
+任务 → 生成 UI
+```
+
+而是完整的：
+
+```text
+真实软件状态
+→ 任务级抽象
+→ 生成任务界面
+→ 用户直接操作
+→ 跨应用执行
+→ 验证真实状态
+→ 更新任务界面
+```
+
+最准确的产品形态可以叫 **Task Capsule，任务胶囊**；更高层的交互范式可以叫：
+
+# Task-Native Interaction
+# 任务原生交互
+
+其根本变化是：
+
+```text
+传统计算：
+应用是交互单位，任务由用户在多个应用间拼起来。
+
+任务原生计算：
+任务是交互单位，应用退化为 Agent 的执行后端。
+```
+
+这比“又一种生成式 UI”强得多。
+
+---
+
+# 一、它可以变成一个什么样的产品？
+
+我建议先不要做“万能 Agent 操作系统”，而是做一个非常清晰的产品原型：
+
+## 每条复杂任务自动生成一个持久的 Task Capsule
+
+例如用户说：
+
+> 帮我把产品 Beta 在 8 月 30 日之前发布，协调好测试、文档、会议和团队通知。
+
+相关状态分散在：
+
+- Calendar；
+- Jira 或 TaskBoard；
+- Drive；
+- Slack；
+- 测试管理系统；
+- 发布后台。
+
+系统生成的不是聊天回答，而是一个临时的小应用：
+
+```text
+Beta Launch · 72%
+
+目标日期        Aug 30
+关键阻塞        2
+测试完成        43 / 51
+文档状态        Needs review
+发布负责人      Alice
+团队通知        Drafted
+
+Launch readiness
+━━━━━━━━━━━━━━━●━━━━
+
+[Move launch date]
+[Resolve blockers]
+[Redistribute work]
+[Prepare release]
+```
+
+用户不需要打开 Jira、Calendar、Drive 和 Slack。
+
+他可以直接：
+
+- 把发布日期向后拖两天；
+- 把一个 blocker 移给另一名成员；
+- 打开“测试未完成”查看具体项目；
+- 将任务推进到下一阶段；
+- 选择一个发布策略。
+
+系统随后：
+
+1. 修改 Calendar 中的发布日期；
+2. 更新 TaskBoard 中依赖该日期的 deadline；
+3. 更新发布文档；
+4. 重算测试状态；
+5. 修改团队通知草稿；
+6. 将结果重新同步到 Task Capsule。
+
+## “一直向右拖进度条”如何做得不骗人？
+
+可以，但进度条不能表示一个虚构的“72%完成度”。
+
+它更适合作为：
+
+> **已经验证可执行的任务阶段控制器。**
+
+例如：
+
+```text
+Planning → Prepared → Validated → Ready → Launched
+```
+
+用户向右拖动到 `Validated`，意思不是“随便多做一些”，而是：
+
+> 完成从当前状态到 Validated 所需的、已经确定且可验证的所有操作。
+
+如果中间出现真实选择，界面局部展开：
+
+```text
+无法继续推进
+
+需要选择发布方式：
+○ 全量发布
+○ 10% 灰度
+○ 内部用户优先
+```
+
+选择完成后，界面重新收缩为进度控制。
+
+这种产品既可以非常极简，也可以做成视觉效果很强的空间化、游戏化界面。真正不能随意改变的不是视觉风格，而是任务对象、状态和操作语义。
+
+---
+
+# 二、它和 DuetUI 到底差在哪里？
+
+你们提供的 txt 对 DuetUI 的总结非常准确：DuetUI 的核心是，Agent 根据层级任务结构生成界面，用户再通过点击、筛选和拖动等行为表达不断浮现的意图；操作历史返回给 TaskAgent 和 InterfaceAgent，推动下一轮任务与界面共同生成。它主要证明了这种循环能降低 Prompt 沟通成本、提升界面和任务满意度；外部服务在原型中很大程度由 LLM 模拟。fileciteturn0file0 DuetUI 原文也将核心贡献定义为“人—Agent 共同生成任务界面”的双向上下文循环，并通过 12 人形成性研究和 24 人用户研究进行验证。
+
+两者真正的边界如下：
+
+| 问题 | DuetUI | 你的方向 |
+|---|---|---|
+| 人本问题 | 用户意图不完整，需要在操作界面过程中逐渐形成 | 用户的任务被多个应用割裂，需要自己维护跨应用状态 |
+| UI 从哪里来 | Task–Subtask–Data 任务分解 | 正在运行的多个应用、设备及其真实状态 |
+| 用户操作的主要作用 | 给 Agent 提供隐式意图反馈 | 直接修改真实任务状态 |
+| 底层服务 | 原型中大量模拟 | 必须真实执行 GUI、MCP 或 API |
+| 核心系统状态 | 任务树、界面树、操作历史 | Task-state graph、跨应用 binding、执行状态与真实 state diff |
+| 主要正确性 | 界面与任务需求是否匹配 | 用户操作是否在真实应用中产生等价效果 |
+| 主要评估 | UI/task GT 匹配、满意度、Prompt 成本 | round-trip fidelity、non-interference、跨应用一致性、task success |
+| 用户意图 | 经交互逐步浮现 | 可以一开始就明确，重点不是学习偏好 |
+| 原生应用的地位 | 服务和数据来源 | Agent 控制的执行后端 |
+
+## 绝对不能再 claim 的内容
+
+你不能写：
+
+- 首次让 Agent 生成 task-oriented UI；
+- 首次用界面作为人—Agent 共同媒介；
+- 首次让用户通过直接操作指导 Agent；
+- 首次让任务界面随着交互动态变化；
+- 首次生成跨平台 Agent UI。
+
+这些空间已经分别被 DuetUI、Software as Content、A2UI 和 Macaron-A2UI占据或逼近。turn899428academia26
+
+## 可以牢牢占住的 claim
+
+> **我们不是生成一个供用户表达需求的界面，而是把多个既有应用的实时状态反向编译成一个可执行任务界面，并保证用户操作与底层跨应用状态变化之间的双向语义等价。**
+
+四个词必须反复钉牢：
+
+```text
+existing applications
+live state
+executable binding
+round-trip verification
+```
+
+这四项同时存在时，才真正与 DuetUI 拉开距离。
+
+---
+
+# 三、它能进一步抽象成一种交互范式吗？
+
+可以，而且我认为这是这项工作最令人兴奋的部分。
+
+## 传统交互的三层结构
+
+过去的 GUI 模式是：
+
+```text
+用户意图
+↓
+用户理解应用
+↓
+用户执行低层操作
+↓
+应用改变状态
+```
+
+GUI Agent 的第一阶段只是把执行换成 Agent：
+
+```text
+用户意图
+↓
+Agent 理解应用
+↓
+Agent执行低层操作
+↓
+应用改变状态
+```
+
+但用户仍然通过自然语言下发一个任务，然后等待 Agent 返回结果。
+
+你所设想的新范式是：
+
+```text
+多个应用与设备的真实状态
+↓
+Agent 建立任务级表示
+↓
+生成一个任务特异的操作界面
+↓
+用户直接操作任务对象
+↓
+Agent 把任务操作编译回应用与设备
+```
+
+这意味着 Agent 不只是 automation layer，也不只是 conversational layer，而是：
+
+> **interaction virtualization layer，交互虚拟化层。**
+
+就像虚拟内存隐藏了物理存储位置，Task-Native Interaction 隐藏了任务状态具体存在于哪个应用、页面或设备。
+
+## 这个范式的基本交互单位
+
+它不再是：
+
+- 应用；
+- 页面；
+- Agent action；
+- Prompt turn；
+- 完整 trajectory。
+
+而是：
+
+> **一个持久、可操作、与真实软件状态绑定的任务对象。**
+
+一条 Task Capsule 至少包含四样东西：
+
+### 1. Task state
+
+当前任务在语义层处于什么状态。
+
+```text
+launch_date = Aug 30
+tests_remaining = 8
+documentation = needs_review
+```
+
+### 2. Projection
+
+这些状态应该以什么方式呈现给用户。
+
+可能是：
+
+- 进度轨；
+- 时间轴；
+- 看板；
+- 地图；
+- 关系图；
+- 少量控制旋钮。
+
+### 3. Binding
+
+每个任务变量实际对应哪些应用状态。
+
+```text
+launch_date
+↔ Calendar.release_event.start
+↔ TaskBoard.milestone.due
+↔ ReleasePortal.target_date
+```
+
+### 4. Actuation
+
+用户修改变量后，系统通过 GUI、MCP 或 API 改变真实环境。
+
+因此，完整循环是：
+
+```text
+Observe
+→ Abstract
+→ Project
+→ Manipulate
+→ Compile
+→ Execute
+→ Verify
+→ Reconcile
+```
+
+这已经是一种完整的交互范式，而不只是一个 UI framework。
+
+---
+
+# 四、值得做吗？
+
+## 我的判断：值得，而且比之前的提交边界、监督和修正方向更有上限
+
+它符合你的四个判断标准。
+
+### 1. 是否只有一个真实的人本矛盾？
+
+有：
+
+> **人按任务思考，但数字世界要求人按应用操作。**
+
+这是长期存在的问题，但 GUI Agent 第一次提供了一个原则上能够消除应用边界的执行层。
+
+这里不是把旧 dashboard 换成 LLM。
+
+以前无法通用实现，是因为系统没有能力：
+
+- 从任意 GUI 中读取状态；
+- 理解不同应用的对象；
+- 动态编排跨应用操作；
+- 为长尾软件补充缺失 API；
+- 在运行时生成任务特异的界面。
+
+CUA、MCP 和 coding agent 的组合改变了可实现性边界。
+
+### 2. 技术模块是否都是必需的？
+
+是。
+
+- CUA：读取和操作没有 API 的应用；
+- MCP/API：高效可靠地执行结构化操作；
+- GenUI/coding agent：生成任务特异的交互表面；
+- task-state model：统一跨应用语义；
+- binding：连接任务变量与软件状态；
+- sandbox：可重置地执行；
+- verifier：检查真实结果；
+- state reconciliation：保持两边同步。
+
+不是为了堆模块，而是缺一项就无法完成双向闭环。
+
+### 3. 自动评估是否自然？
+
+非常自然。
+
+你可以自动判断：
+
+- 界面变量是否绑定到了正确对象；
+- 用户修改后，预期状态是否全部改变；
+- 无关状态是否保持不变；
+- 不同应用是否保持一致；
+- 应用外部发生变化后，任务界面是否同步；
+- 比原始 GUI 减少多少操作和应用切换；
+- GUI、tool 和 hybrid backend 的差异。
+
+### 4. 能否形成强 GitHub 项目？
+
+非常适合。
+
+一个能够展示：
+
+```text
+输入任务
+→ 自动发现多个应用
+→ 生成任务胶囊
+→ 用户直接操作
+→ Agent跨应用执行
+→ verifier 显示实际 state diff
+```
+
+的开源项目，比单纯的 UI prototype 或模型 benchmark 更容易被产品、设计、算法和工程岗位同时理解。
+
+---
+
+# 五、它能投 CHI 吗？
+
+## 能，但论文必须研究“交互范式是否成立”，不能只展示 framework
+
+CHI 不要求每篇技术系统论文都提出新神经网络。官方指南明确承认技术贡献，并要求技术型工作做到可验证、可复现和可复制。
+
+一篇合格的 CHI 论文可以由四层贡献组成：
+
+## 贡献一：交互范式
+
+提出并界定：
+
+> Task-native interaction：人直接操作任务级状态，应用由 Agent 作为执行后端使用。
+
+这里要给出：
+
+- 哪些任务适合；
+- 哪些任务不适合；
+- 哪些抽象可以安全压缩；
+- 什么时候必须展开到底层应用；
+- 任务界面和应用界面如何共存。
+
+## 贡献二：可运行系统
+
+系统不是 Figma 原型，而是真正连接：
+
+- 3–4 个 Web sandbox 应用；
+- GUI 与 MCP 双路径；
+- live task-state graph；
+- generated task interface；
+- cross-app execution；
+- round-trip synchronization；
+- deterministic verifier。
+
+## 贡献三：自动化实验
+
+主体结果应报告：
+
+### Projection coverage
+
+任务需要的变量有多少被正确表示。
+
+### Binding accuracy
+
+变量是否绑定到正确的软件对象。
+
+### Round-trip fidelity
+
+用户编辑任务界面后，底层是否产生预期变化。
+
+### Non-interference
+
+没有要求改变的状态是否保持不变。
+
+### Reconciliation accuracy
+
+底层应用变化后，任务界面是否正确更新。
+
+### Interaction compression
+
+减少了多少点击、导航、应用切换和执行时间。
+
+### OOD generalization
+
+未见 app、未见字段名、未见 tool schema 和未见任务组合上能否工作。
+
+## 贡献四：任务型用户研究
+
+不研究“用户喜不喜欢漂亮 UI”，而研究：
+
+- 用户是否更准确理解整个跨应用任务状态；
+- 是否减少遗漏和跨应用不一致；
+- 是否能预测一次操作会影响哪些对象；
+- 是否更容易修改跨应用依赖；
+- 是否减少应用切换和重复状态检查；
+- 遇到异常时是否知道需要进入哪个原生应用。
+
+这会是一篇非常正统的 AI × HCI systems paper。
+
+CHI 2027 full paper 截止时间是 **2026 年 9 月 10 日 AoE**，而且技术论文强调可复现性，因此初稿必须严格限制在一个任务族和少量应用，不能现在就做真正通用的跨设备操作系统。
+
+---
+
+# 六、除了 UI 和 framework，必须有 AI contribution 吗？
+
+## 不必须训练，但必须有一个真正困难的计算问题
+
+这是两个不同的问题。
+
+### CHI 是否要求训练模型？
+
+不要求。
+
+DuetUI 本身也主要是交互范式、系统架构和实证研究，而不是新的模型架构。
+
+一个 train-free 系统如果：
+
+- 交互范式新；
+- runtime 真正运行；
+- benchmark 严格；
+- 自动实验扎实；
+- 用户研究回答清楚的人本问题；
+
+完全可以成为强 CHI 论文。
+
+### 你的论文是否最好包含 AI 技术贡献？
+
+**最好有，但不要训练通用 GenUI 模型。**
+
+Macaron-A2UI 已经使用大规模语料、LoRA 和强化学习训练专门生成 UI 的 30B、235B 和 754B 模型，并发布了 A2UI-Bench。你在有限时间里训练一个“根据任务输出按钮、滑块和卡片”的模型，很难形成优势。
+
+UI 渲染也正在被 A2UI 等开放协议工程化。A2UI 已经支持 Agent 声明跨平台的可更新界面，并通过不同客户端 renderer 显示。
+
+因此，你的 AI contribution 不应放在：
+
+```text
+task description → React UI
+```
+
+而应该放在：
+
+```text
+task semantics
++ GUI state
++ DOM
++ tool schema
++ candidate state effects
+→ executable cross-app binding
+```
+
+---
+
+# 七、最自然的模型：Cross-App Binding Critic
+
+## 它解决什么问题？
+
+假设任务界面中有一个变量：
+
+```text
+launch_date
+```
+
+候选绑定有：
+
+```text
+A. Calendar.event.start
+B. TaskBoard.milestone.due
+C. ReleasePortal.target_date
+D. Slack.message.scheduled_time
+```
+
+单独绑定一个字段不够。修改发布日期可能必须共同更新 A、B 和 C，但不能修改 D。
+
+模型需要判断：
+
+> 当前任务变量对应哪些真实状态，以及修改它后哪些关联状态必须同步变化。
+
+这不是简单规则，因为：
+
+- 同一个字段名在不同应用中语义不同；
+- 不同字段名可能表达相同语义；
+- 有的关系出现在 DOM；
+- 有的只在截图文本中；
+- 有的来自 tool schema；
+- 有的来自之前的 GUI trajectory；
+- 相同应用在不同任务中需要同步的字段也不同。
+
+## 训练阶段
+
+### 模型输入
+
+- 用户任务；
+- 任务变量；
+- 应用截图；
+- DOM/accessibility tree；
+- tool schema；
+- 候选 binding；
+- candidate execution 的 shadow state diff。
+
+### 训练标签如何得到？
+
+不是让 GPT 打标签。
+
+在 cloned sandbox 中：
+
+1. 任务生成器先定义预期 state diff；
+2. 候选 binding 在副本中执行；
+3. 环境读取真实 before/after state；
+4. 与预期 diff 比较；
+5. 完全表达目标且无额外变化的 binding 是正例；
+6. 漏改、错改和多改构成 hard negatives。
+
+标签来自环境事实。
+
+### 模型输出
+
+可以是：
+
+```text
+binding_score = 0.91
+missing_dependencies = [TaskBoard.milestone.due]
+extraneous_effects = []
+```
+
+它不是 allow/ask/block，也不根据应用名判断风险。
+
+## 验证阶段
+
+必须做：
+
+- 应用重命名；
+- 字段和 DOM schema 改写；
+- 同一字段在不同任务中不同标签；
+- 不同应用中同一语义；
+- 未见 app；
+- 未见任务组合；
+- GUI-only、tool-only 和 hybrid；
+- 去除截图、DOM、trajectory、schema 和 state diff 的消融。
+
+这会形成你希望的“训练确实必要”的证据。
+
+---
+
+# 八、该直接调用 GPT / Claude，还是自己训练？
+
+## 最推荐的路线：API-first，benchmark-first，最后决定是否训练
+
+不要一开始承诺训练。
+
+### 第一阶段：用最强 Agent API搭完整闭环
+
+可以直接使用 GPT、Claude 或其他强模型分别承担：
+
+- 任务分解；
+- task-state graph 生成；
+- UI specification 或代码生成；
+- GUI/MCP 执行规划；
+- 候选 binding 生成；
+- 状态解释。
+
+你的贡献不是“我们能调用更强模型”，而是：
+
+- 系统表示；
+- runtime；
+- benchmark；
+- verifier；
+- 交互机制；
+- end-to-end evaluation。
+
+### 第二阶段：建立强基线
+
+比较：
+
+1. 纯规则和类型匹配；
+2. prompt-only frontier model；
+3. frontier model + shadow execution；
+4. 人工 binding 上界；
+5. 规则 + 轻量训练 critic。
+
+### 第三阶段：只有出现明确缺口时训练
+
+假设结果是：
+
+```text
+Seen applications:
+prompt model = 92%
+
+Renamed schemas:
+prompt model = 71%
+
+Unseen applications:
+prompt model = 54%
+```
+
+而错误集中在：
+
+- 同名异义；
+- 异名同义；
+- 隐含依赖；
+- 多应用 effect propagation；
+
+这时训练一个 QLoRA critic 非常自然。
+
+反过来，若 frontier API + shadow verifier 已经足够稳定，就不要硬训练。把贡献写成：
+
+> 一种使用执行反馈发现和验证跨应用 binding 的 train-free compiler/runtime。
+
+这仍然是完整技术贡献。
+
+## 我最不建议的做法
+
+### 不好：训练一个通用 UI 生成器
+
+这个空间已经拥挤，而且很难超过大型 GenUI 模型。
+
+### 不好：只调用 GPT 生成 React，然后做用户研究
+
+这会被认为是一个漂亮的应用 demo，技术深度不足。
+
+### 不好：手工为每个任务写 React 页面
+
+这不是 task-native computing，而是定制 dashboard。
+
+### 不好：手工为每个应用写完所有 binding
+
+可以有通用 state adapter，但核心绑定必须至少部分自动发现，否则无法支撑“动态编译既有软件”的主张。
+
+### 不好：让同一个模型生成 binding，再由它判断 binding 是否正确
+
+最终 verifier 必须来自环境状态。
+
+---
+
+# 九、最合理的 CHI 2027 版本
+
+我建议把论文冻结成下面这一条主线：
+
+> **Can an agent compile live, fragmented application state into an executable task-specific interface that users can directly manipulate with verifiable cross-application effects?**
+
+中文：
+
+> **Agent 能否将分散在多个既有应用中的实时状态编译为一个可直接操作的任务特异界面，并保证用户操作产生可验证的跨应用效果？**
+
+初始范围只做：
+
+- 一个任务族：项目协调或活动组织；
+- 三个 Web 应用：Calendar、TaskBoard、Drive/Docs；
+- 可选第四个 Message app；
+- 30–50 个参数化任务模板；
+- 一个结构化组件 renderer；
+- 一个 CUA/MCP hybrid executor；
+- 一个 round-trip verifier；
+- 一个 prompt baseline；
+- 一个 binding critic；
+- 18–24 人后置用户研究。
+
+## 论文最强的一句主张
+
+不是：
+
+> Agent 可以为用户生成个性化 UI。
+
+而是：
+
+> **我们将 application-centric interaction 转变为 task-native interaction：用户操纵任务状态，Agent 负责在异质软件中实现并验证该状态。**
+
+---
+
+# 最终判断
+
+## 能形成产品吗？
+
+**能。**
+
+最有吸引力的产品不是“另一个聊天 Agent”，而是：
+
+> 每条复杂任务都会长出一个持续存在、跨设备同步、可直接操作的迷你应用。
+
+界面可以从一条进度轨开始，在必要时自动展开成时间轴、看板、地图或关系图。
+
+## 能和 DuetUI 拉开吗？
+
+**能，但只靠“跨应用统一 UI”不够。**
+
+必须依靠：
+
+- 真实既有应用；
+- live state；
+- executable binding；
+- bidirectional synchronization；
+- deterministic round-trip verification。
+
+DuetUI 主要共同生成任务与界面；你做的是**编译和操纵真实软件世界**。
+
+## 能成为交互范式吗？
+
+**能。**
+
+它代表从 application-centric computing 到 task-native computing 的转变：
+
+```text
+人使用应用完成任务
+→
+人操作任务，Agent 使用应用
+```
+
+## 值得做吗？
+
+**值得，是目前讨论过的方向中上限最高、产品感最强、也最符合你技术护城河的一个。**
+
+但要避免膨胀成通用 Agent OS。
+
+## 能投 CHI 吗？
+
+**能，而且有潜力成为一篇非常漂亮的 CHI systems paper。**
+
+前提是自动评估和真实执行是主体，用户研究验证用户对跨应用任务状态的理解与操作能力。
+
+## 必须训练模型吗？
+
+**不必须。**
+
+最好的策略是：
+
+> 先用最强 Agent API建立完整系统和 benchmark，再根据 OOD 实验决定是否训练一个轻量 cross-app binding critic。
+
+训练通用 UI generator 不值得；训练 GUI executor 也不值得。
+
+真正值得学习的是：
+
+> **任务级变量与异质应用状态之间的可执行语义映射。**
+
+这恰好既难以用静态规则完整表达，又能通过 sandbox 执行自动获得标签，同时真正需要你的 GUI trajectory、DOM、tool schema、state diff、CUA 和 verifier 基础设施。

@@ -1,0 +1,1761 @@
+[A2UI] Generative UI调研
+======================
+
+【提问 轮数1】
+[文件不支持导出]
+启动你完全的调研能力,给我查找跟我目前想要做的东西最相似的generative UI相关的工作。仔细调研CHI,CSCW,UIST,Ubicomp,IUI,CVPR,ICML,ECCV,ACL,AAAI,ICCV,ICLR,NIPS全部UI。所有你能想到的顶会都给我调研一遍,看看有没有什么跟我想做的比较相似的generative UI的工作。其实最主要的就是把目前的GUI agent以及generative UI一块给融合起来,形成一个任务级别导向的这样一个东西。这种跨应用的这种UI,以及对于不同应用、不同设备、不同窗口的一个使用GUI agent作为融合层的这样一个东西,相当于把最终执行的后端完全交付给GUI agent。调研这样的工作。请按级分列,哪些工作跟我现在找的这个岗位最像,然后哪些稍微有一点点像,还是需要警惕一点,哪些是一定要避开的。
+
+【回答内容 轮数1】
+I’ll structure the search around task-level generated UIs, cross-app/device orchestration, and GUI agents as execution backends, then rank overlaps, novelty gaps, and collision risks.
+
+【回答内容 轮数1】
+The search is converging: AOHP is the closest collision; DuetUI, Jelly, A2UI, and DOMSteer are adjacent. Novelty likely lies in live-state reverse compilation, bidirectional synchronization, and round-trip verification.
+
+【回答内容 轮数1】
+I’ll evaluate task-oriented temporary UIs backed by GUI agents across applications, devices, and windows, then map direct precedents, adjacent work, and novelty risks by similarity.
+
+【回答内容 轮数1】
+Early findings show task-generated UI is already crowded by DuetUI, Mirage, A2UI, Macaron-A2UI, and Google GenUI. Novelty likely hinges on live application state, bidirectional binding, and verifiable cross-app execution.
+
+【回答内容 轮数1】
+# 核心判断
+
+截至 **2026 年 7 月 15 日**，我没有发现一项已经公开的工作，完整做通了你现在描述的闭环：
+
+> **从多个正在运行的既有应用中读取实时状态与可操作能力，自动生成一个任务特异的统一界面；用户操作这个界面后，由 GUI/MCP/API hybrid agent 修改真实应用；系统再用独立 verifier 检查并同步回来。**
+
+但是，宏观叙事已经不能再写成：
+
+> “我们首次让用户操作任务，而不是操作应用。”
+
+因为这个位置同时受到三条研究脉络夹击：
+
+1. **Activity-Centric Computing** 很早就提出任务/活动而非应用是计算单位；
+2. **Generative UI** 已经在生成任务特异、可交互、持续演化的界面；
+3. **AOHP** 已经正面提出 agent-native OS、task-level service entrance，以及 API/CLI/structured UI/rendered GUI 的统一执行层。
+
+所以你真正有机会占住的，不是 **task-native interaction 这个愿景本身**，而是它目前缺失的、可以被严格技术化的核心：
+
+# **Verifiable Live Task Projection**
+## 将既有软件的实时世界，编译成可执行、可往返验证的任务投影
+
+你在 TXT 中已经把关键边界概括得很准确：不是普通的“任务→生成 UI”，而是“Applications + Trajectory + State → Task World → Interactive Workspace”，并强调 existing applications、live state、executable binding 和 round-trip verification。fileciteturn1file0
+
+我的调研结论是：
+
+> **这个区别是真实存在的，但仅用它区分 DuetUI 已经不够；必须再正面越过 AOHP。**
+
+---
+
+# 一、相似度最高：必须逐段对照的工作
+
+## S0 级：AOHP——目前最危险、最接近的正面撞车
+
+**AOHP: An Open-Source OS-Level Agent Harness for Personalized, Efficient and Secure Interaction**，2026 年 6 月公开的技术报告。
+
+它已经明确提出：
+
+- 传统 OS 是 app-centric；
+- agent 应成为用户意图和 app 操作之间的执行层；
+- OS 按用户意图生成 task-level service entrance；
+- 用户操作“shopping”这样的高层任务概念；
+- agent 在底层发现、组合并调用多个服务；
+- 底层同时支持 API、CLI、Structured UI 和 Rendered GUI；
+- 旧应用可以通过 GUI 继续参与；
+- 生成入口由 task schema、service graph 和 presentation policy 组成。turn800846view1turn800846view2turn311849view3
+
+这几乎已经说出了你的产品愿景：
+
+```text
+用户操作任务级入口
+        ↓
+Agent 组合多个服务
+        ↓
+API / CLI / structured UI / GUI 执行
+```
+
+它还在 30 个真实移动任务上报告了 agent 完成率、调用次数、时长、token 成本与安全行为；在其设置中，完成率从 54.44% 提升到 75.56%。
+
+### 你不能再声称
+
+- 首次从 app-centric 转向 agent-native/task-centric computing；
+- 首次由 OS agent 生成跨服务任务入口；
+- 首次让既有 GUI、API、CLI 共同成为 agent 后端；
+- 首次让用户只操作高层任务概念；
+- 首次让旧应用通过 GUI fallback 接入 agent-native 系统。
+
+### AOHP 尚未吃掉的空间
+
+从当前公开报告看，它的主要贡献是：
+
+> **OS 架构、服务组合、agent 执行效率和安全信息流。**
+
+它没有把下面这些问题作为核心研究对象和主要指标：
+
+1. 任务界面是不是从**多个应用当前的 live state**反向推导出来；
+2. 界面中的每个变量是否完整覆盖了所有与任务相关的真实状态；
+3. 用户修改一个任务变量后，底层多个应用是否产生语义等价的变化；
+4. 没有被用户要求改变的状态是否保持不变；
+5. 底层应用被外部人员修改后，生成界面是否能够重新调和；
+6. 一个简化界面到底遗漏了哪些会改变结果的重要区别；
+7. 用户是否能够通过该投影更准确地理解和操纵跨应用任务。
+
+这正是你的论文可以下刀的位置。
+
+### 最准确的区别
+
+| AOHP | 你的最佳版本 |
+|---|---|
+| Agent-native OS harness | Live-software task compiler |
+| 组合已发现的服务能力 | 从异质 GUI/tool/live state 中诱导任务世界 |
+| 生成 service entrance | 生成带有可验证状态绑定的任务投影 |
+| 主要验证 agent 是否完成任务、是否更高效 | 主要验证投影是否完整、执行是否等价、是否产生无关变化 |
+| OS 与安全架构为中心 | 人类可操作抽象的语义正确性为中心 |
+| Android/mobile 为主 | Web sandbox 起步，可扩展到跨窗口和跨设备 |
+
+**判断：90% 宏观相似；必须作为第一相关工作，而不是脚注。**
+
+---
+
+## S1 级：Software as Content——交互范式高度重叠
+
+**Software as Content: Dynamic Applications as the Human-Agent Interaction Layer** 提出：动态生成的 agentic application 不只是 agent 输出，而是人和 agent 之间持续、双向、状态化的交互媒介。用户通过 filters、selectors、buttons、sliders 等 affordances 操作 agent；界面会持续演化，并连接人、agent 与外部环境。
+
+它已经占据了下面的主张：
+
+> 生成的应用不是一次性回答，而是持续存在的人—Agent 交互层。
+
+### 与你的重合
+
+- 任务特异界面；
+- 持久状态；
+- 用户通过直接操作而不是纯语言控制 agent；
+- 界面随任务演化；
+- agentic application 作为人与环境之间的中介；
+- structured affordances 暴露可操作空间。
+
+### 仍然存在的区别
+
+Software as Content 的核心对象主要是：
+
+```text
+用户任务
+→ Agent 生成一个新的动态应用
+→ 人和 Agent 在这个应用内持续交互
+```
+
+你的核心对象应该是：
+
+```text
+多个既有应用的实时世界
+→ 反向编译出任务级状态模型
+→ 生成任务投影
+→ 用户编辑投影
+→ 修改原有应用
+→ 检查真实 state diff
+→ 重新同步投影
+```
+
+也就是说：
+
+> SaC 研究“动态软件如何成为交互媒介”；你必须研究“生成界面如何成为既有软件世界的可信投影”。
+
+如果你的系统只是给 agent 加一个持续演化的 mini-app，而没有 live binding、真实执行和 round-trip verifier，就会被 SaC 覆盖。
+
+**判断：交互范式相似度极高；技术闭环仍有明显差异。**
+
+---
+
+## S1 级：DuetUI——用户可操作任务界面的直接竞争者
+
+**DuetUI** 是正式发表于 **CHI 2026** 的工作。它提出 human-agent co-generation：agent 通过任务分解逐步搭建 task-oriented interface，用户对界面的直接操作又隐式指导 agent 下一步生成。它包含 12 人 formative study、技术消融和 24 人用户研究。turn147524view0
+
+### 它已经占据的空间
+
+- agent 根据复杂任务生成界面；
+- 任务界面随任务进展逐步展开；
+- 用户通过直接操作界面影响 agent；
+- 界面和任务形成 bidirectional context loop；
+- GUI Agent 与生成式任务界面被放进同一系统。
+
+### 你与它真正的区别
+
+DuetUI 的问题是：
+
+> 用户意图模糊或持续变化，怎样通过生成界面让用户和 agent 共同塑造任务？
+
+你的问题不能也是“让用户通过 UI 更容易表达偏好”。应改为：
+
+> 用户意图可以非常明确；真正的问题是任务状态分散在多个既有应用中，系统能否把这些实时状态完整地投影到一个任务界面，并保证修改可以无损地写回。
+
+简化成两个方向：
+
+```text
+DuetUI：
+Task decomposition
+→ Generated interface
+→ User manipulation
+→ Intent refinement
+```
+
+```text
+你的方向：
+Existing live software
+→ Task-state induction
+→ Executable projection
+→ User manipulation
+→ Cross-app execution
+→ State verification
+→ Reconciliation
+```
+
+### 绝对不要做的 DuetUI 版本
+
+- 从 prompt 分解 task/subtask/data；
+- 生成一套表单、按钮、卡片；
+- 用户调整后 agent 再继续；
+- 最后比较 prompt 次数、任务时长和 SUS；
+- 大量模拟后端，不修改真实软件。
+
+**判断：表面形态非常像，但研究问题可以被明确分开。**
+
+---
+
+# 二、A级：组件级撞车，需要警惕但不必放弃
+
+## A2UI 与 Macaron-A2UI：生成 UI 的协议和模型已快速成熟
+
+A2UI 已经是一个面向 agent-driven interfaces 的开放协议，支持 agent 生成可交互界面，并在 Web、移动和桌面端原生渲染，而不执行任意代码。
+
+2026 年 5 月的 **Macaron-A2UI** 更进一步，把 Generative UI 明确建模成学习问题：输入对话历史和用户消息，模型同时生成自然语言与可执行 A2UI action sequence；它构造了约 1.4 万条训练样本、A2UI-Bench，并通过 LoRA SFT 和 RL 训练模型。论文也明确说明，其关注的是 **assistant-side UI generation，而不是在既有界面上的 action execution**。
+
+### 对你的意义
+
+你没有必要把主要 AI contribution 放在：
+
+- HTML/CSS/React 生成；
+- A2UI JSON 合法性；
+- 什么时候显示 slider；
+- widget 类型选择；
+- UI 漂不漂亮；
+- UI schema instruction following。
+
+这一侧正在迅速商品化和模型化。
+
+你的 GenUI 部分完全可以：
+
+- 使用 A2UI 或受限组件 DSL；
+- 由最强 coding agent 生成 renderer；
+- 只使用有限的结构化组件；
+- 不训练通用 UI generator。
+
+### 你的训练对象应该在另一侧
+
+```text
+DOM / screenshot / app state / tool schema / trajectory
+                ↓
+typed task-state graph
+                ↓
+executable cross-app bindings
+```
+
+而不是：
+
+```text
+prompt → pretty UI
+```
+
+**判断：实现层高度相关；不应成为你的核心 novelty。**
+
+---
+
+## DOMSteer：现有 live interface 的动态改造
+
+2026 年 4 月的 **Beyond Chat and Clicks / DOMSteer** 提出 in-situ assistance：GUI agent 在不重建应用、不修改底层逻辑的情况下，通过浏览器层 DOM intervention 插入、修改或重组现有网页元素。
+
+它已经占据：
+
+- GUI agent 不只是点击界面，也可以重构界面；
+- 对 live web interface 做即时 transformation；
+- insert、mutate、recompose DOM；
+- 让复杂现有软件更容易理解和操作。
+
+### 你的剩余区别
+
+DOMSteer 主要是：
+
+> 在一个正在使用的界面内部，重新组织或增强现有 UI。
+
+你应该是：
+
+> 跨越多个应用，建立一个新的任务状态空间；生成界面不是原页面的重排，而是多个软件世界的统一投影。
+
+因此不能把贡献写成：
+
+> GUI agent 可以修改现有界面以帮助用户。
+
+必须写成：
+
+> GUI agent 可以从多个异质软件中编译出一个新的、跨应用的可执行任务空间。
+
+**判断：单应用/in-situ transformation 很近；跨应用状态语义仍有空间。**
+
+---
+
+## Google Generative UI 与 Generative Interfaces
+
+Google 2026 年公开的 Generative UI 工作已经可以针对任意 prompt 生成完整、定制化、可交互的页面、工具、游戏和应用，并已开始进入 Gemini 和 Search 产品；其主要评价是相对于文本、Markdown 和搜索页面的用户偏好。
+
+这意味着“每个任务长出一个漂亮 mini-app”已经不够成为研究贡献。
+
+### 你的区别不能只是
+
+- 更极简；
+- 更花哨；
+- 用户可选择风格；
+- 跨设备渲染；
+- 比聊天墙更好；
+- 为 event planning 生成一页应用。
+
+### 必须变成
+
+> 生成页面里的值不是 agent 编造的展示内容，而是对真实运行软件状态的引用；每个交互控件都必须有可执行、可验证的底层 binding。
+
+**判断：产品外观接近，软件语义不同。**
+
+---
+
+## MAESTRO：现有 GUI 的偏好驱动适配
+
+2026 年的 **MAESTRO** 在对话式 GUI 中维护用户偏好，并通过排序、过滤、增强、突出显示以及 workflow backtracking 来适配已有 GUI，用户研究规模为 33 人。
+
+它警告你不要把论文做成：
+
+> 根据用户偏好自动决定任务界面显示什么、怎样布局。
+
+因为这会滑向：
+
+- preference modeling；
+- adaptive interface；
+- human-heavy preference elicitation；
+- 单工作流 decision support。
+
+你可以把 styling 或 presentation preference 留在产品 demo，但不要作为研究主线。
+
+**判断：与个性化 UI 接近；与你的 live task compilation 不是正面冲突。**
+
+---
+
+# 三、B级：技术底座相似，但不会吃掉核心问题
+
+## GUI–MCP/API hybrid execution
+
+**MCPWorld** 已经提供 API、GUI 和 hybrid CUA 的容器化测试环境，并通过读取应用内部行为自动验证任务完成；**OSWorld-MCP** 加入了大量 desktop tools，专门评估 tool invocation、GUI operation 和路径选择；**ToolCUA** 则训练模型在 GUI action 和高层工具之间选择更优执行路径。turn237838view6turn237838view7
+
+因此：
+
+> “我们让 GUI agent 同时使用 MCP 和 GUI。”
+
+不能成为论文贡献。
+
+在你的系统里，hybrid backend 应该只是：
+
+- 有可靠 tool 时走 tool；
+- 无 tool 时使用 CUA；
+- 视觉信息必须读取时使用 GUI；
+- 执行完成后统一读取 state diff；
+- 所有路径服从同一个 task binding。
+
+它的作用是建立工程护城河，不是定义人本问题。
+
+---
+
+## CVPR / ICCV / ICML / ACL / EMNLP 的 GUI Agent 模型
+
+AI 顶会的相关工作主要集中在：
+
+- GUI 视觉 grounding；
+- 多步 planning；
+- screenshot-only computer control；
+- 跨平台 action model；
+- trajectory training；
+- app knowledge retrieval；
+- screen-stream understanding。
+
+代表性工作包括 ICML 2025 的 Aguvis、Cradle，CVPR 2025 的 ShowUI，ICCV 2025 的 UIPro，以及 EMNLP 2025 的 Retrieval-augmented GUI Agents、UI-Hawk 等。
+
+这些工作不会直接吃掉你的 HCI contribution，但它们意味着：
+
+> 训练一个更强的 executor、grounder 或 trajectory planner，不是你这篇论文最划算的投资。
+
+它们适合成为你系统的下层执行器和 baseline。
+
+---
+
+# 四、历史先驱：必须引用，否则“新范式”会被一票否决
+
+## Activity-Based / Activity-Centric Computing
+
+早在 CHI 2006，Activity-Based Computing 就明确提出：
+
+> 计算的基本单位不应再是文件或应用，而应是用户的 activity。
+
+它支持把应用和资源聚合为活动、暂停和恢复活动、把活动移动到其他计算机，以及在不同设备上继续工作。
+
+UIST 2021 的 **Tabs.do** 则用机器学习把浏览器标签组织成 task bundles，以减少 tab clutter 和 task switching 成本。
+
+### 这意味着你不能声称
+
+- 首次以任务而不是应用组织计算；
+- 首次把不同应用资源聚合成任务空间；
+- 首次跨设备迁移任务；
+- 首次用任务级 workspace 代替窗口和应用；
+- 首次提出 application-centric computing 的局限。
+
+### 你的时代增量是什么
+
+过去的 activity-centric systems 通常依赖：
+
+- 预先集成的资源类型；
+- 用户手工组织；
+- 应用合作；
+- 系统级 metadata；
+- 固定 workspace 表示。
+
+GUI Agent 带来的新能力是：
+
+> 对未被专门集成的长尾软件，运行时读取其 GUI、工具和状态，自动诱导任务语义，并将任务操作重新编译成真实软件动作。
+
+所以准确叙事不是：
+
+> 我们发明 task-centric computing。
+
+而是：
+
+> **GUI Agent 使 activity-centric computing 首次可能成为一个运行时软件编译问题，而不只是一个预设计的 workspace 问题。**
+
+---
+
+# 五、按会场的整体扫描结论
+
+| 社区 | 公开研究的主要覆盖 | 对你的结论 |
+|---|---|---|
+| **CHI / IUI / DIS** | DuetUI、Generative UI、SaC、MAESTRO、动态界面、human-agent co-generation | 交互范式竞争最强；不能再以“任务 UI”本身为新意 |
+| **UIST** | 任务/活动组织、malleable software、直接操作、界面重构 | 必须承认 task-centric 和 malleable interface 的历史 |
+| **CSCW / UbiComp** | activity-centric work、多设备工作空间、共享活动、跨设备连续性 | 跨设备和协作是自然延伸，但不适合做第一 novelty |
+| **CVPR / ICCV / ECCV** | GUI grounding、视觉 action model、screen understanding | 提供 executor；很少研究人面向的跨应用 task projection |
+| **ICML / ICLR / NeurIPS / AAAI** | general computer control、agent planning、tool use、environment/benchmark | 提供模型与优化方法；当前没有发现完整的人类任务界面往返闭环 |
+| **ACL / EMNLP** | GUI agent instruction following、retrieval、screen stream、tool/schema reasoning | 更接近语言—GUI 执行，不是 live task UI compilation |
+| **2026 arXiv / OpenReview / 工业协议** | AOHP、SaC、DOMSteer、Macaron-A2UI、A2UI、Google GenUI | **真正的直接威胁主要集中在这里，而且发展速度极快** |
+
+这里要强调：这是截至 2026 年 7 月 15 日对公开主会论文、官方项目和公开预印本的检索判断，不能排除尚未公开的 CHI 2027、UIST 2026 或 NeurIPS 2026 投稿。
+
+---
+
+# 六、你真正还能牢牢占住的研究问题
+
+## 不要把核心写成 Generative UI
+
+更准确的对象应该是：
+
+# **Task Projection Fidelity**
+## 任务投影保真度
+
+唯一的人本矛盾是：
+
+> **任务界面必须压缩应用复杂性才有价值；但压缩会删除区别，而被删除的区别可能改变真实任务结果。**
+
+这是一个比“界面好不好看”或者“用户喜不喜欢”更扎实的问题。
+
+---
+
+## 用一条任务说明
+
+用户说：
+
+> 把 Beta 发布日期从 8 月 30 日调整到 9 月 3 日，并确保测试、文档和团队计划保持一致。
+
+真实状态分散在：
+
+- Calendar：发布会议；
+- TaskBoard：测试和文档 deadline；
+- Drive：发布计划文档；
+- Message App：团队通知草稿。
+
+系统生成一个任务界面：
+
+```text
+Beta Release
+
+发布日期          Sep 3
+测试截止          Sep 1
+文档截止          Sep 2
+未解决阻塞        2
+负责人            Alice
+团队通知          Draft
+
+[发布日期滑块]
+[依赖关系视图]
+[应用变更预览]
+```
+
+用户把发布日期拖到 9 月 5 日。
+
+系统必须证明三件事：
+
+### 1. Coverage：界面没有漏掉重要变量
+
+例如 TaskBoard 中存在一个必须在发布前两天完成的合规审核。
+
+若界面完全没有表示它，那么“极简化”就是不诚实的。
+
+### 2. Binding：用户操作绑定到了正确的软件对象
+
+发布日期变化必须对应：
+
+- 正确 Calendar event；
+- 正确 project milestone；
+- 正确发布计划文档；
+- 正确通知草稿。
+
+不是仅仅修改 Task Capsule 中的一份副本。
+
+### 3. Round-trip fidelity：真实应用和投影保持等价
+
+执行后，独立 verifier 读取底层状态：
+
+```text
+Calendar.release_date = Sep 5
+TaskBoard.test_deadline = Sep 3
+Drive.release_plan.date = Sep 5
+Message.draft.date = Sep 5
+```
+
+同时检查：
+
+```text
+unrelated_customer_meeting = unchanged
+unrelated_project_deadlines = unchanged
+```
+
+随后同事在 TaskBoard 中把测试截止时间改成 Sep 4，任务界面必须：
+
+- 更新自己的状态；
+- 检测发布前只剩一天；
+- 明确标出冲突；
+- 而不是继续显示旧值。
+
+这一步叫 **reconciliation**：底层世界变化后，任务投影重新与真实世界对齐。
+
+---
+
+# 七、最自然的 AI contribution
+
+## Task-State and Binding Compiler
+
+模型不是生成 React 代码，而是学习：
+
+```text
+原始任务
++
+截图 / DOM / accessibility tree
++
+tool schema 与参数
++
+应用内可观察状态
++
+已有操作轨迹
+        ↓
+跨应用 typed task graph
+```
+
+输出例如：
+
+```json
+{
+  "entity": "beta_release",
+  "variable": "release_date",
+  "current_value": "2026-08-30",
+  "dependencies": [
+    "testing.deadline",
+    "documentation.deadline",
+    "announcement.date"
+  ],
+  "bindings": [
+    "calendar.event_17.start_time",
+    "taskboard.milestone_4.deadline",
+    "drive.document_12.release_date"
+  ]
+}
+```
+
+这些字段的含义分别是：
+
+- `entity`：多个应用中指向的同一个现实任务对象；
+- `variable`：用户可以直接操纵的任务级变量；
+- `current_value`：从应用当前真实状态聚合出的值；
+- `dependencies`：这个变量改变后需要同步调整的任务关系；
+- `bindings`：它具体绑定到哪些底层软件对象。
+
+### 训练标签从哪里来
+
+在你控制的 Web sandbox 中：
+
+- 应用数据库提供真实对象与状态；
+- 参数化任务生成器提供跨应用 entity 对应关系；
+- 应用 contract 提供字段依赖；
+- 执行前后 state diff 提供真实 effect；
+- 这些都不需要逐条由人或 LLM 主观打标。
+
+### 模型为何自然需要学习
+
+规则很难可靠处理：
+
+- 同一实体在不同应用中的名称不一致；
+- 日期以结构化字段、文档文本、截图标签等不同方式出现；
+- tool schema 改写；
+- 未见应用；
+- DOM 字段和视觉布局改变；
+- 一个界面变量对应多个底层对象；
+- 多个相似对象中选择正确 binding。
+
+### 验证必须包含
+
+- unseen app；
+- unseen widget；
+- tool/schema rename；
+- DOM field rename；
+- 不同工具产生相同 effect；
+- 相同工具因参数不同绑定不同对象；
+- screenshot-only / DOM-only / schema-only 消融；
+- 静态规则、prompt frontier model、轻量训练 critic 的比较。
+
+---
+
+# 八、最应该报告的自动指标
+
+你的核心指标不应是 UI preference，也不应只有 task success。
+
+| 指标 | 回答的问题 |
+|---|---|
+| **Projection Coverage** | 任务相关的真实变量是否被完整表示 |
+| **Binding Accuracy** | 界面控件是否绑定到正确底层对象 |
+| **Round-Trip Fidelity** | 操作投影后，真实应用是否达到等价状态 |
+| **Non-Interference** | 无关软件状态是否保持不变 |
+| **Cross-App Consistency** | 多个应用中的同一任务事实是否一致 |
+| **Reconciliation Accuracy** | 外部状态改变后，投影是否正确更新和发现冲突 |
+| **Interaction Compression** | 减少了多少点击、导航和应用切换 |
+| **OOD Generalization** | 未见应用、schema 和任务组合上是否仍有效 |
+
+这里可以形成一个非常漂亮的技术目标：
+
+> **在最大化 interaction compression 的同时，维持 task projection fidelity。**
+
+也就是：
+
+```text
+更简单的任务界面
+        vs
+更完整、忠实的软件世界表示
+```
+
+这一个张力足以支撑整篇论文，不需要再引入 trust、consent、personalization、memory 和 oversight。
+
+---
+
+# 九、必须避开的红区
+
+这里的“避开”不是不引用这些工作，而是**必须正面引用，但绝不能把它们已经完成的事情重新包装成贡献**。
+
+## 红区一：再做一个 task-oriented generative UI
+
+```text
+Prompt
+→ task decomposition
+→ cards/forms/sliders
+→ user edits
+→ agent continues
+```
+
+这是 DuetUI、Macaron-A2UI 和更广泛 GenUI 的竞争区。
+
+---
+
+## 红区二：再讲一遍“应用消失，任务成为交互单位”
+
+这个愿景已经被 Activity-Based Computing、Software as Content 和 AOHP 从不同年代、不同角度表达过。turn237838view1turn800846view0
+
+你的增量必须是：
+
+> 如何把这个愿景做成具有可执行语义和可验证正确性的运行时编译系统。
+
+---
+
+## 红区三：把跨设备当核心 novelty
+
+A2UI 已经支持 Web、移动、桌面的跨端渲染；Activity-Based Computing 也很早就支持 activity roaming across computers。
+
+跨设备可以是很强的产品 demo，但不是主贡献。
+
+---
+
+## 红区四：训练通用 UI generator
+
+Macaron-A2UI、Google Generative UI 和 OpenGenUI 一类工作正在快速占据这一方向。
+
+除非你有大量资源，否则不值得竞争：
+
+- UI code quality；
+- aesthetic quality；
+- component selection；
+- schema validity；
+- prompt→UI generalization。
+
+你的训练预算应该投入 cross-app binding，而不是 layout。
+
+---
+
+## 红区五：做一个精美 dashboard，后端写死
+
+若每条任务都需要：
+
+- 手工写 React 页面；
+- 手工指定每个字段；
+- 手工写 API binding；
+- 手工规定依赖；
+- 只支持固定的 Calendar + Jira + Gmail；
+
+那么这不是 task compiler，而是定制 dashboard。
+
+它可以是产品原型，却不构成你想要的 AI contribution。
+
+---
+
+## 红区六：只生成界面，不完成真实闭环
+
+没有以下链路，就会被认为只是未来主义 demo：
+
+```text
+Observe real apps
+→ Induce task state
+→ Generate interface
+→ Human edits
+→ Execute in real apps
+→ Verify state diff
+→ Reconcile interface
+```
+
+缺少后四步时，GUI Agent 不是不可替代的。
+
+---
+
+## 红区七：把 styling 和 UI preference 变成主问题
+
+极简、花哨、个性化主题可以提高 demo 吸引力，但这条线会把论文拉向 preference elicitation、adaptive UI 和主观用户研究。
+
+最好的定位是：
+
+> renderer 可以自由变化，但 task graph、bindings 和 verifier 不随样式变化。
+
+---
+
+# 十、最终分级
+
+## 最像，必须当作正面竞争者
+
+1. **AOHP**
+   宏观架构几乎正面重合；你必须转向 task projection fidelity 和 round-trip semantics。
+
+2. **Software as Content**
+   已经占据“动态应用是人—Agent 交互层”；你必须强调 existing live software projection。
+
+3. **DuetUI，CHI 2026**
+   已经占据 task-oriented UI co-generation；你必须离开 vague intent refinement。
+
+## 稍微有一点像，需要警惕
+
+4. **A2UI / Macaron-A2UI**：生成 UI 的协议与模型。
+5. **DOMSteer**：实时改造现有网页界面。
+6. **Google Generative UI / Generative Interfaces**：prompt-specific 完整体验。
+7. **MAESTRO**：偏好驱动的 GUI 适配和 workflow navigation。
+8. **AUI-Gym / OpenGenUI**：CUA 参与 UI 生成的自动评估与训练，但目前更偏生成器质量，而非既有软件绑定。
+9. **Activity-Based Computing / Tabs.do**：历史概念先驱，必须承认。
+
+## 主要是基础设施，不构成研究撞车
+
+10. **MCPWorld / OSWorld-MCP / ToolCUA**：hybrid backend 与 verifier。
+11. **UI-TARS / UI-Venus / Aguvis / ShowUI / UIPro / Cradle**：GUI executor。
+12. **InfiniteWeb 等环境生成工作**：sandbox 和任务生成。
+13. **A2UI、AG-UI 类协议**：task interface renderer 和通信层。
+
+## 一定要避开的选题版本
+
+- “第一个生成跨应用任务 UI 的 Agent”；
+- “第一个从 app-centric 转向 task-centric 的系统”；
+- “一个可持续演化的 Agent mini-app”；
+- “让用户通过 UI 逐步表达模糊偏好”；
+- “根据用户偏好自动调整界面”；
+- “GUI + MCP hybrid Agent”；
+- “跨设备生成同一个界面”；
+- “用 CUA judge 改进 UI 代码生成”；
+- “写死三款应用的精美统一 dashboard”。
+
+---
+
+# 最终建议
+
+目前最稳、最硬、也最能体现你 GUI Agent 护城河的论文命题是：
+
+> **现有 Generative UI 从任务或对话生成新的界面；我们研究一个相反的编译问题：如何从多个既有应用的实时状态与可操作能力中，生成一个任务级交互投影，并保证用户在投影中的每次操作都与底层跨应用状态变化双向语义等价。**
+
+一句更短的英文表述：
+
+> **Compile live software into a verifiable task interface, rather than generate an interface from a prompt.**
+
+CHI 论文的唯一核心问题可以压缩为：
+
+> **一个跨应用任务究竟能被压缩成多简单的界面，同时不遗漏会改变真实结果的重要状态？**
+
+这同时给你：
+
+- 一个真实、清楚的人本矛盾：**简化与保真之间的冲突**；
+- 一个自然的 AI 任务：**跨应用 task-state 与 binding induction**；
+- 一个确定性 benchmark：**状态、依赖和 effect 全部来自 sandbox**；
+- 一套扎实自动指标：**coverage、binding、round-trip、non-interference、reconciliation**；
+- 一个 GUI Agent 必不可少的闭环：**读取长尾软件并执行真实变化**；
+- 一个非阻塞的小规模用户研究：验证用户是否更准确理解并操纵跨应用任务；
+- 一个非常强的 GitHub demo。
+
+最先做的 kill test 也只有一个：
+
+> **用户在自动生成的任务界面中修改一个变量，系统能否跨三个既有应用完成所有必要变化、保持所有无关状态不变，并在底层应用随后被外部修改时正确同步回来？**
+
+这一步跑通，你做的是一个新的软件编译层；跑不通，系统就仍然只是一个漂亮的 Generative UI dashboard。
+
+【回答内容 轮数1】
+The task-centric vision itself dates to Activity-Centric Computing and Huddle. Direct competition clusters in CHI/UIST/WWW/DIS, while CV/ML work mainly supplies grounding, planning, execution, and benchmarks.
+
+【回答内容 轮数1】
+# 核心判断
+
+截至 **2026 年 7 月 15 日**，我对 CHI、UIST、IUI、CSCW、UbiComp、WWW、ACL、CVPR、ICCV、ICLR、ICML、NeurIPS、AAAI，以及相邻的 EuroSys、MobiSys、ACM MM 等公开论文、预印本和系统工作的判断是：
+
+> **“根据任务生成一个 UI”“从 application-centric 转向 task-centric”“用界面代替聊天”“跨设备统一操作”这些宏观主张，都已经不能单独构成 novelty。**
+
+但是，我没有发现一项公开工作同时完成下面六件事：
+
+1. 从**多个正在运行的既有软件**中读取实时状态；
+2. 在没有为每个任务预先编写组件的情况下，构造任务级对象和依赖；
+3. 生成供人直接操作的任务特异界面；
+4. 将用户在该界面中的修改，通过 GUI Agent、MCP 或二者混合执行回真实软件；
+5. 执行后重新读取软件状态，自动验证语义等价与非干扰；
+6. 在未见应用、UI 改版、schema 重命名和执行路径变化下测试泛化。
+
+这意味着你仍然有一个足够硬的空位，但它不应该再叫笼统的 **Generative UI**。
+
+你真正可以占据的是：
+
+# 既有软件的可执行任务投影
+## Executable Task Projection over Existing Software
+
+更像系统论文的表述是：
+
+> **Runtime Task Compiler：GUI Agent 将多个既有应用的实时状态反向编译为一个可操作的任务界面，再把人的任务级操作编译回真实应用，并验证 round-trip fidelity。**
+
+你自己的 TXT 其实已经把最重要的四个词压缩出来了：
+
+```text
+existing applications
+live state
+executable binding
+round-trip verification
+```
+
+这四个词缺一不可。fileciteturn2file0
+
+---
+
+# 先用一条任务说明：你的系统究竟比现有 GenUI 多了什么
+
+用户说：
+
+> 帮我准备下周四的客户拜访，把会议、材料、项目问题和出行安排协调好。
+
+真实状态分散在：
+
+- Calendar：客户与团队成员的时间；
+- Gmail：客户最新提出的问题；
+- Drive：多个版本的提案和演示文稿；
+- TaskBoard：仍未解决的项目 blocker；
+- Travel：列车和酒店；
+- 另一台设备上的通讯录或地图。
+
+你的系统先通过 GUI、DOM、accessibility tree、历史轨迹和可用 MCP/tool 读取这些软件，然后构造一个任务对象：
+
+```text
+客户拜访
+
+日期              周四 14:00
+参与者            Alice、Bob、客户方 3 人
+客户新增问题      2
+未解决 blocker    1
+演示文稿          需要更新
+出行方案          尚未选择
+```
+
+同时构造真实绑定：
+
+```text
+visit.date
+↔ Calendar.event.start
+↔ TaskBoard.preparation_deadline
+↔ Gmail.draft.subject
+↔ Travel.search.departure_date
+```
+
+这里的 `visit.date` 是用户看到的任务变量；后面四项是它在真实软件中的落点。
+
+用户在统一界面中把日期从周四拖到周五，并选择最新演示文稿。系统随后：
+
+1. 通过 GUI Agent 修改 Calendar；
+2. 重新计算 TaskBoard 截止时间；
+3. 更新 Gmail 草稿；
+4. 在 Drive 中绑定正确文件；
+5. 更新 Travel 查询；
+6. 再次读取所有应用；
+7. 确认预期状态真的改变；
+8. 确认无关邮件、文件和日程没有被改动；
+9. 把最终真实状态同步回任务界面。
+
+现有 GenUI 大多覆盖的是：
+
+```text
+用户请求 → 任务/意图模型 → 生成 UI
+```
+
+你要研究的是完整闭环：
+
+```text
+既有软件的实时世界
+→ 任务级表示
+→ 任务界面
+→ 用户操作
+→ GUI/MCP 执行
+→ 真实状态验证
+→ 冲突调和与界面更新
+```
+
+这也是你与现有工作的真正分水岭。
+
+---
+
+# S 级：与你最像，必须逐段正面处理
+
+## S1. Software as Content：最接近你的宏观交互范式
+
+**Software as Content（SaC）**提出动态生成的 agentic application 应成为人和 Agent 之间的主要交互媒介。界面持续存在、随交互演化，并提供筛选器、选择器和可执行 affordance。它几乎已经占据了“聊天之后，动态软件成为人—Agent 交互层”这句宏观主张。turn410855view3
+
+它是你最危险、也最有利的近邻，因为论文明确承认：当前实现不能可靠写入外部系统；真正的写能力要求解决异构外部系统控制、多步执行中的事务一致性，以及 Agent 写入后前端状态如何与 ground truth 同步。
+
+因此，你不能 claim：
+
+> 我们首次把动态应用作为人—Agent 交互层。
+
+但你可以 claim：
+
+> 我们解决了动态任务界面尚未解决的执行闭环：将既有软件的实时状态编译进来，再通过 GUI Agent 写回，并用独立 verifier 检查 round trip。
+
+**相似度：最高。**
+**威胁类型：范式级。**
+**对你的价值：SaC 的限制部分几乎直接写出了你的研究问题。**
+
+---
+
+## S2. PSI：最接近你的运行时与持久状态架构
+
+**PSI**研究多个独立生成的 AI instruments 如何通过共享 personal-context bus 变成持续、互联、可同步操作的个人计算环境。每个模块发布当前状态和 write-back affordance，Agent 可以跨模块推理并触发同步操作。
+
+与你的差别在于：
+
+- PSI 的模块本身是生成的，并遵循统一 contract；
+- 你的输入是已经存在、彼此不统一、甚至没有 API 的软件；
+- PSI 重点是 generated modules 之间如何共享状态；
+- 你的难点是如何从 GUI、DOM、轨迹和 tool schema 中**发现**任务对象及读写绑定；
+- 你的执行后端需要 CUA，并且要对真实应用状态做自动验证。
+
+因此你不能 claim：
+
+> 首次让多个生成界面共享状态、互相联动。
+
+你能 claim：
+
+> 首次把不受统一 contract 约束的既有软件，运行时接入同一个可执行任务投影。
+
+**相似度：极高。**
+**威胁类型：系统架构级。**
+
+---
+
+## S3. Jelly：最接近你的 Task IR 与依赖表示
+
+CHI 2025 的 **Jelly**使用 LLM 从 prompt 生成 task-driven data model，包括对象关系 schema、实体属性和 dependency graph；界面由该模型生成，用户的直接操作也能更新模型。它已经明确指出：用户不得不把多个固定 application model 手工拼成自己的任务，而 generative UI 应围绕任务动态构造数据模型。turn811239view3
+
+这意味着你不能 claim：
+
+> 首次用任务对象图或依赖图驱动动态界面。
+
+但 Jelly 当前主要使用生成数据，并将实时外部数据接入列为未来扩展；它没有解决从既有应用中自动恢复真实任务对象、读写绑定、执行和 round-trip verification。
+
+最准确的区分是：
+
+```text
+Jelly:
+Prompt → Task Model → UI → Model Update
+
+你的系统:
+Live Applications → Task Model + Bindings
+→ UI → Application Execution
+→ State-Diff Verification
+```
+
+**相似度：极高。**
+**威胁类型：中间表示与数据模型级。**
+
+---
+
+## S4. Mirage：最接近可以立即产品化的简化任务 UI
+
+WWW 2026 的 **Mirage**让开发者把应用功能声明为带语义描述和 typed schema 的可复用组件；系统根据自然语言目标选择组件，并即时构建简化界面。用户实验显示它能降低完成时间和认知负担。
+
+与你的差别必须压得很硬：
+
+- Mirage 要求开发者事先暴露组件和 schema；
+- 你的系统不能要求每个应用为每个任务提供专用 task component；
+- Mirage 的核心是从已声明功能中选择和编排；
+- 你的核心是从 GUI 世界中自动发现对象、状态、操作语义与跨应用依赖；
+- Mirage 不需要 GUI Agent 作为通用 fallback；
+- 你的系统必须处理无 API、半结构化和未见应用。
+
+如果你的实现最终也是：
+
+```text
+开发者为 Calendar、Drive、Jira 写好组件
+→ LLM 选择组件
+→ 拼出界面
+```
+
+那么论文会非常接近 Mirage，甚至更弱。
+
+**相似度：高。**
+**威胁类型：产品实现与组件编排级。**
+
+---
+
+## S5. DuetUI：最接近你的动态人—Agent 界面循环
+
+CHI 2026 的 **DuetUI**提出人—Agent 共同生成 task-oriented interface 的双向循环：Agent 分解任务并搭出界面 scaffold；用户通过直接操作隐式影响 Agent 下一轮的理解和生成。它基于 12 人形成性研究，并进行了 24 人用户研究。
+
+DuetUI 占据的是：
+
+> UI 作为用户和 Agent 共同表达、逐步澄清任务意图的媒介。
+
+你的中心不应该是模糊意图，也不应该主要评价 prompt 减少、界面满意度或意图逐步对齐。
+
+你的方向是：
+
+> 即使用户任务已经明确，相关真实状态仍分散在多个软件中；Agent 应把这些状态编译成可操作的任务世界，并保证操作真实写回。
+
+最短的区别是：
+
+```text
+DuetUI:
+UI 帮助 Agent 理解用户想做什么。
+
+你的系统:
+UI 帮助用户直接操纵软件世界，
+Agent 负责把这些操作落实并验证。
+```
+
+你上传的 TXT 中对这条边界的判断是正确的：DuetUI 是 top-down 的 `Task → Interface`，你必须做 bottom-up 的 `Applications → Task World → Executable Interface`。fileciteturn1file0
+
+**相似度：高。**
+**威胁类型：交互循环和叙事级。**
+
+---
+
+## S6. Huddle 与 Activity-Centric Computing：历史优先权警报
+
+UIST 2006 的 **Huddle**已经针对多个连接设备，根据设备间 content-flow model 自动生成 task-based interface。它的问题表述甚至与你很相似：用户不得不把任务拆成各设备上的子任务，再寻找每台设备的功能。
+
+更广泛的 **Activity-Centric Computing**几十年来一直在批评 application-centric computing，并提出跨系统边界的、以人类目标活动为中心的统一计算模型。
+
+因此以下主张一定不能用：
+
+- 首次从 application-centric 转向 task-centric；
+- 首次让一个界面控制多个设备；
+- 首次按人的活动而不是软件边界组织计算；
+- 首次为多设备任务生成统一界面。
+
+你的增量不是愿景，而是新的可实现机制：
+
+> CUA 使系统第一次有可能在不修改原应用、不拥有完整 API、没有开发者预建 content-flow model 的情况下，对长尾软件做运行时状态读取、语义绑定和执行。
+
+**相似度：概念上极高，技术上较远。**
+**威胁类型：历史 novelty 与理论 framing 级。**
+
+---
+
+## S7. Generative Interfaces for Language Models：通用 GenUI 的直接基线
+
+ACL Findings 2026 的 **Generative Interfaces for Language Models**把用户 query 转换成任务特异 UI，并通过结构化界面表示和迭代 refinement 提升交互；报告中生成界面相对聊天在部分条件下获得最高 72% 的人类偏好提升。turn410855view2
+
+这意味着下面的实验已经不够：
+
+```text
+Chat vs Generated UI
+→ 比较偏好、满意度和完成时间
+```
+
+你的主要比较必须变成：
+
+```text
+原始多应用操作
+vs
+只聚合信息但不能写回的静态界面
+vs
+真正可执行且可验证的任务投影
+```
+
+**相似度：表面高，执行闭环低。**
+**威胁类型：通用 GenUI 评价级。**
+
+---
+
+# 一张能力矩阵：真正的空位在哪里
+
+`✓` 表示核心能力，`△` 表示部分支持或依赖预声明，`—` 表示不是工作中心。
+
+| 工作 | 既有软件实时状态 | 跨应用/设备 | 生成任务 UI | 写回真实状态 | GUI Agent 后端 | 独立 round-trip verifier |
+|---|---:|---:|---:|---:|---:|---:|
+| Software as Content | △ | △ | ✓ | 当前实现不完整 | △ | — |
+| PSI | 生成模块的状态 | ✓ | ✓ | ✓，依赖共享 contract | — | — |
+| Mirage | 预声明组件状态 | △ | ✓ | ✓，通过声明组件 | — | — |
+| Jelly | 主要是生成数据 | — | ✓ | 只更新 task model | — | — |
+| DuetUI | 任务上下文 | — | ✓ | 主要反馈给 Agent | — | — |
+| Huddle | 预建 appliance model | ✓ | ✓ | ✓ | — | 模型驱动 |
+| DMI | ✓ | △ | 面向 Agent，不面向人 | ✓ | ✓ | 任务结果评估 |
+| **你的目标** | **✓** | **✓** | **✓** | **✓** | **✓** | **✓** |
+
+所以你的论文不能靠某一列新，而要靠**最后一行的组合与闭环**。
+
+---
+
+# A 级：稍微有一点像，但主要是你要吸收的零件
+
+## DOMSteer 与 MAESTRO：既有界面的运行时改造
+
+**DOMSteer**让 GUI Agent 通过浏览器级 DOM 操作，对任意 live Web interface 插入提示、突出控件、重排布局，且操作可逆。它已经占据“GUI Agent 不只点击，也能实时重构现有界面”的主张。
+
+**MAESTRO**则研究在 conversational agent 中，根据用户偏好调整现有 GUI 和导航，而不是每轮重新生成完整界面。
+
+它们与你的区别是：
+
+- 主要改变单个当前界面的呈现；
+- 不构建跨应用任务对象图；
+- 不把一个任务变量绑定到多个软件对象；
+- 不通过 CUA 把任务级编辑传播到不同应用。
+
+但你需要警惕：如果最后只是在原页面隐藏按钮、重排控件和添加提示，你就会落入这条线。
+
+---
+
+## DMI：与你几乎是镜像关系
+
+EuroSys 2026 的 **Declarative Model Interface**把既有 GUI 转换成 `access / state / observation` 三类声明式 primitive，让 LLM 不再执行细粒度 GUI 导航，而是声明目标状态；系统无需修改应用源代码或依赖 API。
+
+它研究的是：
+
+```text
+Existing GUI → Agent-friendly declarative interface
+```
+
+你研究的是：
+
+```text
+Existing GUI → Human-facing task interface
+```
+
+DMI 非常值得借鉴，因为它证明“把 GUI 从 imperative mechanism 抽象成 declarative state”在系统上是成立的。但你不能只做一个更方便 Agent 使用的 API；你的贡献必须落在**人所操纵的任务级对象、跨应用绑定和用户价值**上。
+
+---
+
+## A2UI 与 MCP Apps：渲染和协议已经在被工业化
+
+Google 的 **A2UI**已经提供可更新、跨平台、agent-generated UI 的声明式格式和多个 renderer；Agent 可以把结构化 UI 发送到不同前端，由客户端原生组件渲染。
+
+官方 **MCP Apps**已经支持在 Agent host 内嵌交互 HTML，双向调用 MCP 工具、接收状态更新，并把 outcome request 路由到用户已经连接的能力。
+
+因此以下都不应成为你的主要技术贡献：
+
+- 设计一套新的按钮、表单和卡片 JSON；
+- 让 Agent 在聊天里显示 dashboard；
+- 让 dashboard 中的按钮调用 MCP tool；
+- 让生成界面能够实时刷新；
+- 跨 React、Flutter、Web 渲染。
+
+最合理的做法是：**直接把 A2UI 或 MCP Apps 当 renderer/transport**，把研究精力放在 Task Compiler、binding discovery 和 verifier。
+
+---
+
+## Macaron-A2UI：不要去训练通用 UI 生成器
+
+2026 年 5 月的 **Macaron-A2UI**已经构建大规模 GenUI 语料和 A2UI-Bench，并对 30B、235B 和 754B 模型进行 LoRA SFT 与强化学习，生成自然语言和轻量可执行 UI action。
+
+所以你不应把有限时间花在：
+
+```text
+task description → buttons/cards/forms
+```
+
+你的训练对象应该是：
+
+```text
+heterogeneous application state
+→ task objects and executable bindings
+```
+
+这是你的 GUI Agent 轨迹、DOM、截图、状态差分和工具 schema 真正能够建立壁垒的地方。
+
+---
+
+## AUI-Gym：CUA 作为 GenUI judge 已经有人做
+
+**Computer-Use Agents as Judges for Generative User Interface**构造了包含 52 个应用、1,560 个任务的 AUI-Gym，让 coding model 设计 GUI、CUA 判断任务是否可完成，并通过程序化 verifier 检查任务可执行性。
+
+它的方向是：
+
+> 为 Agent 设计更容易操作的 UI。
+
+你的方向是：
+
+> Agent 为人生成更容易操纵真实任务的 UI。
+
+但方法上非常值得借鉴：你也可以让 CUA 作为自动化压力测试器，测试生成的 task projection 是否包含完成任务所需的所有 affordance。
+
+---
+
+## WaitGPT、AI-Instruments、TaskArtisan：直接操纵抽象对象的交互前例
+
+UIST 2024 的 **WaitGPT**把数据分析 Agent 生成的代码转换成可视化、可修改的数据操作，让用户直接检查和编辑分析步骤。
+
+CHI 2025 的 **AI-Instruments**把 prompt reify 成可复用、可直接操纵的界面 instrument，用于探索和调整模糊的生成意图。
+
+UIST 2025 Poster **TaskArtisan**允许用户通过草图和语音创建 task-specific widget，并在 infinite canvas 中组合内容与控件。
+
+它们说明“把抽象指令或程序变成可直接操纵的界面对象”已经是成熟的 HCI 设计语言。你的差别必须是：
+
+> 这些对象不只是生成内容或中间程序，而是与多个权威软件状态保持可执行、可验证的双向绑定。
+
+---
+
+## Magentic-UI：可作为执行与用户研究平台，但不能成为 novelty
+
+**Magentic-UI**已经支持 co-planning、co-tasking、multi-tasking、action guards、memory，以及浏览器、代码、文件和 MCP 工具。
+
+它非常适合作为你系统的执行层或 baseline，但它的用户界面仍围绕 Agent 计划、执行与人工介入。你的工作应该把交互单位换成**任务状态本身**，而不是再增加一个 oversight mechanism。
+
+---
+
+# B 级：看起来也很像，但其实是你的后端，不是论文中心
+
+## GUI–MCP hybrid execution 已经是拥挤赛道
+
+- **MCPWorld**提供 API、GUI 和 hybrid CUA 的统一容器化测试环境，包含 201 个任务，并通过 white-box application instrumentation 程序化验证任务完成。
+- **OSWorld-MCP**专门评估 tool invocation、GUI operation 和模式选择。
+- **UltraCUA**把 GUI primitive 与高层 tool call 统一为 hybrid action，并构造了 17,000 多个可验证任务。
+- **ToolCUA**直接训练 GUI–tool 路径选择策略，以缩短执行路径并提高 OSWorld-MCP 成功率。
+- **EE-MCP**把 GUI–MCP interplay 建模为 hybrid policy learning。
+
+因此：
+
+> “我们把 GUI Agent 和 MCP 结合起来”不构成新意。
+
+你的新问题必须发生在它们上方：
+
+> 当执行后端已经能混合使用 GUI 和 tool 时，人应该操作什么样的任务级界面？如何保证界面编辑无论由哪种后端落实，语义结果都一致？
+
+---
+
+## 跨应用长任务 benchmark 也已经存在
+
+2026 年的 **WindowsWorld**包含 181 个职业型任务、17 个桌面应用，其中 78% 天然涉及多个应用；现有 Agent 在多应用任务上的成功率低于 21%。
+
+这说明两个事实：
+
+1. 跨应用执行确实是有工业价值的真实难题；
+2. 仅仅发布一个新的跨应用 benchmark，不足以体现你的人本交互贡献。
+
+你可以把 WindowsWorld、OSWorld 2.0 或 MCPWorld 当外部 executor test，但论文主体需要评价：
+
+- 任务界面是否完整；
+- binding 是否正确；
+- 用户修改是否真实落地；
+- 是否引入无关状态变化；
+- 底层状态漂移后是否正确 reconciliation。
+
+---
+
+# 顶会扫描结果：各会场实际占据了什么
+
+| 会场 | 最相关公开工作/区域 | 对你的含义 |
+|---|---|---|
+| **CHI** | Jelly、DuetUI、AI-Instruments、GenerativeGUI | 交互范式、任务数据模型、直接操纵、动态界面已经拥挤 |
+| **UIST** | Huddle、WaitGPT、TaskArtisan | 多设备任务 UI、可操作程序表示、task-specific widget 有深厚前例 |
+| **WWW** | Mirage | 开发者声明组件→即时 goal-driven UI 已被占据 |
+| **ACL** | Generative Interfaces for Language Models | 通用 query→task UI 与 Chat-vs-GenUI 评估已被占据 |
+| **EuroSys** | DMI | 从旧 GUI 抽象声明式 Agent 接口已有强系统先例 |
+| **IUI** | 智能/自适应界面和 Agent UX 为主 | 尚未看到完整“既有软件反向编译+CUA 写回+verifier”系统，但非常适合 binding model 版本 |
+| **CSCW** | 人—AI 协作、角色、团队协调 | 只有当多用户共同拥有底层状态时才应以 CSCW framing 为主 |
+| **UbiComp/MobiSys** | 跨设备、context-aware UI、UI reassembly | “跨设备统一”不能单独 claim；需要真实设备迁移与情境变化 |
+| **CVPR 2025** | ShowUI、GUI-Xplore | 视觉 grounding、跨应用泛化、环境探索，属于执行后端 turn407127view1 |
+| **ICCV 2025** | UIPro、Iris | 大规模多平台 action model、视觉聚焦与 grounding，属于执行后端 turn407127view3 |
+| **ICLR 2025** | UGround、OS-ATLAS | 通用 GUI grounding 与 foundation action model，属于 perception/action backbone  |
+| **ICML 2025** | Aguvis | 纯视觉跨平台 GUI Agent、grounding 与规划训练  |
+| **NeurIPS 2025** | GUI-Actor、SE-GUI | coordinate-free grounding、自演化 RL，仍是 Agent “眼睛和手”  |
+| **AAAI 2026** | UI-R1、GUI-Eyes | action prediction RL、主动视觉感知 turn407127view11 |
+| **ECCV / ACM MM / EMNLP** | 公开工作主要仍在视觉理解、多模态表示或语言交互 | 截至当前未发现与你完整执行闭环直接重合的已公开代表作；2026 部分会场最终论文列表仍未完全公开 |
+
+总体格局非常明确：
+
+> **AI/CV 顶会主要在造更好的 Agent 执行后端；CHI/UIST/WWW/ACL 在造更好的任务界面；真正尚未被完整做透的是二者之间的“可验证编译层”。**
+
+---
+
+# 一定要避开的研究表述
+
+这些论文不是“不好”，而是下面这些 territory 已经被占住，不能再作为你的第一贡献。
+
+## 1. “根据任务动态生成 UI”
+
+Generative Interfaces、DuetUI、Jelly、GenerativeGUI、Macaron-A2UI 和 A2UI 已经覆盖。
+
+## 2. “UI 代替聊天，提升用户偏好”
+
+ACL 2026 已经系统比较；最多只能做辅助结果。
+
+## 3. “从 application-centric 转向 task-centric”
+
+Activity-Centric Computing 和 Huddle 是历史 prior art；SaC 又在 2026 年重新占据了 agent 时代的版本。
+
+## 4. “多个生成模块通过共享状态组成个人计算环境”
+
+这是 PSI 的中心。
+
+## 5. “开发者声明组件，LLM 按任务拼出界面”
+
+这是 Mirage 的中心。
+
+## 6. “GUI Agent 根据用户请求改造当前页面”
+
+DOMSteer 与 MAESTRO 已经逼近。
+
+## 7. “训练一个更强的 UI generator”
+
+Macaron-A2UI 已经做到数百亿至数千亿规模；你没有结构性优势。
+
+## 8. “让 GUI Agent 与 MCP 混合执行跨应用任务”
+
+MCPWorld、OSWorld-MCP、UltraCUA、ToolCUA 和 EE-MCP 已经形成赛道。
+
+## 9. “GPT/Claude 生成 React dashboard，再做用户研究”
+
+这会被审稿人概括成：
+
+> frontier model + browser automation + generated dashboard。
+
+除非 dashboard 中每个 task variable 都是自动发现、可执行、可验证的真实 binding，否则技术贡献不够。
+
+---
+
+# 你真正应当冻结的研究问题
+
+我建议最终研究问题写成：
+
+> **Can a GUI agent compile fragmented, live application state into an executable task projection whose user edits produce semantically equivalent, verifiable changes across applications?**
+
+中文：
+
+> **GUI Agent 能否把分散在多个既有应用中的实时状态编译为一个可操作的任务投影，并保证用户对该投影的修改，在真实应用中产生语义等价、可验证且无无关副作用的状态变化？**
+
+唯一人本矛盾是：
+
+> **人围绕一个任务思考，但计算机把该任务的状态和控制权割裂在多个应用中。**
+
+这比“减少 app switching”深一层。
+
+真正的问题是：
+
+> 用户目前不得不亲自维护一个跨应用的隐式 task model；某个日期改了以后，她必须知道还要去哪些应用同步修改，并检查所有修改是否一致。
+
+你的系统让这个隐式 task model 成为显式、可操作、可执行的交互对象。
+
+---
+
+# 技术闭环应该怎样搭
+
+```text
+Live Apps / Devices
+    ↓
+Task World Compiler
+    ↓
+Task Object Graph + Executable Bindings
+    ↓
+Generated Task Projection
+    ↓
+Human Manipulation
+    ↓
+GUI / MCP Hybrid Actuator
+    ↓
+State-Diff Verifier
+    ↓
+Reconciliation
+```
+
+## Task World Compiler
+
+输入：
+
+- 当前任务；
+- screenshot；
+- DOM / accessibility tree；
+- GUI action trajectory；
+- tool schema 和参数；
+- 当前可观察状态。
+
+输出：
+
+```json
+{
+  "object": "client_visit",
+  "attribute": "date",
+  "value": "2026-08-21",
+  "bindings": [
+    "calendar.event.start",
+    "taskboard.prep_task.deadline",
+    "travel.search.departure_date"
+  ]
+}
+```
+
+这里：
+
+- `object` 是任务级实体；
+- `attribute` 是人实际关心的任务变量；
+- `value` 来自当前软件状态；
+- `bindings` 表示该变量在不同应用中的读写落点。
+
+## Hybrid Actuator
+
+它不决定任务语义，只负责把 task edit 落实：
+
+- 有可靠 MCP/API 时调用工具；
+- 无 API 或需要视觉上下文时使用 GUI Agent；
+- 混合路径由现有 ToolCUA/UltraCUA 类技术或 frontier CUA 承担。
+
+## 独立 Verifier
+
+用户把日期改到周五以后，verifier 读取数据库或 sandbox canonical state，自动回答：
+
+- Calendar 是否真变成周五；
+- TaskBoard deadline 是否同步；
+- Gmail 草稿是否更新；
+- Travel 查询是否更新；
+- 其他日程、任务和邮件是否保持不变；
+- 任务界面显示的值是否等于底层真实值。
+
+这个 verifier 不能由生成 binding 的同一个模型自评。
+
+---
+
+# 最自然的 AI contribution
+
+## 不训练 UI generator，也不训练 executor
+
+最合理的学习模块是：
+
+# Cross-Application Binding Critic
+或者
+# Task World Compiler
+
+它学习：
+
+> 一个任务变量，在异质应用、不同字段名、不同 GUI 表达和不同执行方式中，分别对应哪些真实状态及操作。
+
+训练样本不应是：
+
+```text
+calendar → date picker
+```
+
+而应该有反捷径结构。
+
+### 相同名字，不同语义
+
+```text
+Drive.owner
+CRM.account_owner
+TaskBoard.owner
+```
+
+三者不一定代表同一个角色。
+
+### 不同名字，相同语义
+
+```text
+assignee
+responsible_person
+task_lead
+DRI
+```
+
+可能都对应同一个任务负责人。
+
+### 同一字段，任务上下文不同
+
+Calendar 中的日期可能是：
+
+- 客户会议日期；
+- 内部准备会议日期；
+- 旅行出发日期；
+- 项目里程碑日期。
+
+不能看到 `date` 就绑定。
+
+### 跨应用 effect propagation
+
+用户修改发布日期，不仅要找到 Calendar 字段，还要发现：
+
+- milestone deadline；
+- announcement draft；
+- testing freeze；
+- release portal target date；
+
+都依赖它。
+
+---
+
+# 标签从哪里来
+
+你的 sandbox 应先保存隐藏 canonical task graph：
+
+```text
+launch_date
+↔ calendar.release_event.start
+↔ taskboard.milestone.due
+↔ release_portal.target_date
+```
+
+它是环境和 benchmark 的隐藏真值，只用于训练标签和测试 verifier。
+
+模型部署时只看到：
+
+- task；
+- GUI；
+- DOM；
+- tool schema；
+- trajectory；
+-可安全获取的 state diff。
+
+这符合你要求的三层结构：
+
+1. **环境事实**：真实字段和状态变化；
+2. **研究操作化**：哪些字段属于同一个任务变量；
+3. **有限人类 grounding**：用户是否真的把这些变量视为同一任务状态，以及哪些抽象值得显示。
+
+---
+
+# 自动评估主体
+
+你的 TXT 中提出的评价维度基本正确，建议冻结为七项。fileciteturn2file8
+
+| 指标 | 回答的问题 |
+|---|---|
+| **Projection Coverage** | 用户完成任务所需的变量是否都被投影出来 |
+| **Binding Accuracy** | 每个任务变量是否绑定到正确的软件对象和字段 |
+| **Round-Trip Fidelity** | 用户编辑投影后，真实软件是否达到等价目标状态 |
+| **Non-Interference** | 没有要求改变的真实状态是否保持不变 |
+| **Reconciliation Accuracy** | 底层应用被外部修改后，任务界面是否正确更新 |
+| **Cross-App Consistency** | 同一任务事实在不同应用中是否保持一致 |
+| **Interaction Compression** | 减少多少点击、导航、应用切换、时间和用户复制信息的操作 |
+
+OOD 必须至少包含：
+
+- 应用改名；
+- 字段改名；
+- DOM/schema 改写；
+- UI 重新布局；
+- 同名异义；
+- 异名同义；
+- 未见应用；
+- GUI 路径换成 MCP 路径；
+- MCP 路径换成 GUI fallback；
+- 底层应用在操作中途被外部修改。
+
+---
+
+# 最合适的用户研究
+
+比较三个条件：
+
+1. 原始多应用 GUI；
+2. 静态聚合 dashboard，只能看，不能可靠写回；
+3. 可执行任务投影。
+
+用户完成一组跨应用协调任务，并在中途修改日期、负责人、文件版本或预算。
+
+主要行为指标：
+
+- 最终真实状态错误数；
+- 跨应用遗漏数；
+- app/window switch 次数；
+- 用户能否回答当前任务真实状态；
+- 修改一个跨应用依赖的成功率；
+- 用户是否能预测一次操作会影响哪些真实对象；
+- 发现 projection 与底层不一致的能力；
+- 完成时间和二次修复操作。
+
+主观满意度、信任和美观只能做次要结果。
+
+---
+
+# 最现实、最强的首稿范围
+
+不要做：
+
+```text
+所有任务
+所有应用
+所有设备
+万能 Agent OS
+```
+
+做：
+
+```text
+一个任务族：
+knowledge-work coordination
+
+三个核心应用：
+Calendar
+Email
+TaskBoard
+
+可选第四个：
+Drive / Docs
+```
+
+任务可以是：
+
+- 客户拜访准备；
+- 项目发布协调；
+- 团队活动安排；
+- 招聘面试流程。
+
+其中我最推荐 **项目发布协调**，因为它天然有：
+
+- 跨应用共享变量；
+- 日期和依赖传播；
+- 文档版本；
+- blocker；
+- 负责人；
+- 消息草稿；
+- 阶段性进度；
+- 很清楚的状态 verifier。
+
+跨设备只做一个 showcase：
+
+> 手机上的日历被同事修改后，桌面 Task Projection 自动 reconciliation。
+
+不要把“跨设备”变成主贡献，否则会被 Huddle、ACC 和 UbiComp 历史工作拉入一个更大的 related-work 战场。
+
+---
+
+# 最终分级结论
+
+## 与你最像、必须重点防守
+
+1. **Software as Content**：最像宏观范式；
+2. **PSI**：最像共享状态运行时；
+3. **Jelly**：最像 Task IR 和 dependency graph；
+4. **Mirage**：最像可产品化的即时任务界面；
+5. **DuetUI**：最像动态任务界面与直接操纵循环；
+6. **Huddle / Activity-Centric Computing**：最危险的历史 novelty blocker；
+7. **Generative Interfaces**：最直接的通用 GenUI baseline。
+
+## 有一点像，应吸收而不是竞争
+
+- DOMSteer、MAESTRO：live interface transformation；
+- DMI：旧 GUI 的声明式抽象；
+- A2UI、MCP Apps：UI protocol 和 renderer；
+- Macaron-A2UI：通用 UI 生成模型；
+- AUI-Gym：CUA 作为 GUI judge；
+- WaitGPT、AI-Instruments、TaskArtisan：抽象对象的直接操纵；
+- Magentic-UI：human–agent runtime 和实验平台。
+
+## 应当作为后端直接复用
+
+- MCPWorld、OSWorld-MCP；
+- UltraCUA、ToolCUA、EE-MCP；
+- ShowUI、GUI-Xplore；
+- UIPro、Iris；
+- UGround、OS-ATLAS；
+- Aguvis；
+- GUI-Actor、SE-GUI；
+- UI-R1、GUI-Eyes。
+
+## 一定要避开的论文版本
+
+- task → React UI；
+- Chat vs GenUI 偏好比较；
+- “首次 task-centric computing”；
+- 开发者手写全部组件和 binding；
+- 共享 contract 下的 generated modules；
+- 单页面 DOM 改造；
+- 通用 UI generator 训练；
+- 通用 GUI–MCP routing；
+- 纯跨应用 benchmark；
+- 没有真实执行与 verifier 的未来主义 Agent OS demo。
+
+---
+
+# 最终建议
+
+**值得做。**
+
+但你的论文不能再是：
+
+> 我们把 GenUI 和 GUI Agent 结合起来。
+
+而必须是：
+
+> **我们提出并实现一种运行时任务编译器：它从多个既有应用中恢复实时任务状态与可执行绑定，生成供人直接操作的任务投影，并通过 GUI/MCP Agent 将编辑写回真实软件，最后用独立状态验证器保证双向语义保真。**
+
+这条线真正利用了你的护城河：
+
+```text
+multimodal GUI understanding
++ trajectory
++ live state
++ GUI/MCP hybrid actuation
++ sandbox
++ deterministic verifier
++ OOD evaluation
+```
+
+普通 GenUI 团队可以很快做出漂亮界面，但很难证明界面中的每个控件都与真实、异质、持续变化的软件世界保持正确的双向语义绑定。
+
+普通 CUA 团队可以提高 task success，但通常不会研究：
+
+> 当 Agent 成为软件世界的执行后端后，人究竟应该直接操作什么？
+
+这正是你最有机会占住的位置。

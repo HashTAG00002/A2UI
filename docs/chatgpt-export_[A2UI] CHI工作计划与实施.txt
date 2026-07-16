@@ -1,0 +1,1097 @@
+[A2UI] CHI工作计划与实施
+=================
+
+【提问 轮数1】
+[文件不支持导出]
+基于以上内容,帮我形成一个CHI的工作计划,然后大约说明我们要做什么。是不是要搭建一个软件代码框架,然后在此基础上我们还要提出一个bench之类的?需要我们主动提一个bench吗?这个bench可能需要跨应用来适配我们刚才说的那个主要的场景。那现在有这样的bench吗?它可能需要在线执行,需要的是OS World这样级别的吗?如果没有现成的话,需要我自己搭的话,感觉如果说使用OS World这种级别的话,还是太重量级了,因为OS端有很多需要考虑的点。但是外部端的话可能就相对好一点,所以我可能更倾向于外部端。但是OS端如果能做的话应该也行。我们这里面需要什么特别多的这种归类权限吗?然后另外一个是需不需要训模型?你可以帮我决定一下。如果要训的话,训成什么样的?然后我想说的点是我们现在要做的这个东西,大约最后落地应该落成一个什么样的,然后给出一个大约的落地大纲,然后可以开工吗?我感觉这个其实说到底如果在最急单情况下的话,我完全调API使用一些专家模型的话,我也不需要训练,那其实它迭代可以很快。这个东西的话,我投入这个CHI到底需要我完成什么样的工作?我感觉只要把代码框架搭出来,这个CHI基本就已经完成了。是不是这样?不需要什么AI训练相关的这种东西吧?就只是调API的话。因为现在我们提供是一种全新的这种交互的产品级的这样的一个范式,对吧?那我其实要做的就是产品上我把它视觉化变成一个demo,一个很好看的demo,然后并且我把它再抽象化成一个通用的这种交互的范式。并且然后最后用户调研一下,并且在整个过程中保证一定量的在OS World上面,或者是其他的Visual Web Arena这种web端的上面的用户准确率,以及用户体验,这两个指标我都要汇报,对吧?就类似于这样的,就是在提高用户体验的同时,不要降低过多的这样的执行的这样的一个准确率吧,对吧?那其实说实话,它好像就是把GUI Agent的在线轨迹变成了一个UI,然后让人来操控这个UI来间接地控制GA Agent的这个在线轨迹,对吧?它只是把这个在线轨迹,交互轨迹,UI化了,对不对?因为我想的是在整个过程中,人可以操作这个步骤,人可以让它停在哪一步,不是直接通过操纵GUI Agent,而是通过操纵这个,在GA Agent的实际执行过程中,实时地转化成一个更高层级的简单UI的给人汇报,并且不只是汇报,还有给人交互,人可以,不只可以读,还可以写的这种感觉,对吧?回答我所有问题,并形成一个工作计划。
+
+【回答内容 轮数1】
+I’ll turn this into an actionable CHI plan: define the contribution, assess benchmarks and Web versus OS scope, decide on training, and specify evidence and phased deliverables.
+
+【回答内容 轮数1】
+The key framing choice is whether the contribution is a controllable live-trajectory UI or a stronger transient task interface, enabling a deliberately scoped, reducible plan.
+
+【回答内容 轮数1】
+# 核心结论：可以开工，但不能把它做成“轨迹可视化器”
+
+我建议你现在正式冻结为下面这个 CHI 方向：
+
+> **为跨应用 GUI Agent 构建一个实时、可编辑、可执行的任务界面。用户不再直接操纵 Agent 的低层轨迹，而是操纵任务状态；系统负责把这些修改编译成真实应用中的 GUI/tool 操作，并持续验证界面状态与真实软件状态一致。**
+
+最直白的产品表达是：
+
+> **人操作任务，Agent 操作应用。**
+
+这与你前面材料里已经逐渐收敛出的“task-native computing”方向是一致的：不是再做监督、确认或轨迹回放，而是将 application-centric interaction 转换成 task-centric interaction。fileciteturn0file0
+
+我的具体决策如下：
+
+| 问题 | 决策 |
+|---|---|
+| 要不要搭软件代码框架？ | **要，而且这是主体之一** |
+| 代码框架搭完就等于 CHI 完成了吗？ | **不等于，只完成了系统贡献的一半左右** |
+| 要不要主动提出 benchmark？ | **要，但做一个论文专属的小型 evaluation suite，不做 OSWorld 规模** |
+| 是否需要跨应用？ | **需要，至少三个 Web 应用，但只做一个任务族** |
+| 主环境选 OS 还是 Web？ | **选受控 Web；OSWorld 只做可选外部验证** |
+| 要不要在线执行？ | **最终必须在线闭环；开发阶段同时支持离线 replay** |
+| 要不要训练模型？ | **主线不训练，先调用专家 API；只有 benchmark 证明 API 在 OOD binding 上不够时，才训练一个轻量 critic** |
+| 是否需要大量权限？ | **不需要 OS 级高权限；需要浏览器控制、DOM/截图、应用状态 adapter、隔离账户和数据库 reset** |
+| 最终落地是什么？ | **一个真正可运行的跨应用 Task Workspace + runtime + benchmark + verifier + 用户研究 + GitHub demo** |
+
+---
+
+# 一、这项工作究竟要做什么
+
+先用一条任务走完。
+
+用户对 Agent 说：
+
+> “帮我准备下周五的项目发布：安排发布会议、整理材料、创建剩余任务，并起草一封团队通知。”
+
+Agent 在三个应用中工作：
+
+- Calendar：创建发布会议；
+- TaskBoard：建立任务、负责人和截止时间；
+- Drive/Docs：整理发布材料；
+- 可选第四个应用：Mail，生成通知草稿。
+
+传统 GUI Agent 界面可能只给用户展示：
+
+```text
+正在打开 Calendar
+正在点击 Create Event
+正在填写日期
+正在打开 TaskBoard
+……
+```
+
+这只是把轨迹变得可读，用户仍然需要理解几十个步骤。
+
+你的系统不展示这些作为主要交互对象，而是实时形成一个任务界面：
+
+```text
+项目发布
+
+发布日期：8 月 14 日
+发布会议：8 月 14 日 14:00–15:00
+负责人：Alex
+材料状态：3/4 已完成
+剩余任务：
+  - 最终检查演示文档
+  - 确认发布公告
+通知：已起草，尚未发送
+```
+
+用户直接把发布日期从 8 月 14 日改到 8 月 18 日。
+
+系统随后自动计算：
+
+- Calendar 会议需要移动；
+- TaskBoard 中依赖发布日期的 deadline 需要调整；
+- Docs 中的发布计划日期需要更新；
+- 邮件草稿中的日期需要修改；
+- 已经完成且不依赖发布日期的任务不需要重做。
+
+然后 Agent 在线执行这些应用操作，并把执行后的真实状态重新同步回任务界面。
+
+## 这才是你的关键闭环
+
+```text
+真实应用状态与执行轨迹
+        ↓
+任务级状态抽象
+        ↓
+实时可编辑任务界面
+        ↓
+用户修改任务变量
+        ↓
+语义修改 patch
+        ↓
+重新规划并操作真实应用
+        ↓
+状态 verifier
+        ↓
+更新任务界面
+```
+
+这里的 `patch` 只是“用户改了什么”的结构化表达。
+
+例如：
+
+```json
+{
+  "field": "project.launch_date",
+  "old_value": "2026-08-14",
+  "new_value": "2026-08-18"
+}
+```
+
+- `field` 表示用户修改的是项目发布日期，而不是某个特定网页输入框；
+- `old_value` 和 `new_value` 来自任务界面中的实际修改；
+- 这个 patch 会被编译成多个应用动作；
+- 它不是大模型产生的主观标签；
+- 最终是否正确，由各应用的真实状态检查。
+
+---
+
+# 二、它是不是“把 GUI Agent 在线轨迹 UI 化”？
+
+## 弱版本：是，而且不够新
+
+弱版本是：
+
+- 把每一步显示成卡片；
+- 用户暂停；
+- 用户删除或重排几个步骤；
+- Agent 继续执行；
+- 最后比较用户是否更有控制感。
+
+这种工作本质上仍是：
+
+> 轨迹 timeline + pause/resume + 人类监督。
+
+Magentic-UI 已经支持 co-planning、co-tasking、action guards 等多种实时人类参与机制，所以仅仅做一个“人能读写 Agent 计划或轨迹”的界面，很容易被认为是现有 human-in-the-loop Agent UI 的增量。
+
+## 强版本：不是轨迹 UI，而是任务状态操作层
+
+你真正要做的必须是：
+
+> **多条低层轨迹可以映射到同一个任务状态；用户修改一个任务状态，可以产生多条跨应用轨迹。**
+
+这两个方向是多对一和一对多：
+
+```text
+许多 GUI/tool actions
+        ↓
+一个任务变量
+```
+
+以及：
+
+```text
+一个任务变量修改
+        ↓
+多个应用中的动作和状态变化
+```
+
+用户不需要表达：
+
+> “请撤销第 37 步，然后回到 Calendar，把日期框改成 18，再去 Jira 修改三个 ticket。”
+
+用户只表达：
+
+> “发布日期改到 18 日。”
+
+Agent 负责将其落实到软件世界。
+
+所以你的论文不能写成：
+
+> We visualize GUI-agent trajectories as an interactive UI.
+
+而应该写成：
+
+> We introduce a live task-level interaction layer that is bidirectionally bound to heterogeneous application states and agent execution.
+
+中文就是：
+
+> 我们把多个应用中的实时软件状态反向编译成任务界面，并将用户对任务界面的修改重新编译回真实软件操作。
+
+---
+
+# 三、现在有没有现成的 benchmark？
+
+## 没有完全对应的
+
+根据目前公开的 benchmark 和系统，我没有发现一个现成测试集同时评估以下完整闭环：
+
+1. 从正在执行的跨应用 GUI/tool 轨迹中构建任务级状态；
+2. 持续把真实应用变化同步到任务界面；
+3. 用户直接修改任务级对象；
+4. 将修改正确传播到多个应用；
+5. 执行完成后验证任务 UI 与真实应用状态的一致性；
+6. 同时测量 Agent 成功率和人类理解、控制及纠错效果。
+
+这是基于公开工作的检索判断，不是对未公开研究的绝对排除。
+
+现有环境各自只覆盖其中一部分。
+
+### OSWorld / OSWorld 2.0
+
+OSWorld 主要评估 Agent 在真实桌面应用中的开放式任务执行；OSWorld 2.0 更进一步覆盖长时、跨来源、动态环境的专业工作流，其 108 个任务具有很长的执行链路。它们适合评价“Agent 能否完成复杂电脑任务”，但没有把“任务界面的双向编译和人类直接操作”作为评价对象。
+
+### VisualWebArena
+
+VisualWebArena 评估多模态 Web Agent 完成需要视觉理解的现实网页任务，建立在可复现、执行式评价之上。它适合测试视觉页面理解和网页操作，但并不评估跨应用任务抽象、用户修改任务状态或 round-trip synchronization。
+
+### BrowserGym / WorkArena
+
+BrowserGym 提供了统一的 Web Agent 环境接口，可以运行 WebArena、VisualWebArena、WorkArena 等 benchmark；WorkArena 面向知识工作 Web 任务，并且 BrowserGym 支持设计新的任务环境。它非常适合作为你的运行底座，但不能直接作为你的研究 benchmark。
+
+### MCPWorld
+
+MCPWorld 已经支持 GUI、API/MCP 和 hybrid CUA，并且利用 white-box application 和程序化 verifier 检查真实应用行为。这一点与你的工程需求很接近，但它评估的是不同执行模式下的任务完成，并不评估任务级人类界面的抽象、修改和跨应用传播。
+
+## 相邻的 GenUI 工作也已经存在
+
+DuetUI 让 Agent 分解任务并逐步生成界面，用户通过直接操作界面反过来影响 Agent；Software as Content 将动态应用视为人机 Agent 交互媒介；Macaron-A2UI 已经把可执行生成 UI 建模为学习和 benchmark 问题。
+
+因此，你不能把 novelty 写成：
+
+> Agent 能生成一个动态 UI。
+
+你的硬边界必须是：
+
+> **这个 UI 不是凭空生成的任务助手，而是绑定到多个正在运行的既有应用，能够进行双向状态同步、真实执行和自动 round-trip verification。**
+
+---
+
+# 四、需要主动提出 benchmark 吗？
+
+## 需要，但不要做一个“第二个 OSWorld”
+
+你的 benchmark 应该是这篇论文不可缺少的**评估协议和任务套件**，而不是试图成为一个覆盖所有 GUI Agent 能力的大型通用 benchmark。
+
+暂时可以不命名，避免先包装概念。其核心测试对象是：
+
+> 一个 task-level interface 是否准确反映真实软件世界，以及用户修改能否准确返回真实软件世界。
+
+## 推荐范围
+
+只做一个任务族：
+
+### Project coordination / knowledge-work coordination
+
+包含三个主应用：
+
+1. Calendar；
+2. TaskBoard；
+3. Drive/Docs。
+
+Mail 可以作为第四个增强应用，不要一开始就加入。
+
+规模建议：
+
+- 30–50 个参数化任务模板；
+- 每个模板生成不同人物、日期、依赖和文档状态；
+- 总计约 500–1,500 个自动实例；
+- 其中一个应用皮肤、schema 或任务组合用于 OOD 测试；
+- 15–25 个任务用于后置用户研究。
+
+不要追求几百个完全不同的任务类型。
+
+---
+
+## Benchmark 应拆成四层
+
+### 第一层：任务状态编译
+
+输入：
+
+- 用户目标；
+- DOM/accessibility tree；
+- 截图；
+- Agent action/tool trace；
+- 应用当前可观察状态。
+
+输出：
+
+```text
+任务实体、属性、依赖和当前状态
+```
+
+例如：
+
+```text
+Project Launch
+  date = Aug 14
+  owner = Alex
+  meeting = scheduled
+  materials = 3/4 complete
+```
+
+指标：
+
+- 实体匹配；
+- 属性值正确率；
+- 依赖关系正确率；
+- task-state exact match。
+
+### 第二层：在线同步
+
+在真实应用状态发生改变后，任务 UI 是否及时、正确更新。
+
+指标：
+
+- stale state rate：任务 UI 展示过期数据的比例；
+- update latency：真实状态改变到 UI 反映改变的时间；
+- spurious update rate：没有任务语义变化却错误修改任务 UI 的比例。
+
+### 第三层：用户修改到执行结果
+
+输入：
+
+```text
+用户在任务 UI 中把 launch date 从 14 日改成 18 日
+```
+
+输出不是一段自然语言，而是一组实际应用状态变化。
+
+指标：
+
+- edit realization success：用户修改最终是否真的落实；
+- propagation completeness：所有依赖应用是否都同步修改；
+- unintended change rate：是否误改了无关状态；
+- final task success：整体任务仍是否完成。
+
+### 第四层：完整 round trip
+
+检查：
+
+```text
+应用状态
+→ 任务 UI
+→ 用户修改
+→ Agent 执行
+→ 应用新状态
+→ 任务 UI 新状态
+```
+
+首尾是否一致。
+
+这才是你最重要的自动指标：
+
+## Round-trip task-state fidelity
+
+不要把它理解成一个玄学构念。它就是：
+
+> 任务 UI 表示的内容、用户修改的内容和真实应用最终状态是否相符。
+
+---
+
+# 五、需要 OSWorld 级别吗？
+
+## 不需要，而且当前不应该用 OSWorld 做主环境
+
+OSWorld 2.0 的任务已经进入平均数百次调用、长时间专业工作流的量级。把它作为主环境，会同时引入：
+
+- OS 启动和重置；
+- 窗口、焦点、剪贴板；
+- 文件系统差异；
+- 应用版本；
+- 网络状态；
+- GUI grounding error；
+- Agent 长时规划失败；
+- 复杂凭证和权限；
+- 极长实验周期。
+
+这些因素很容易掩盖你的真正研究问题：**任务界面的双向可执行绑定是否成立。**
+
+## 主环境选择
+
+推荐：
+
+```text
+BrowserGym / Playwright
+        +
+3 个可重置 Web 应用
+        +
+统一状态 adapter
+        +
+GUI/tool hybrid executor
+```
+
+其中：
+
+- BrowserGym 或类似接口提供浏览器 observation/action harness；
+- Playwright 用于确定性控制和日志；
+- 每个应用有 reset、seed 和 state adapter；
+- benchmark verifier 可以直接读取内部状态；
+- Agent 在实际运行时仍主要依赖截图、DOM、工具结果等可部署信息。
+
+## 外部验证怎么做
+
+建议只做一项：
+
+### 首选：BrowserGym / WorkArena 风格的 Web 外部验证
+
+在主系统完成后，把 task compiler 或 binding 层迁移到一个未见 Web 应用，测试是否能减少定制工作。
+
+### 次选：MCPWorld 子集
+
+当你需要证明后端既可以是 GUI，也可以是 MCP/tool 时，选择少量任务验证：
+
+> 同一个 task-level edit 可以被编译到不同执行 backend。
+
+### OSWorld
+
+只做 3–10 个 showcase case，放在 appendix 或 demo：
+
+- 不用于主要统计结论；
+- 不承诺大规模 leaderboard；
+- 不让它阻塞投稿。
+
+### VisualWebArena
+
+除非你的 task UI 需要处理地图、图像商品、视觉页面内容，否则不是最匹配的外部环境。你的重点是跨应用任务状态，而不是视觉 grounding。
+
+---
+
+# 六、是否需要在线执行？
+
+## 最终系统必须在线
+
+因为你的主要主张不是：
+
+> 系统可以在任务结束后总结 Agent 做了什么。
+
+而是：
+
+> 用户可以在 Agent 执行过程中直接操作任务状态，并即时改变后续执行。
+
+因此必须支持：
+
+- Agent 每完成关键应用操作，任务 UI 更新；
+- 用户任何时候修改可编辑字段；
+- runtime 将修改转成 semantic patch；
+- Agent 的剩余计划被更新；
+- 后续 GUI/tool actions 使用新状态；
+- verifier 持续检查是否出现不同步。
+
+## 但开发时不要全部在线跑
+
+建议做双模式：
+
+### Replay mode
+
+使用已记录的 screenshot、DOM、actions 和 state diff 重放。
+
+用途：
+
+- 快速调试 task compiler；
+- 调试 UI 更新；
+- 做大规模离线 benchmark；
+- 降低 API 和执行成本。
+
+### Live mode
+
+真实浏览器和应用在线执行。
+
+用途：
+
+- 端到端结果；
+- latency；
+- 用户实验；
+- demo；
+- 检查 replay 中没有覆盖的状态问题。
+
+开发顺序应该是：
+
+```text
+先 replay 稳定
+→ 再小规模 live
+→ 最终闭环 live evaluation
+```
+
+---
+
+# 七、要不要训练模型？
+
+# 我的决定：主线不训练
+
+你现在最合理的策略是：
+
+> **先用 GPT、Claude 或 Gemini 等强 API，把整个交互范式、runtime 和 benchmark 跑通。**
+
+不训练 executor。
+
+不训练 UI code generator。
+
+也不先训练一个“什么时候显示什么组件”的模型。
+
+原因很直接：
+
+1. 当前最大风险是交互范式和系统闭环能不能成立，不是模型精度；
+2. 训练会消耗你最紧缺的时间；
+3. benchmark 尚未完成前，不知道真正的学习瓶颈是什么；
+4. CHI 不要求论文必须 fine-tune 一个模型；
+5. 一个有明确新交互技术、完整系统实现和扎实评估的 train-free systems paper 可以成立。
+
+## 但是“只调用 API”不等于只写 prompt
+
+这里必须区分。
+
+### 不够的版本
+
+```text
+GPT API
++
+React dashboard
++
+browser-use
+```
+
+审稿人会问：
+
+> 为什么这不只是一个产品集成？
+
+### 足够有技术主体的版本
+
+即使不训练，你仍然需要实现：
+
+- typed task-state representation；
+- cross-app entity binding；
+- incremental task-state compiler；
+- semantic edit patch；
+- dependency propagation；
+- live execution controller；
+- bidirectional synchronization；
+- state-diff verifier；
+- replayable benchmark harness；
+- OOD application/schema evaluation。
+
+这里的贡献是**可执行系统机制和评价方法**，不是模型参数。
+
+---
+
+## 唯一值得训练的备选模块
+
+只有自动实验表明下面的问题确实严重时，才训练：
+
+# Cross-app binding critic
+
+它判断：
+
+> 两个不同应用中的字段、对象或状态，是否表示同一个任务实体或依赖关系。
+
+例如：
+
+- Calendar 中的 `Aug 14 launch sync`；
+- TaskBoard 中的 `Release milestone`;
+- Docs 中的 `Launch plan v3`；
+
+是否属于同一个项目发布任务。
+
+同一个 `Alex` 可能是：
+
+- Calendar attendee；
+- TaskBoard owner；
+- 文档作者；
+- 邮件收件人。
+
+模型需要理解语义角色，而不能只匹配字符串。
+
+### 训练输入
+
+- 用户任务；
+- 局部截图和 DOM；
+- 应用对象及字段；
+- Agent 轨迹；
+- tool schema；
+- 可观察状态差异。
+
+### 训练输出
+
+```text
+这些对象是否绑定到同一个任务实体
+以及它们是什么关系
+```
+
+### 标签来源
+
+从 benchmark generator 的隐藏任务图和应用数据库映射自动产生，不让同一个模型给自己生成 GT。
+
+## 训练启动条件
+
+在第四周做一次明确决策：
+
+- API/prompt 方法在 held-out app、字段重命名和 schema 变化上仍然稳定：**不训练**；
+- 出现系统性的跨应用实体混淆，而且手写规则开始按应用无限膨胀：**训练一个轻量 QLoRA/critic**。
+
+无论是否训练，都不要改变论文主线。
+
+---
+
+# 八、需要什么权限和基础设施？
+
+## Web 主环境不需要重 OS 权限
+
+你需要的主要能力是：
+
+- 浏览器自动化权限；
+- 截图；
+- DOM 或 accessibility tree；
+- action log；
+- 每个应用的隔离测试账户；
+- 应用数据库或状态 adapter；
+- reset 和 deterministic seed；
+- 可选 MCP/API credentials；
+- Docker 容器或独立 namespace。
+
+不需要：
+
+- 系统 root 权限；
+- 真实用户邮件账户；
+- 真实企业 OAuth；
+- 真实敏感文件；
+- OS 全局键鼠 hook；
+- 驱动级虚拟化。
+
+## 用户研究权限
+
+任务型用户研究通常需要学校或机构的人类研究伦理审批。
+
+建议现在就提交，但让它不阻塞工程：
+
+- 使用合成项目数据；
+- 不要求参与者登录个人账户；
+- 不收集私人邮件、文件或日历；
+- 用户研究在第六周以后开始；
+- 自动 benchmark 在审批完成前已经能够独立运行。
+
+---
+
+# 九、代码框架搭出来，CHI 是否基本完成？
+
+## 不是
+
+一个很好看的 demo 能证明“它能运行”，但 CHI 还会追问：
+
+1. 它解决了什么过去没有被解决的人机交互问题？
+2. 为什么必须设计成任务级交互，而不是聊天或轨迹 timeline？
+3. 系统如何保证任务 UI 不歪曲真实软件状态？
+4. 用户修改能否可靠落实到多个应用？
+5. 是否真的改善了用户理解和控制？
+6. 是否为了 UX 牺牲了大量任务成功率和效率？
+7. 哪些发现可以被其他研究者和产品设计者复用？
+
+所以一篇完整论文需要五类贡献。
+
+## 1. 交互贡献
+
+提出并实例化：
+
+> 用户直接操纵跨应用任务状态，Agent 负责操纵应用。
+
+## 2. 系统贡献
+
+一个实时、双向、可验证的 task-to-application runtime。
+
+## 3. 表示与算法贡献
+
+任务状态、跨应用 binding、semantic patch 和依赖传播。
+
+不一定是训练模型，但必须是可复用机制。
+
+## 4. Benchmark 和自动实验贡献
+
+证明：
+
+- 编译准确；
+- 修改传播正确；
+- round trip 一致；
+- OOD 可迁移；
+- Agent 成功率和成本仍然合理。
+
+## 5. 用户研究贡献
+
+证明这种界面是否真的让用户：
+
+- 更快理解任务状态；
+- 更准确修改跨应用任务；
+- 更容易发现 Agent 错误；
+- 少进行低层操作和文字解释；
+- 在不持续监督轨迹的情况下保持有效控制。
+
+代码框架是必要条件，不是充分条件。
+
+---
+
+# 十、你需要汇报哪些指标？
+
+你的理解基本正确，但不能只报告“Agent 准确率 + 用户体验”。
+
+建议分成三层。
+
+## 第一层：Agent 是否仍然能完成任务
+
+- End-to-end task success；
+- 应用级子任务 success；
+- action 数；
+- latency；
+- token/tool cost；
+- 因任务 UI 而新增的执行失败。
+
+可以把传统 Agent 作为 non-inferiority baseline：
+
+> 新交互方式在提高用户操作能力时，任务成功率不能显著低于直接 Agent。
+
+具体 margin 可以在实验前定义，例如允许不超过一个小的百分点区间，而不是实验结束后再挑标准。
+
+## 第二层：任务界面是否忠实且可执行
+
+这才是你的技术主指标：
+
+- task-state extraction accuracy；
+- stale state rate；
+- semantic edit realization；
+- cross-app propagation correctness；
+- unintended state change；
+- round-trip consistency；
+- held-out app/schema performance。
+
+## 第三层：人类是否真正受益
+
+最重要的不是“觉得界面漂亮”。
+
+主要测：
+
+- 用户识别跨应用错误的正确率；
+- 用户完成一次任务修改所需时间；
+- 用户需要执行的低层操作数；
+- 用户需要额外用文字解释的次数；
+- 最终任务是否符合用户修改；
+- 用户对当前真实状态和下一步效果的理解准确率。
+
+控制感、可用性和工作负担可以作为辅助结果。
+
+---
+
+# 十一、用户实验应该比较什么？
+
+推荐三个条件：
+
+## 条件 A：Chat-only Agent
+
+用户通过自然语言查看状态、提出修改。
+
+## 条件 B：Readable trajectory / plan UI
+
+用户能够看到计划、进度和步骤，可以暂停或发送文字反馈，但不能直接操作任务对象。
+
+## 条件 C：你的 Task Workspace
+
+用户直接修改日期、负责人、依赖、选择和任务状态，系统将修改落实到真实应用。
+
+## 用户任务
+
+例如：
+
+- 组织项目发布；
+- 调整会议和项目计划；
+- 准备客户汇报；
+- 重新分配延期工作。
+
+每个任务植入少量跨应用不一致：
+
+- Calendar 日期正确，但 TaskBoard deadline 过期；
+- 负责人修改后，文档权限没有同步；
+- 发布日期更新了，但邮件草稿仍使用旧日期；
+- Agent 把一个无关文档绑定到当前任务。
+
+主要看用户能否发现并修复，而不是让参与者填写一堆抽象 trust scale。
+
+---
+
+# 十二、完整系统架构
+
+```text
+task-native-agent/
+├── apps/
+│   ├── calendar/
+│   ├── taskboard/
+│   └── docs/
+│
+├── runtime/
+│   ├── browser_controller/
+│   ├── gui_executor/
+│   ├── tool_executor/
+│   ├── event_bus/
+│   └── replay_engine/
+│
+├── task_state/
+│   ├── representation/
+│   ├── compiler/
+│   ├── entity_binding/
+│   └── dependency_graph/
+│
+├── workspace_ui/
+│   ├── renderer/
+│   ├── editable_components/
+│   └── live_sync/
+│
+├── execution/
+│   ├── patch_compiler/
+│   ├── replanner/
+│   └── action_dispatcher/
+│
+├── benchmark/
+│   ├── task_templates/
+│   ├── initial_states/
+│   ├── user_edits/
+│   ├── ood_splits/
+│   └── live_runs/
+│
+├── verifier/
+│   ├── app_state_checks/
+│   ├── cross_app_checks/
+│   └── round_trip_checks/
+│
+├── baselines/
+├── evaluation/
+├── user_study/
+├── docker-compose.yml
+└── README.md
+```
+
+---
+
+# 十三、八周工作计划
+
+CHI 2027 full paper 截止日期是 **2026 年 9 月 10 日 AoE**，没有 abstract deadline。当前时间只够做一个任务族、三个核心应用和一个完整技术闭环。
+
+## 第 1 周：冻结论文问题和最小纵向切片
+
+目标不是写很多基础设施，而是跑通一条完整路径。
+
+必须完成：
+
+- 冻结任务族：project coordination；
+- 确定三个应用；
+- 定义任务状态表示；
+- 手写 12–20 条 benchmark cases；
+- 跑通 Calendar + TaskBoard；
+- Agent 执行时任务 UI 能更新；
+- 用户修改一个日期后，两个应用都正确改变；
+- verifier 能自动判定结果。
+
+本周结束的 demo 应是：
+
+> Agent 安排发布 → UI 显示发布状态 → 用户改日期 → Agent 自动更新 Calendar 和 TaskBoard → verifier 通过。
+
+这一周不训练模型。
+
+## 第 2 周：完成环境和状态层
+
+完成：
+
+- 三个 Web 应用；
+- reset、seed、replay；
+- screenshot、DOM、action 和 state log；
+- app state adapter；
+- GUI executor；
+- 可选 tool/MCP executor；
+- 统一事件流。
+
+删掉真实 OS 和真实商业账户集成。
+
+## 第 3 周：任务状态编译和实时界面
+
+完成：
+
+- task-state schema；
+- entity binding；
+- incremental compiler；
+- 结构化任务 UI；
+- live update；
+- stale-state detection；
+- API-based compiler baseline。
+
+本周结束后，Agent 正常执行时，任务界面应持续反映真实状态。
+
+## 第 4 周：双向操作闭环
+
+完成：
+
+- 用户 editable components；
+- semantic patch；
+- dependency propagation；
+- re-planning；
+- GUI/tool execution；
+- round-trip verifier；
+- cancellation 和失败处理。
+
+这是论文最关键的一周。
+
+如果第四周结束仍只能“显示”而不能可靠“写回”，就不能继续增加漂亮 UI，而应集中修复闭环。
+
+## 第 5 周：Benchmark 和基线
+
+完成：
+
+- 30–50 个模板；
+- 500–1,500 个参数化实例；
+- seen / held-out schema；
+- held-out task combinations；
+- chat-only baseline；
+- read-only trajectory baseline；
+- rule-based binding；
+- API prompt binding；
+- 自动化主实验。
+
+本周结束后应已经产生论文主要技术表格。
+
+## 第 6 周：训练决策和用户实验 pilot
+
+先检查：
+
+- API 方法是否在 OOD 上足够好；
+- 错误是否主要来自 executor；
+- 错误是否主要来自 binding；
+- 规则是否正在按应用无限增加。
+
+只有 binding 出现清楚而稳定的学习问题时，进行轻量训练。
+
+同时完成：
+
+- 用户实验界面；
+- 3 个实验条件；
+- 任务 pilot；
+- 日志与问卷；
+- demo 视频初版。
+
+## 第 7 周：正式实验和论文主体
+
+完成：
+
+- 18–24 人左右的后置任务型研究，视伦理流程和招募条件调整；
+- 自动实验补充；
+- failure analysis；
+- 系统与 benchmark 开源清理；
+- 完成 Introduction、Related Work、System、Benchmark、Evaluation 初稿。
+
+## 第 8 周：冻结功能并投稿
+
+只做：
+
+- 重跑最终数字；
+- 统计与可视化；
+- 补 ablation；
+- README；
+- Docker 启动；
+- demo 视频；
+- accessibility 和匿名化检查；
+- 全文收敛。
+
+禁止此时新增：
+
+- OSWorld 全量实验；
+- 个性化 memory；
+- 长期 task history；
+- 自动 UI 风格生成；
+- 多种任务族；
+- policy editor；
+- 通用 Agent OS。
+
+---
+
+# 十四、论文最终应该长什么样
+
+## 论文主张
+
+> 当前 GUI Agent 仍以应用操作和执行轨迹为中心。我们提出一种 task-native interaction layer，将异质应用中的实时状态编译为可编辑任务界面，并将用户的任务级操作重新编译为可执行的跨应用修改。
+
+## 三个研究问题
+
+### RQ1：系统正确性
+
+能否从在线 GUI/tool 轨迹中准确维护一个实时任务状态？
+
+### RQ2：可执行控制
+
+用户对任务状态的修改能否被正确传播到多个应用，并保持最终状态一致？
+
+### RQ3：人类价值和自动化代价
+
+与聊天和轨迹式控制相比，任务界面能否提升理解、错误发现和修改效率，同时保持 Agent 任务成功率和自动化收益？
+
+## 预期贡献
+
+1. 一种从 application-centric 到 task-native 的 Agent 交互技术；
+2. 一个在线双向编译与同步 runtime；
+3. 一个针对 task-state fidelity 和 edit realization 的 evaluation suite；
+4. 大规模自动实验；
+5. 后置任务型用户研究；
+6. 完整开源系统和演示。
+
+---
+
+# 十五、明确的负样本
+
+## 不好的版本一：漂亮的 Agent Dashboard
+
+显示计划、进度、状态和日志，但不能写回真实应用。
+
+问题：只是可视化。
+
+## 不好的版本二：把每一步轨迹变成可编辑卡片
+
+用户仍然需要理解低层动作，核心仍是 trajectory supervision。
+
+## 不好的版本三：动态生成任意 UI
+
+只研究“应该生成列表、表格还是看板”。
+
+问题：会与 DuetUI、SaC、A2UI 等 GenUI 工作直接重合。
+
+## 不好的版本四：通用 Agent OS
+
+支持所有软件、所有任务、长期记忆和多设备。
+
+问题：八周内无法验证，也无法形成一条清楚评估逻辑。
+
+## 不好的版本五：只做用户研究
+
+参与者觉得 task UI 很好看、更有控制感，但没有自动证明它是否忠实反映并修改了真实软件状态。
+
+问题：不符合你的技术定位。
+
+## 不好的版本六：为了 tech-heavy 强行训练
+
+训练一个 text-to-UI 模型，但系统的 binding 和 verifier 仍然薄弱。
+
+问题：训练对象不是研究瓶颈。
+
+---
+
+# 最终落地大纲
+
+这项工作最后应该同时是三个东西。
+
+## 一个产品 Demo
+
+用户交给 Agent 一个跨应用任务，任务逐渐生长成一个持续存在的小型应用；用户直接操作这个任务应用，Agent 在后台操作真实软件。
+
+## 一个研究系统
+
+系统能够：
+
+- 读取 GUI/tool 执行；
+- 维护任务状态；
+- 生成可编辑界面；
+- 把用户修改传播到多个应用；
+- 自动检测不同步和错误。
+
+## 一个研究评价平台
+
+它可以独立回答：
+
+- 任务 UI 是否正确；
+- 用户修改是否真的执行；
+- 跨应用状态是否一致；
+- Agent 成功率损失多少；
+- 用户是否更高效、更准确地理解和控制任务。
+
+所以，**你现在确实可以立即开工，而且应该先调用专家 API，不训练模型。**
+
+第一阶段唯一目标不是“搭一个完整漂亮框架”，而是在一周内完成下面这条纵向链路：
+
+```text
+两个 Web 应用
+→ Agent 在线执行
+→ 实时任务界面
+→ 用户修改一个任务变量
+→ Agent 跨应用落实
+→ 自动 verifier 判定正确
+```
+
+这条链路跑通，方向就成立了；之后再扩到第三个应用、benchmark、用户研究和可选的轻量 binding model。
