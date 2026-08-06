@@ -1,0 +1,86 @@
+[
+  {
+    "task_id": "release_reschedule",
+    "neg_control": true,
+    "broken": "noop",
+    "score": 0.3,
+    "changed_fraction": 0.0,
+    "untouched_fraction": 1.0,
+    "resynced_fraction": 0.0,
+    "hard_fail": false,
+    "passed": true,
+    "dispatch": {
+      "n_ops": 3,
+      "n_applied": 0,
+      "all_applied": false,
+      "ops": [
+        {
+          "app": "calendar",
+          "entity_id": "E1",
+          "operator": "move_event",
+          "value": "2026-08-18",
+          "applied": false,
+          "error": "neg-control: noop"
+        },
+        {
+          "app": "taskboard",
+          "entity_id": "T1",
+          "operator": "set_deadline",
+          "value": "2026-08-18",
+          "applied": false,
+          "error": "neg-control: noop"
+        },
+        {
+          "app": "taskboard",
+          "entity_id": "T2",
+          "operator": "set_deadline",
+          "value": "2026-08-18",
+          "applied": false,
+          "error": "neg-control: noop"
+        }
+      ]
+    }
+  },
+  {
+    "task_id": "design_review_delay",
+    "neg_control": true,
+    "broken": "noop",
+    "score": 0.3,
+    "changed_fraction": 0.0,
+    "untouched_fraction": 1.0,
+    "resynced_fraction": 0.0,
+    "hard_fail": false,
+    "passed": true,
+    "dispatch": {
+      "n_ops": 3,
+      "n_applied": 0,
+      "all_applied": false,
+      "ops": [
+        {
+          "app": "calendar",
+          "entity_id": "E3",
+          "operator": "move_event",
+          "value": "2026-08-22",
+          "applied": false,
+          "error": "neg-control: noop"
+        },
+        {
+          "app": "taskboard",
+          "entity_id": "T4",
+          "operator": "set_deadline",
+          "value": "2026-08-22",
+          "applied": false,
+          "error": "neg-control: noop"
+        },
+        {
+          "app": "taskboard",
+          "entity_id": "T5",
+          "operator": "set_deadline",
+          "value": "2026-08-22",
+          "applied": false,
+          "error": "neg-control: noop"
+        }
+      ]
+    }
+  }
+]

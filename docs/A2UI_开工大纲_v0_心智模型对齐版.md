@@ -1,9 +1,11 @@
-# A2UI 开工大纲（单一权威文档·心智模型对齐版）
+# TaskVM 开工大纲（单一权威文档·锁定版）
 
-> 本文件是我（Claude）通读全部材料后形成的**唯一开工基础**，合并并取代了此前的 `A2UI_介绍与开工大纲.md` 与 `A2UI_开工基础plan.md`（二者已删除，重要内容并入此处）。
-> 输入材料：5 份外部规划 txt（现位于 `docs/oracle/`：HCI-UI 总纲 / GenerativeUI 调研 / 与 DuetUI 差异 / 与 SaC+Sidekick 差异 / CHI 工作计划）+ 4 篇论文 tex 原文（`docs/references/`：DuetUI / SaC / Sidekick / Macaron-A2UI）。
-> 所有竞品逐字引用均经独立 verifier 对 tex 原文核对（标【核对】）。Sidekick/Macaron 边界、6 周排期、三方撞车独立判断、15 个开放问题的展开解释均为本次新增。
-> 今天 2026-07-30；CHI 2027 full paper deadline ≈ 2026-09-10 AoE（用户确认无延期、只剩 6 周）。标【待对齐】=需你拍板、会影响我搭什么。
+> 本文件是通读全部材料并完成 15+1 个开放问题（含 §15-G-Q16 新增项）**全部拍板、零遗留待确认项**后形成的**唯一开工基础**，取代此前的【心智模型对齐版】。
+>
+> **项目更名**：项目代号由 **A2UI 正式更名为 TaskVM**（见 §15-Q2 决策记录）。原因：`A2UI` 是 Google 于 2025 年发起的通用 agentic UI 声明式协议名（`a2ui.org`，v0.8，2025-09 创建 / 2025-11 更新），Macaron-A2UI（COLM 2026，Mind Lab 团队开源工作）只是该协议的一个训练侧实现（模型），与本项目及本团队均无归属关系、并非本项目前作，三者（Google 协议 / Macaron-A2UI / 本项目）都不是"我们的项目"，继续用 `A2UI` 做代号会让审稿人误以为是同一件事。**TaskVM 项目在实现中仍可能选择性复用 A2UI v0.8 协议作为 UI 渲染层的传输格式**（见 §7 与 §15-Q6），"更名"与"是否用该协议渲染界面"是两件独立的事，不冲突。
+>
+> 输入材料：5 份外部规划 txt（`docs/oracle/`）+ 4 篇竞品论文 tex 原文（`docs/references/`：DuetUI / SaC / Sidekick / Macaron-A2UI）+ AOHP 技术报告（`docs/references/AOHP-paper/`，已确认为相邻工作、非撞车）。
+> 今天 2026-07-30；CHI 2027 full paper deadline ≈ 2026-09-10 AoE，无延期、只剩 6 周。全文【待对齐】标记已全部拍板清空，剩余的仅为落地时的工程细节，交由开工的 coding agent 在 W1 中自行决定并记录。
 
 ---
 
@@ -34,7 +36,7 @@
 用户对 Agent 说：*帮我准备下周五的项目发布：安排发布会议、整理材料、创建剩余任务、起草团队通知。*
 真实状态分散在 Calendar（会议）/ TaskBoard（任务、负责人、截止）/ Drive（材料）/ Mail（通知草稿）。传统 GUI Agent 只给用户看"正在打开 Calendar…正在点击…"的轨迹，用户仍要理解几十步。
 
-A2UI 不展示轨迹，而是实时生成一个**活的任务状态**：
+TaskVM 不展示轨迹，而是实时生成一个**活的任务状态**：
 ```
 项目发布            状态：准备中
 发布日期          8 月 14 日
@@ -72,11 +74,17 @@ A2UI 不展示轨迹，而是实时生成一个**活的任务状态**：
 - 技术评测：GPT-4 同源（persona 生成 + 数据集 + baseline + LLM-as-judge，双评 + 人工复核 + κ>0.95，同源偏差仍在）；Full Loop W-F1=0.508，Data F1=0.367，loop 提 Recall 降 Precision。用户研究 2 条件 vs Stitch，N=24，总任务时间**未显著**降低（188.38s vs 195.38s, p=.5545），收益只在沟通成本。
 - DuetUI 自陈"proximity to a fixed Ground Truth is an insufficient proxy"——它**观察到**了安全压缩前沿问题，但只当 metric artifact 哀叹，没形式化为一等指标。→ 这正是我们 SCF 的切口。
 
-### Macaron-A2UI【你们自家 COLM 2026 论文】
+### Macaron-A2UI【开源第三方工作，COLM 2026，Mind Lab 团队】
 - `2-relatedworks.tex` L5（逐字）：*"In contrast to these lines of work, we focus on assistant-side Generative UI rather than action execution over an existing interface."*
 - `3-problem.tex` L5：声明式协议（A2UI v0.8）+ 可信组件 catalog 渲染，**不**生成 HTML/JS/framework 代码。
-- 这是 **CHI 工作天然占据的缝隙**：Macaron 明确把"对既有界面的动作执行"排除在外，且是同团队前作。CHI 工作 = Macaron 主动让出的那一半。
-- 可复用资产：A2UI-Bench（300 任务 / atomic·depth·width + no_ui_chat 负类）、L1 自动 / L2·L3 LLM-judge(gpt-5.1) / V1-V3 VLM-judge 评测架构、Flutter Web renderer + 23 组件 catalog + render-check gate、LoRA SFT→GRPO 配方（reward 0.2/0.4/0.4）、minimal-prompt 评测 regime、训练好的 Grande(235B,74.2)/Venti(GLM-5.1,75.6) 模型。论文承诺开源模型+bench+协议。
+- 这是 **CHI 工作天然占据的缝隙**：Macaron 明确把"对既有界面的动作执行"排除在外。CHI 工作 = Macaron 主动让出的那一半。
+### AOHP（Android Open Harness Project，清华/北大/港大，2026-06 技术报告，已深读核对）【结论：不撞车，仅为相邻工作】
+`main.tex` 摘要与正文核对：
+- AOHP 是 **fork AOSP 的操作系统级 agent harness**，核心是让 agent 成为"OS 一等公民"：personalized service composition（把多个 App 聚合成"购物入口"等任务级入口）+ efficient agent interfaces（结构化 UI、后台虚拟屏幕并行、事件流）+ secure information flow（敏感数据 vault 化 + taint tracking）。
+- 表面相似点：它的 "Generated Service Entrances"（§Personalized Service Composition）把多个 App 聚合为一个任务级入口，词汇上和我们的"任务界面聚合多应用状态"接近。
+- 实质区别（三条，构成不撞车的理由）：(a) AOHP 改的是**操作系统内核/框架层**（AOSP fork），解决的是"agent 如何高效访问系统资源"，不是"如何把多个 App 的真实状态压缩为可编辑任务界面"；(b) AOHP **没有 round-trip verification 闭环**——它的评测指标是任务完成率（+21.12pp）、token 成本（-51.55%）、执行时延，全篇没有"用户编辑任务变量→写回验证→界面重新同步"这套机制；(c) AOHP 的 personalization 是"跨 App 复用用户偏好记忆"（如送货时间偏好从一个购物 App 迁移到另一个），不是"同一任务变量在多个 App 间的语义绑定与依赖传播"。
+- 可借鉴的具体工程做法（非概念，纯方法论）：其 benchmark 用 **checkpoint-weighted completion rate**（30 个真实任务，按目标 checkpoint 打分，允许部分完成给部分分），比二元成功/失败更细粒度，值得在 TaskVM 的 verifier 打分设计中借鉴。
+- **结论**：AOHP 作为 related work 的"系统层相邻工作"引用（同属"重新设计 agent 与 OS/App 交互基础设施"这个大方向），不构成 novelty 威胁，不需要额外的切割论证。
 
 ### Sidekick【UIST'26，2026-07-20 发布，今天新增】
 - `5_user_study.tex` L20（逐字）：*"Sidekick is not an agent or CUA, but a prototype system that serves as a communication layer for users to multitask with CUAs. It does not perform actions on the computer, but only provides feedback to users."*
@@ -105,7 +113,7 @@ SaC 已经占了"动态生成的 app 是人-Agent 交互媒介"这个宏观主�
 表面都是"生成一个任务 UI + 人操作 + 人-Agent 循环"。但 DuetUI 是 **top-down**（prompt→任务分解→界面），服务是 **LLM 模拟**，人是**高频 co-generator**（每次操作都在重塑意图），UI 是"帮 Agent 理解人想做什么"。我们是 **bottom-up**（真实应用实时状态→反向编译），**真实执行**，人是**低频**（偶尔改个任务变量），UI 是"帮人理解 Agent 正在改变的世界"。DuetUI 连真实 app 都不碰。撞车只在"懒读摘要的审稿人"层面，不在实质。风险是 framing，不是技术。
 
 **③ Sidekick —— 实质撞车最低，但 demo 混淆风险最高（且最新、审稿人记忆最新）。**
-Sidekick 实质上是纯反馈/通信层：不执行、不写回、不绑 live state、不跨应用、无独立 verifier。它和我们在每个承重轴上都正交。**但** 它是 7 月 20 号刚发的，审稿人脑子里最新鲜；而且它的表面词汇（CUA + 侧边面板 + 多模态反馈 + 人间歇查看）和一个**偷懒的 A2UI demo** 最像。如果我们的 demo 一开场是"Calendar Agent 80% / Jira Agent 60% / Docs 完成 / 发现冲突 / [暂停][查看日志][继续]"——那就是一个跨应用版 Sidekick，死路。所以 Sidekick 的威胁不在思想重叠，而在 **demo 纪律**：绝不能用"状态仪表盘"开场。
+Sidekick 实质上是纯反馈/通信层：不执行、不写回、不绑 live state、不跨应用、无独立 verifier。它和我们在每个承重轴上都正交。**但** 它是 7 月 20 号刚发的，审稿人脑子里最新鲜；而且它的表面词汇（CUA + 侧边面板 + 多模态反馈 + 人间歇查看）和一个**偷懒的 TaskVM demo** 最像。如果我们的 demo 一开场是"Calendar Agent 80% / Jira Agent 60% / Docs 完成 / 发现冲突 / [暂停][查看日志][继续]"——那就是一个跨应用版 Sidekick，死路。所以 Sidekick 的威胁不在思想重叠，而在 **demo 纪律**：绝不能用"状态仪表盘"开场。
 
 **一句话总结我的判断**：三篇不是一堵墙，而是各缺一个不同的锚点——DuetUI 缺 live state/executable binding（它是 UI-from-intent），SaC 缺 existing applications/round-trip（app-IS-state，不写回），Sidekick 缺 executable binding/live state/round-trip/cross-app（feedback-only）。**只有我们四个锚点同时在。** 防御策略因此各不相同：SaC=让出大概念、楔入 source-of-truth；DuetUI=锐化 top-down-vs-bottom-up + 模拟-vs-真实；Sidekick=demo 纪律（用"操纵+写回+verifier"开场，绝不用状态仪表盘开场）。
 
@@ -118,7 +126,7 @@ Sidekick 实质上是纯反馈/通信层：不执行、不写回、不绑 live s
 | **DuetUI** | Agent 的任务分解 | 重塑人的意图（top-down 共生成） | 无（GPT-4 同源 judge） |
 | **SaC** | 界面**就是** state（自洽生成 app） | 演化这个 app 本身 | 无（existence proof） |
 | **Sidekick** | Agent 的动作 | 什么都不改（只观察/暂停） | 仅动作级错误检测 |
-| **A2UI（我们）** | **多个真实应用的实时状态** | **写回那些真实应用** | **独立 verifier 读 ground-truth** |
+| **TaskVM（我们）** | **多个真实应用的实时状态** | **写回那些真实应用** | **独立 verifier 读 ground-truth** |
 
 哲学一句话：DuetUI 让 UI 帮 Agent 理解人；SaC 让 app 成为 state 本身；Sidekick 让 UI 当 Agent 的仪表盘；**我们让 UI 当软件世界的控制台——一个忠实、可操纵、可验证的真实应用投影；你改变的是世界，不是 Agent 的计划。**
 
@@ -153,59 +161,62 @@ Sidekick 实质上是纯反馈/通信层：不执行、不写回、不绑 live s
 
 ---
 
-## 5. 一等贡献：安全压缩前沿（Safe Compression Frontier）【待对齐·地位】
+## 5. 二等（衍生）贡献：安全压缩前沿（Safe Compression Frontier）【已拍板：降级，见 §15-Q4】
 
-- **人本矛盾**：界面必须压缩才有价值 ∩ 必须保留会改变结果的区别 ∩ Agent 不应替用户决定什么区别重要。简化=删除区别=价值判断。模型更强不能消除。
-- **研究问题**：给定任务 + live state，系统能否自动找出**最小但足够**的人可见可操作自由度集，使得 (a) coverage（每个需要的状态改变可表达）(b) round-trip fidelity / non-interference（每个会改变结果的区别被显形）(c) compression（无关的东西不塞进来）。
-- **操作化**：三轴联合测量 `coverage × round-trip-fidelity × interaction-compression`，核心技术目标 = **最大化 compression 同时维持 projection fidelity** 的 Pareto 前沿。
-- **"可玩"由此涌现**（不是硬造）：近单调执行任务 → 进度轨；有真实 trade-off → 少量控制旋钮/分支 gallery；不可压缩探索/认知 → 透镜（聚合、定位冲突、导航，不替人操纵）。系统按任务选压缩到哪一层。
-- **为什么不是 GenUI/DuetUI**：不学"生成什么 widget"（Macaron 已商品化），不学"用 UI 共塑模糊意图"（DuetUI 已占）；学的是**哪些维度可被安全编译掉、哪些必须作为人可见可操作自由度保留**——fidelity-governed projection，不是 UI 生成。
-- **【待对齐】**：HCI-UI 大纲只把 SCF "seed" 成研究问题（line 7758）；`开工基础plan` 提为一等贡献；`CHI 工作计划` doc **完全没提** compression。三份不一致。我倾向按锁定版当一等贡献（它直接驱动架构里的 `projection_policy` 模块 + 一个 Pareto 实验），但这决定了我搭的框架是否含一个"按任务决定 DOF/控件"的策略模块——需你拍板。
+> **地位锁定**：SCF **不是一等贡献**，一等贡献是 §1 的核心构念本身——**可执行投影保真性（Executable Projection Fidelity）**，即"任务界面是多个真实应用状态的忠实、可执行、可验证的投影"这件事本身。SCF 是在这个投影已经成立的前提下，一个重要但衍生的次级问题——"投影在简化时如何不丢失关键信息"。降级理由：①"新交互范式"这个一等主张本身已经和 SaC 的语言（"the application itself becomes the interaction state"）非常接近，容易被不细读的审稿人认为撞车，因此论文的第一道防线必须是**保真投影 + round-trip verification**这一条独一无二的技术主张（三篇竞品都做不到，见 §4.3 demo 弧），而不是压缩策略；②SCF 若强行升格为一等，需要额外搭一个 `projection_policy` 策略模块并跑 Pareto 实验，在 6 周窗口内会挤占 W1 kill test 的开发资源，直接威胁唯一的真实 gate。
+>
+> **落地含义**：`projection_policy` 模块**保留**在架构里（§8），但降级为"当前版本用规则/简单启发式实现，不追求 Pareto 前沿实验"；SCF 的完整三轴测量（coverage×round-trip-fidelity×interaction-compression）与 Pareto 前沿实验，写入 Discussion / Future Work，作为"我们的框架为下一步研究这个问题提供了必要的度量基础设施"，而不是本文的核心实验章节。
+
+- **人本矛盾（保留，作为 Discussion 里的次级问题陈述）**：界面必须压缩才有价值 ∩ 必须保留会改变结果的区别 ∩ Agent 不应替用户决定什么区别重要。简化=删除区别=价值判断。模型更强不能消除。
+- **研究问题（保留，但不作为本文一等实验）**：给定任务 + live state，系统能否自动找出**最小但足够**的人可见可操作自由度集，使得 (a) coverage（每个需要的状态改变可表达）(b) round-trip fidelity / non-interference（每个会改变结果的区别被显形）(c) compression（无关的东西不塞进来）。
+- **"可玩"由此涌现**（不是硬造，仍是叙事资产，但不需要专门模块支撑）：近单调执行任务 → 进度轨；有真实 trade-off → 少量控制旋钮/分支 gallery；不可压缩探索/认知 → 透镜（聚合、定位冲突、导航，不替人操纵）。**W1-W4 用规则/启发式决定用哪一层即可，不需要学出一个策略模块。**
+- **为什么不是 GenUI/DuetUI**：不学"生成什么 widget"（Macaron 已商品化），不学"用 UI 共塑模糊意图"（DuetUI 已占）；学的是**哪些维度可被安全编译掉、哪些必须作为人可见可操作自由度保留**——fidelity-governed projection，不是 UI 生成。这句话仍然成立，只是现在挂在"投影保真性"这个一等构念下面作为其中一个属性，而不是独立的一等贡献。
 
 ---
 
-## 6. 四项锁定决策（+ 冲突标注）
+## 6. 四项锁定决策（已全部拍板，无待确认项）
 
-1. **Benchmark = 混合**：3 白盒自建（Calendar/TaskBoard/Drive，sqlite 后端）+ 1 held-out 黑盒（对模型黑盒/对 verifier 白盒 via state adapter）。benchmark 持有隐藏 canonical task graph + DB 映射作 verifier GT；模型推理时只见 screenshot/DOM/a11y/tool schema/trajectory，**永不接触 DB**。
-   - 【冲突/待对齐】`CHI 工作计划` doc 只说"一个 app 皮肤/schema/任务组合做 OOD"+"held-out schema"，比锁定版弱且含糊。需澄清：held-out 单元到底是"第 4 个模型未见过的真实 app"，还是"3 个已见 app 的改名/换肤/schema 变体"，还是两者都要？这俩 OOD 强度差很多。
-2. **UI/可玩任务面 = 一等贡献**（SCF，见 §5）。
+1. **Benchmark = 混合**：3 白盒自建（Calendar/TaskBoard/Drive，sqlite 后端）+ 1 held-out 黑盒（对模型黑盒/对 verifier 白盒 via state adapter）。benchmark 持有隐藏 canonical task graph + DB 映射作 verifier GT；模型推理时只见 screenshot/DOM/a11y/tool schema/trajectory，**永不接触 DB**。held-out 单元采用**两者都要**（见 §15-Q7）：1 个真未见 app（验迁移）+ 已见 app 的 rename/reskin/schema 变体（验反捷径），分别报 OOD 指标。
+2. **一等贡献是可执行投影本身（见 §1/§5），而非 SCF**。SCF 降级为衍生贡献，详见 §5。
 3. **训练 = 诚实 Go/No-Go**：OOD 先设计得足够难以真实区分规则/prompt/学习；有 gap 才训轻量 QLoRA critic，无 gap 则 train-free。**绝不为了 tech-heavy 硬训。verifier 永远来自环境状态，绝不让生成 binding 的模型自评。**
-4. **用户研究 = 4 条件**：C0 原始多 app GUI / C1 静态只读聚合 dashboard / C2 chat agent + 全 app 工具访问（Claude/GPT + 3 app MCP 工具，真正的 non-inferiority 对手）/ C3 我们的投影。
-   - 【冲突】`CHI 工作计划` doc 是 **3 条件**（chat-only / 可读轨迹 / Task-Workspace），缺 raw-multi-app baseline。→ **以锁定 4 条件为准**，但需你确认。
+4. **用户研究 = 4 条件**（已锁定）：C0 原始多 app GUI / C1 静态只读聚合 dashboard / C2 chat agent + 全 app 工具访问（Claude/GPT + 3 app MCP 工具，真正的 non-inferiority 对手）/ C3 我们的投影。非劣性 margin = C3 成功率不低于 C2 的5个百分点；N=18 within-subject（见 §15-Q10）。
 
 ---
 
-## 7. AI 侧：训什么 / 不训什么 + Macaron 复用
+## 7. AI 侧：训什么 / 不训什么 + 协议与 Macaron 关系（已全部拍板，见 §15-Q6）
 
-- **不训** UI 生成器（Macaron 已做到 30B/235B/754B + A2UI-Bench，且是自家工作）。
-- **不训** GUI executor（UI-TARS/GUI-Owl/UI-Venus/Claude Computer Use 已在做，复用）。
+- **不训** UI 生成器，**不部署 Macaron 的已训练模型**（Grande/Venti）。主线直接调用前沿通用模型（GPT-5.6-sol / Claude-Sonnet-5 类）生成 UI，并将 A2UI v0.8 的完整协议规范（`surfaceUpdate`/`dataModelUpdate`/`beginRendering`/`deleteSurface` 四种消息类型的 schema 定义，几千 token）直接注入 system prompt，不需要 skill 机制，这正是 Macaron 论文自己对标的 full-prompt baseline 做法。**不下载不部署 Macaron 模型 → 不算复用其训练产物，也就不 pin 死在 A2UI v0.8**（协议升级只需换 prompt 里的 spec 文本）。若后期因成本考虑改用本地部署的轻量开源模型走 schema-light 路线，届时才真正涉及下载 Macaron checkpoint，但非 W1-W4 主线。
+- **不训** GUI executor（UI-TARS/GUI-Owl/UI-Venus/Claude Computer Use 已在做，复用）。**明确两个模型角色分工**：(1) Agentic UI 生成模型——把多 app 状态编译成任务界面；(2) Compute-use 执行模型——在真实 App 里操作。两者上下文独立，即使都用同一个厂商的模型（如同时用 GPT-5.6），也是两次独立调用，不共享 context。
 - **唯一值得学**：`Cross-App Binding Critic / Task World Compiler`——一个任务变量在异质应用、不同字段名、不同 GUI 表达中分别对应哪些真实状态与操作；改它后哪些关联状态必须同步（effect propagation）。规则写不死：同名异义、异名同义、同字段不同任务语义、跨应用 effect 传播。
   - 标签来源：cloned sandbox 候选 binding → 读真实 before/after state diff → 与隐藏 expected diff 比 → 完全匹配正例、漏改/错改/多改 hard negative。**非 LLM 自评，非研究者逐条标。**
   - 反捷径：同工具不同参数→相反判断；不同工具同 effect→相同判断；重命名/换肤后仍有效；`tool-name-only baseline` 必须在重命名/反标签上显著下降。
   - 形态：3B–7B 多模态/语言 critic，QLoRA/轻量 SFT。
 - **决策点（W4）**：seen app prompt≈92% 但 renamed≈71%、unseen≈54%、错误集中在同名异义/隐含依赖时才训。否则 train-free。
-- **【新增·待对齐】Macaron 关系**：我倾向 **differentiate-while-reusing**——CHI 工作明确占据 Macaron 让出的"对既有界面的动作执行"缝隙（不撞），同时复用 A2UI-Bench/judge prompts/Flutter renderer 作基础设施（降 benchmark 与模型准备的险）。但这会把 CHI 工作与 Macaron 耦合，且需决定 pin A2UI v0.8。需你确认是 build-on / differentiate / independent。
+- **Macaron 关系最终锁定**：**differentiate + 选择性复用基础设施**——CHI 工作明确占据 Macaron 让出的"对既有界面的动作执行"缝隙（不撞，Macaron-A2UI 是与本项目无归属关系的开源第三方工作，非本项目前作）；可选择性复用其公开的 A2UI-Bench 评测思路/judge prompts 作参考，但**不复用其训练模型、不 pin 死在 A2UI v0.8**（理由同上）。
 
 ---
 
 ## 8. 系统架构骨架（我要搭的代码框架）
 
 ```
-a2ui/
-├── apps/                  # 自建可重置 Web 应用（sqlite 后端）
+taskvm/
+├── apps/                  # 自建可重置 Web 应用（sqlite 后端，目录结构参考 SenseAct 的 scenarios/<name>/engine/{reward,injector,*_db}.py 模式）
 │   ├── calendar/  taskboard/  drive/
+│   │   └── engine/        # reward.py(判定成功) / injector.py(注入初始状态+可选的外部并发修改注入，见 §15-E-Q11) / *_db.py
 │   └── _heldout/          # held-out 黑盒 app（OOD；对模型黑盒，对 verifier 白盒 via state adapter）
 ├── harness/               # browser_controller(Playwright) / state_adapter(reset·seed·read-canonical) / trace_capture / replay_engine / shadow_txn(copy-on-write 影子执行)
-├── task_state/            # representation / compiler(Apps→TaskWorld) / entity_binding / dependency_graph / projection_policy(★SCF:决定哪些维度留作人 DOF)
+├── task_state/            # representation / compiler(Apps→TaskWorld) / entity_binding / dependency_graph / projection_policy(规则/启发式实现，不追求 Pareto，见 §5)
 ├── execution/             # patch_compiler(编辑→semantic patch) / replanner / action_dispatcher(GUI/MCP/API hybrid)
 ├── verifier/              # app_state_checks / cross_app_checks / non_interference / round_trip_checks / reconciliation
 ├── workspace_ui/          # renderer / editable_components / live_sync（先结构化文本/表单，不追求花哨）
-├── benchmark/             # task_templates(30-50) / initial_states(隐藏 canonical graph) / user_edits / ood_splits / live_runs
+├── benchmark/             # task_templates(40) / initial_states(隐藏 canonical graph) / user_edits / ood_splits / live_runs；参考 SenseAct 的 cost_model.py 真实 token 计量方式做 API 成本追踪
 ├── baselines/             # 规则/类型匹配·prompt-only·frontier+shadow·人工 binding 上界·规则+critic
 ├── user_study/            # 4 条件
 └── evaluation/  docker-compose.yml  README.md
 ```
-**开工第一周我只动**：`apps/{calendar,taskboard}`(极简可重置) + `harness/{state_adapter,replay_engine,trace_capture}` + `task_state/{representation,compiler(frontier API)}` + `verifier/round_trip_checks` + `workspace_ui/renderer`(结构化文本/表单)。**先 replay-mode**，跑通 compiler→UI→patch→执行→verifier。
+**开工第一周只动**：`apps/{calendar,taskboard}`(极简可重置) + `harness/{state_adapter,replay_engine,trace_capture}` + `task_state/{representation,compiler(frontier API)}` + `verifier/round_trip_checks` + `workspace_ui/renderer`(结构化文本/表单)。**先 replay-mode**，跑通 compiler→UI→patch→执行→verifier。
+
+> **仓库/代码命名**：目录名建议由 `a2ui` 迁往 `taskvm`；若迁移成本过高，允许保留 `a2ui/` 作为仓库目录但内部模块/类名统一用 `TaskVM` 前缀，不影响开工进度，由 coding agent 自行决定。
 
 ---
 
@@ -272,7 +283,7 @@ a2ui/
 
 - ❌ 漂亮 Agent Dashboard，但不能写回真实应用（只是可视化）。
 - ❌ 把每步轨迹变成可编辑卡片（仍是 trajectory supervision，与 Magentic-UI 增量）。
-- ❌ 动态生成任意 UI、研究"该用列表还是看板"（与 DuetUI/SaC/A2UI 正面重合）。
+- ❌ 动态生成任意 UI、研究"该用列表还是看板"（与 DuetUI/SaC 正面重合）。
 - ❌ 通用 Agent OS / 所有软件所有任务长期记忆多设备（不可验证）。
 - ❌ 只做用户研究、没有自动保真证明（不符合技术定位）。
 - ❌ 为 tech-heavy 强行训练 text-to-UI 模型（训练对象不是瓶颈）。
@@ -299,74 +310,59 @@ a2ui/
 
 ---
 
-## 15. 待对齐的开放问题（15 个，展开解释版）【待你拍板】
+## 15. 15 个开放问题的最终拍板记录（已全部完成，供后续 coding agent 直接执行）
 
-> 这 15 个是**会改变我搭什么**的分歧点。下面每个都展开成"这是什么问题 / 为什么重要 / 我的推荐默认"。你逐条"同意"或纠正即可。A 组（1-3）与 B 组（4-6）决定框架形态，最优先。
+> 本节是 15 个开放问题（含 §G 新增第 16 项）经多轮讨论后的最终决策记录，**全部已拍板、无遗留待确认项**，coding agent 可直接按此开工。
 
-### A. 时间与范围（最优先）
-1. **deadline 真实性 + 6 周现实**。你已确认无延期、只剩 6 周。剩下要定的只是：6 周压缩版（见 §11）是否可行？还是你有更准的日期/想转 UIST 2027？
-   - 为什么重要：决定我按 6 周还是更短/更长排代码。
-   - **推荐：跑 §11 的 6 周压缩版，用户研究后置非阻塞。**
-2. **命名 canonical**。三份材料用了三个名字：①Task-Native Interaction / Task Capsule（HCI-UI 第 8 轮终版）②TaskVM / Playable Task Surface（与 SaC 差异 doc）③A2UI（仓库名 + plan，且 plan 明说"TaskVM/Task Capsule 暂不启用"）。
-   - 为什么重要：论文里用哪个名字、teaser 怎么写、related work 怎么自我称呼，全看这个。且"virtualization"叙事（TaskVM）容易和 SaC 的"生成 app"撞，"projection"叙事更安全。
-   - **推荐：论文用 Task-Native Interaction / Task Capsule（HCI-UI 终版，且不撞 SaC）；仓库/代码继续 a2ui。**
-3. **AOHP 深读**。AOHP（agent-native OS，2026-06 tech report）被标"比 SaC 更接近、可能吸收 bottom-up 框架"，但 repo 里没有它的 tex，我还没深读。
-   - 为什么重要：如果 AOHP 已经做了"从 live GUI 提任务状态 + 跨 app 执行 + app 可替换性"中的任何一块，我们的 related work 就有硬伤。它是唯一一个我没核实过的"近邻"。
-   - **推荐：开工前我并行找 AOHP 论文做正式 diff，再写 related work。**
+### A. 时间与命名（已锁定）
+1. **6 周现实**。**已锁定**：跑 §11 的 6 周压缩版，无延期、不转 UIST。用户补充：项目采用多 coding agent 并行开发模式（非单人手写），6 周窗口下内容量可行性高于传统人工开发估计，不需要因此额外压缩范围。
+2. **命名：A2UI → TaskVM**。**已锁定并完成**（见文档开头说明）。决策依据：`A2UI` 是 Google 2025 年发起的通用 agentic UI 声明式协议名（`a2ui.org` v0.8，可在企业内部资料交叉验证，包括行业跟进文档对 Google 2025 年底发布 A2UI 标准的多次独立记载），Macaron-A2UI（COLM 2026）是 Mind Lab 团队的开源第三方工作，与本项目及本团队无归属关系、不是本项目前作。三者（`A2UI` 协议 / Macaron-A2UI / 本项目）都不是本项目私有名字，继续用 `A2UI` 作项目代号会造成三方混淆，故项目代号改为 **TaskVM**，论文内部术语也统一用 TaskVM / Task-Native Interaction / Task Capsule 这一系统词汇（具体用哪个写论文标题由写作阶段再定，不影响开发）。TaskVM 项目在实现中仍可选择性复用 A2UI v0.8 协议作为 UI 渲染层的传输格式，二者不冲突（见 §7/Q6）。
+3. **AOHP 深读**。**已完成**（已加入 `docs/references/AOHP-paper/`，已全文核对）。结论：**不撞车**，仅为相邻工作。详见 §3 新增小节。AOHP 改 OS 内核/框架层，无 round-trip verification，personalization 是跨 App 偏好记忆而非任务变量绑定，三点均与我们正交。可借鉴其 checkpoint-weighted completion rate 评分方式。
 
-### B. 贡献栈（决定我搭什么）
-4. **Safe Compression Frontier 的地位**。它到底是真"一等贡献"（驱动架构里的 `projection_policy` 模块 + 一个 Pareto 实验），还是只当评测 lens？三份材料不一致：HCI-UI 只 seed、`开工基础plan` 提为一等、`CHI 工作计划` 完全没提。
-   - 为什么重要：若一等，我必须搭一个"按任务决定哪些维度留作人 DOF、哪些编译成控件"的策略模块，并跑 coverage×round-trip×compression 的 Pareto 实验；若只 lens，这个模块可以不做，省一周。
-   - **推荐：一等贡献，按锁定版。它正好把你的"灵动/可玩"诉求和 tech-heavy 核心统一，且 DuetUI 自己都承认"固定 GT 不是好 proxy"——这是我们的切口。**
-5. **签名实验"application-substitution invariance"（JVM moment）**。同一 task edit 跨 Stack A（Google Calendar+Jira+Docs+Gmail）/ B（Outlook+Linear+Notion）/ C（桌面+移动+Web），验任务面稳定+操作相同+语义一致+轨迹不同+无关不动。它在 SaC 差异 doc 里被锁为签名实验，但 `开工基础plan` 只有 3 app+1 held-out、没这个。
-   - 为什么重要：这是**唯一**能证明"任务交互与应用实现解耦"的实验，也是 §4.3 demo 的第二招。但全量 3 stack × 4 app 在 6 周内太重。
-   - **推荐：CHI 2027 内做"小版"（2 stack × 2-3 app）当一个 figure；全量 Stack A/B/C 放未来工作。**
-6. **Macaron 关系**。CHI 工作与你们自家的 Macaron-A2UI（COLM 2026）是 build-on（复用 A2UI-Bench/judge/Flutter renderer）/ differentiate / independent？
-   - 为什么重要：复用资产能省 benchmark + 模型准备的险，但会把 CHI 工作耦合到 Macaron 的 A2UI v0.8 协议；独立则要自建评测。
-   - **推荐：differentiate-while-reusing——明确占据 Macaron 让出的"对既有界面动作执行"缝隙，同时复用 A2UI-Bench/judge/renderer 作基础设施，pin A2UI v0.8。**
+### B. 贡献栈（已锁定）
+4. **Safe Compression Frontier 的地位。已锁定：降级为衍生贡献**，**一等贡献是可执行投影本身（Executable Projection Fidelity）**。用户确认的重定位理由：“新交互范式”这个提法本身容易与 SaC 语言撞车，而安全压缩虽重要但本质是保真投影这个一等命题下的次级衍生问题，而非原生问题。SCF 不建独立的 `projection_policy` 策略学习模块与 Pareto 实验，该部分写入 Discussion/Future Work。详见 §5。
+5. **签名实验"application-substitution invariance"（JVM moment）**。**已锁定**：CHI 2027 内做"小版"（2 stack × 2-3 app）当一个 figure；全量 Stack A/B/C 放未来工作。用户无异议，直接按此执行。
+6. **协议与 Macaron 关系。已锁定**：**differentiate + 选择性复用基础设施**。关键确认：Macaron-A2UI 是 Mind Lab 团队的开源第三方工作，与本项目及本团队无归属关系、不是本项目前作，不存在"建在其之上"的关系；`A2UI` 协议也非本项目私有。主线技术路线：直接调用前沿通用模型（GPT-5.6-sol/Claude-Sonnet-5）+ 完整 A2UI v0.8 协议 spec 注入 system prompt（不需要 skill 机制，这是 Macaron 论文自己对标的 full-prompt baseline 做法），**不下载不部署 Macaron 训练好的模型**（Grande/Venti）——因此不算复用其训练产物，也就不 pin 死在 A2UI v0.8（协议升级只需换 prompt 文本）。若未来因成本考虑改用本地部署的轻量开源模型走 schema-light 路线，届时才真正涉及 Macaron checkpoint 复用，但非主线。另需明确：**两个模型角色独立**（Agentic UI 生成 vs. compute-use 执行），即使同用一个厂商模型也是两次独立调用、不共享 context。
 
-### C. Benchmark 与 OOD
-7. **held-out OOD 到底是什么**。锁定版说"1 个对模型黑盒、对 verifier 白盒的真实未见 app"；`CHI 工作计划` doc 说"held-out schema/皮肤/任务组合"。这俩 OOD 强度差很多：真未见 app 验迁移，已见 app 改名换肤验反捷径。
-   - 为什么重要：决定 benchmark 里 held-out 那一块怎么造、verifier 的 state adapter 怎么写、以及"OOD Generalization"指标报什么。
-   - **推荐：两者都要，分别报——1 个真未见 app（验迁移）+ 已见 app 的 rename/reskin/schema 变体（验反捷径）。**
-8. **Mail app in/out**。材料里 Mail 一直是"可选第 4 个"。
-   - 为什么重要：4 个 app 比 3 个 app 的跨应用复杂度（effect 传播、冲突）高一个量级，6 周内可能拖垮。
-   - **推荐：out。Drive 作第 3 个，Mail 永久 optional。**
-9. **benchmark 规模终值**。30-50 模板 / 500-1500 实例是个范围。
-   - 为什么重要：W3 要 overnight 跑完，规模定死才知道 API 成本和时间。
-   - **推荐：40 模板 / 800 实例 / OOD 占 ~20%。**
+### C. Benchmark 与 OOD（已锁定，无异议）
+7. **held-out OOD**。**已锁定：两者都要**——1 个真未见 app（验迁移）+ 已见 app 的 rename/reskin/schema 变体（验反捷径），分别报 OOD 指标。
+8. **Mail app**。**已锁定：out**。Drive 作第 3 个 app，Mail 永久 optional。
+9. **benchmark 规模**。**已锁定：40 模板 / 800 实例 / OOD 占 ~20%**。用户补充了 API 成本评估需求（见下方新增"API 调用量估算"）。
 
-### D. 用户研究
-10. **4 条件确认 + 非劣性 margin + N + IRB 时间**。C0 raw-multi-app / C1 static-read-only / C2 chat-agent+tools / C3 ours 是否最终确认？非劣性 margin（C3 成功率不能比 C2 低多少）取多少？N 多少？6 周内 IRB 来得及吗？
-    - 为什么重要：4 条件是锁定决策，但 `CHI 工作计划` doc 是 3 条件，需你一锤定音；margin 必须实验前定死（否则事后改 margin 是学术不端）；IRB 若不及则用户研究只能 pilot + 后置。
-    - **推荐：4 条件；非劣性 margin = C3 成功率不低于 C2 的 5 个百分点；N=18 within-subject；IRB 立即提交，若不及则 W5 pilot + 后置正式（自动评测仍为论文主体，不阻塞投稿）。**
+### D. 用户研究（已锁定）
+10. **4 条件 + 非劣性 margin + N + IRB**。**已锁定**：4 条件（C0/C1/C2/C3）；非劣性 margin = C3 不低于 C2 的 5 个百分点；N=18 within-subject。IRB 实质：美欧高校强制要求的人类受试者研究伦理审查机制，风险低的研究（如本项目的可用性测试）多数机构有 expedited/exempt 通道（1-2 周可批）；若所在机构无正式 IRB，工业界背景 HCI 论文的常见做法是在文中自述遵循伦理准则（自愿参与、知情同意书、数据匿名化），不强制要求正式批文号即可投稿。**推荐**：若无正式 IRB 走轻量自述路径，W5 pilot + 后置正式，不阻塞投稿（自动评测仍为论文主体）。
 
-### E. 机制设计（可默认，有异议再改）
-11. **reconciliation 机制**。底层 app 被外部改了之后，surface 怎么发现、怎么处理冲突？poll（轮询）/ subscribe（订阅事件）/ re-read-on-action（用户操作时重读）？冲突时是静默覆盖还是标红给选项？
-    - 为什么重要：这是 §4.3 demo 第 4 步、也是 SaC 逐字交出的"frontend state synchronisation"未来工作——我们的卖点之一。机制没定，verifier 的 reconciliation 检查就没法写。
-    - **推荐：re-read-on-action（用户编辑/定时心跳触发重读）+ 冲突时标红不静默覆盖，给出"底层已变 / 你的编辑 / 合并选项"。**
-12. **跨设备**。drop / appendix showcase？
-    - 为什么重要：上限第 5 条说"跨设备≠跨权限"，硬做会撞权限/事务的墙。
-    - **推荐：appendix showcase，不当贡献。**
-13. **wind-tunnel（CUA 模拟用户）基础设施**。本期建 / 推迟？
-    - 为什么重要：它能自动生成用户编辑轨迹压测 reconciliation，但 HCI-UI 明确"模拟用户是风洞不是乘客"——不能当 novelty，且 6 周内建它风险高。
-    - **推荐：推迟，本期不建。**
+### E. 机制设计
+11. **reconciliation 机制**。**已锁定**：re-read-on-action(用户编辑/定时心跳触发重读)+ 冲突时标红不静默覆盖。**并发修改注入机制——已拍板：采纳折中方案**。不建"协作者"角色(benchmark 环境下无法真实模拟多人协作、测不出实质效果)，只在 `apps/<name>/engine/injector.py` 预留一个最简单的"benchmark 自己主动注入外部状态变更"接口(定时脚本或手动 trigger 直接向 DB insert 一条冲突事件，参考 SenseAct 的 `injector.py` 模式)，实现成本接近零。此接口列为 **W4+ 可选加分项，非 W1 核心路径**，不阻塞开工；W1-W3 reconciliation 先仅靠历史心跳重读验证，W4 视时间富余再接入该接口测试外部并发场景，测出的效果作为 §4.3 demo 第 4 步与 SaC 未来工作缺口的直接对照证据。
+12. **跨设备**。**已锁定：appendix showcase**，不当贡献。
+13. **wind-tunnel（CUA 模拟用户）基础设施**。**已锁定：推迟，本期不建**。
 
-### F. 心智模型校验（确认我理解对）
-14. **"滑块愿景"是否接受重定位**。你早期激动的"拖一下进度条"已被 Round 6/7 结构性批判（非单调多目标任务不可行）。你是否接受重定位的诚实上限（自动找最低安全压缩维度 → 进度条/驾驶舱/透镜三层）？
-    - 为什么重要：若你仍想主推"一个滑块搞定一切"，那 SCF 的故事要重写，且会撞上限第 2 条的批判。
-    - **推荐：接受重定位。这反而让 SCF 更可发表——"每个任务获得它能诚实承受的最简单界面"比"一个滑块"深刻得多，也防住"过度压缩"的审稿质疑。**
-15. **人的角色口径**。是"低频授权节点"（与 SaC 差异 doc 的 Turn 5 框架）还是"任务变量编辑者、Agent 传播其编辑"（锁定主线）？两者不矛盾但口径不同，影响贡献 claim 措辞。
-    - 为什么重要：若强调"授权节点"，容易被读成 Sidekick 式的监督/反馈；若强调"任务变量编辑者"，更突出"人操纵任务、Agent 操纵应用"的主线。
-    - **推荐：统一为"低频任务变量编辑者"——人编辑任务变量（低频），Agent 把编辑可靠传播并验证；授权/暂停只是其中一种低频介入。**
+### F. 心智模型（已锁定，含重要激发性修正）
+14. **"滑块愿景"重定位 + 人的决策口径。已锁定，但经用户重要修正**：用户明确接受重定位（不同任务获得它能诚实承受的最简单界面，不需要硬拗滑块），并补充了滑块当初的真正目的：**激发玩乐心理、降低认知负载**，不是字面意义上的单一控件。**关键修正（重要）**：关于人的角色，用户明确拒绝了"低频授权节点"这个提法因为它听起来太像 Sidekick 的人工审核/监控范式（用户原话："我特别讨厌这种人类中制介入的研究，因为它太老了"）。正确口径是：**人在任务开始时主动设定这次要做到哪个 milestone/checkpoint**（而非模型自行判断边界并自动停下等人审核）；安全性/边界检查等后续环节全部下放给自动化 verifier，不需要人在提交前做最终审核。这个区别很关键：**人控制的是"要做到哪里"，不控制"怎么验证安全"**。
+15. **人的角色口径。已锁定**：因 Q14 修正而重新确定为"**任务起始时的主动 milestone 设定者**"，而非"低频授权节点"。论文措辞应避免任何会被读成"人审核 Agent 结果、确认后才能继续"的句式（那是 Sidekick 路线），而应强调"人在事前设定目标深度/checkpoint，模型自主完成到该深度为止，安全性由自动 verifier 全程接管"。
+
+### G. 心智模型泛化(用户新提，非原 15 之一，单独记录)
+16. **"统一信息实体"代表用户心智模型——已拍板：限定为 task_state 的叙事包装**。用户原意是把故事讲得更形而上一点——底层存在一个"统一信息实体"，代表用户心智模型、统领跨 App 协调诉求，并通过 task 得到体现(参考自家 SenseAct 项目在 web bench 设计上"底层有一个用户画像"的思路，但 SenseAct 本身研究主动感知，与本项目话题关系不大，仅供设计思路借鉴)。**风险(已确认并采纳规避)**：该表述若不加限定，容易与 SaC intro 的语言("the application itself becomes the interaction state...converging toward personalized software")产生比降级前 SCF 更严重的撞车观感——因为它暗示存在一个独立于具体 App 的"更根本的真理来源"，与本项目"real state 永远留在真实 App 里、surface 只是投影，绝非 source of truth"的核心防御论点直接矛盾。**最终决定**："统一信息实体"仅限定为 `task_state` 数据结构本身的哲学化包装(即"同一任务变量在不同 App 里的绑定关系集合"这个已有技术含义)，**不**是独立于 task_state、本体论意义上更根本的新实体；**不建独立模块**，仅作为 Discussion 里的叙事升华措辞，不影响 §8 架构骨架。
 
 ---
 
-## 16. 我接下来的动作
+## 17. 新增参考资料与工程借鉴（本轮新增）
 
-1. 等你对 §15 的问题拍板（尤其 A 组 1-3 与 B 组 4-6，决定框架形态）。
-2. 拍板后更新本文件为锁定版（去掉【待对齐】），据 §8 骨架进 **plan 模式**，过一遍 W1 的具体代码方案（仓库骨架、Calendar/TaskBoard 极简可重置应用接口、canonical task graph 的隐藏与读取、replay 引擎、compiler/binding 的 frontier-API 调用契约、verifier 的 round-trip 判定逻辑），你确认后再动手写代码。
-3. 开工即守：这是**独立的 a2ui 项目**，不拖入其他仓库；自动评测为主体、用户研究后置不阻塞；训练是 Go/No-Go 而非默认；demo 开场用"操纵+写回+verifier"弧（§4.3），绝不用状态仪表盘开场。
+- **AOHP 技术报告**（`docs/references/AOHP-paper/`）：已全文核对，结论为相邻工作、不撞车，可借鉴其 checkpoint-weighted completion rate 评分方式（详见 §3、§15-Q3）。
+- **SenseAct 项目**（团队自家项目，路径 `/home/hadoop-mt-ocr/dolphinfs_ssd_hadoop-mt-ocr/zhangyuzhe09/SenseAct`，非本仓库内）：一个聚焦 agent 主动感知能力的独立 web-agent benchmark，与本项目在研究问题上无直接关系，但其工程结构高度可复用：
+  - 目录模式 `scenarios/<name>/engine/{reward,injector,*_db}.py`（每个自建 App 配一个判成功的 `reward.py` + 注入初始/外部状态的 `injector.py`）——直接对应本项目 `apps/<name>/engine/` 的设计（已写入 §8 架构骨架）。
+  - `senseact/cost_model.py` 的真实 token 计量方式（不用启发式估算，每次调用记录真实 usage）——用于本项目 benchmark 的 API 成本追踪（已写入 §8）。
+  - `senseact/metrics.py` 的 SR + Success@Budget/cost-success AUC 组合，为"如何同时报告成功率与成本"提供了可执行范式。
+- **API 调用量估算**（用户要求，非精确值，供预算参考）：以 40 模板/800 实例的 benchmark 全量跑一遍估算，单次完整跑测约 600-900 次 API 调用（Agentic UI 生成 60-90 次 + compute-use 执行 450-750 次 + round-trip 验证 60 次）；开发阶段（W1-W3）需反复跑同批任务调试 prompt/verifier，保守估计迭代 10-20 轮，累计约 6,000-18,000 次调用；若算上多方案探索性实验（如并行测试不同 UI 压缩策略），总量级达 20,000-30,000 次也属合理区间。**此估算精度有限**（未知具体 prompt 长度、图片分辨率等参数），建议参照 SenseAct 的 `cost_model.py` 做法，实际跑几个 W1 kill test 任务后拿到真实数字用于校准，不需要现在纠结准确度。
+
+---
+
+## 18. 开工指引(面向执行的 coding agent，全部拍板已完成，零待确认事项)
+
+1. **可直接开工**，全文 15+1 个开放问题(含 G 组新增的第 16 项)均已拍板锁定，**无任何遗留待确认项**。
+2. 据 §8 骨架进 **plan 模式**，过一遍 W1 的具体代码方案(仓库骨架、Calendar/TaskBoard 极简可重置应用接口、canonical task graph 的隐藏与读取、replay 引擎、compiler/binding 的 frontier-API 调用契约、verifier 的 round-trip 判定逻辑)。
+3. 开工即守：项目代号为 **TaskVM**(不再用 A2UI 作代号)；这是**独立项目**，不拖入其他仓库；自动评测为主体、用户研究后置不阻塞；训练是 Go/No-Go 而非默认；不部署 Macaron 已训练模型，主线用前沿通用模型 + A2UI v0.8 协议 spec 注入 prompt；demo 开场用"操纵+写回+verifier"弧(§4.3)，绝不用状态仪表盘开场。
+4. **两个收尾细节均已拍板**(见 §15-E-Q11、§15-G-Q16)：(a) `injector.py` 预留最简外部并发注入接口，列为 W4+ 可选加分项，不阻塞 W1-W3；(b) "统一信息实体"仅作为 `task_state` 的叙事化包装写入 Discussion，不建独立模块、不进 W1-W2 架构。coding agent 可按本文档直接落地，无需再向用户确认任何决策点。
 
 ---
 
@@ -385,7 +381,7 @@ GUI Agent 能否基于多个现有应用的运行状态，动态生成一个统�
 重点：把 GUI Agent 和 agentic UI 变成类似 Java 虚拟机的跨软件中间层——底层应用不同，但用户始终在一个面向任务、可交互、可写回的界面中工作。
 **最相似竞品**：Software as Content / Sidekick / DuetUI（= 正文 §4 已独立判定撞车程度与差异化设计）。
 
-> 与正文的对应：方向 1 = §0 主线 = 四锚点 existing applications / live state / executable binding / round-trip verification。"TaskVM"是本附录里的叫法，与正文 §15-Q2 的命名待对齐（候选：Task-Native Interaction / Task Capsule / TaskVM）。**注意**：方向 1 的 TL;DR 与正文 §0 完全一致（真实状态→编译→界面→写回→更新），只是措辞用了"虚拟机中间层"比喻。
+> 与正文的对应：方向 1 = §0 主线 = 四锚点 existing applications / live state / executable binding / round-trip verification。"TaskVM"现已正式定为项目代号（见 §15-A-Q2），本附录的叫法与正文一致，无需再对齐。**注意**：方向 1 的 TL;DR 与正文 §0 完全一致（真实状态→编译→界面→写回→更新），只是措辞用了"虚拟机中间层"比喻。
 
 ## A.2 方向 2：PromptPatch（下一论文候选 / 近方向二"可执行的平行世界"的运行时侧）
 
@@ -426,3 +422,49 @@ GUI Agent 能否基于多个现有应用的运行状态，动态生成一个统�
 - 方向 3 的 commit-boundary 思想可作为 TaskVM 中"用户编辑 → semantic patch → 执行"这一步的设计灵感：编辑未"提交"前是可逆的预览（shadow_txn 影子执行），提交后才真正写回并验证——这与正文 §8 的 `shadow_txn` 模块天然契合。
 
 > 即：用户喜欢的这三个方向，本质是同一套"可验证的 Agent 运行时状态层"在不同生命周期阶段的实例化。TaskVM（跨软件写回）是其中最完整、最 tech-heavy、最适合作为 CHI 2027 主线的那一个。
+
+---
+
+# 附录 B：公司内部 API 调用方式（Friday/aigc 网关）与通用 OpenAI key+url 的核心区别
+
+> 背景：`benchmark/model_client.py` 等模块最初按"通用 OpenAI-compatible：`base_url` + `api_key` 直连"心智模型来写，这在公司网关下**基本能跑但有几个关键差异点会踩坑**。本节参考团队既有实现（`/mnt/dolphinfs/.../yangwenkui03/wm/lds/internal_mesh_client.py`、`config.yaml`、`config_loader.py` + SenseAct 的 `build/synthesize/_client.py` / `scripts/run_eval.py`）梳理，并用 `2026-08-05` 当天对网关做的真实连通性 probe（API key `1925796454518841403`）交叉验证，所有结论均可复现核实。
+
+## B.1 表面像 OpenAI SDK，但有 3 个不能偷懒的差异
+
+1. **`base_url` 固定为公司网关，不是 `api.openai.com`**：`https://aigc.sankuai.com/v1/openai/native`（OpenAI SDK 用法上完全兼容，`OpenAI(api_key=..., base_url=...)` 直接可用；`chat.completions.create(...)` 接口不变）。这一点两份参考实现（`internal_mesh_client.py` 注释 + SenseAct `_client.py`）完全一致，可互相印证。
+2. **`api_key` 不是"个人 OpenAI key"，而是"Friday 平台业务应用 token"，且与调用配额强绑定**：每个 App（业务方申请的 token）在**每个模型上分别有独立的 QPM 限流**，不是"一个 key 全模型共享一个总配额"。这是最容易踩的坑——本项目现在用的 key `1925796454518841403` 对 `gpt-5.5` / `claude-sonnet-5` / `claude-opus-5` / `gpt-5.6-terra` / `gpt-5.6-luna` / `kimi-k2.7-code` 这几个"热门旗舰模型"限流极紧（连续 8 秒间隔重试仍 429），但对 `gpt-5.6-sol`、`gemini-3-flash-preview`、`gemini-3.6-flash`、`glm-5.2`、`glm-5v-turbo`、`aws.claude-sonnet-4.6`、`aws.claude-opus-4.8`、`deepseek-v4-pro/flash`、`kimi-k3`、`MiniMax-M3`、`LongCat-2.0` 完全畅通（首次调用即 200）。**这不是"key 失效"，而是"这个 App 在这些模型上的配额几乎为 0"**——错误体里会明确写 `App:**1403在模型:xxx每分钟请求次数超过限制`，一看就知道是限流不是鉴权失败，不要误判成 key 有问题。
+3. **鉴权/欠费/限流有明确分层，不能一概按"重试"处理**：`internal_mesh_client.py` 的分层策略是本项目应直接照抄的最佳实践——
+   - `401/403` → 鉴权失败（token 无效/无权限）→ **立即抛致命错误，不重试**；
+   - `402` 或响应体命中"欠费/配额"关键词 → **立即抛致命错误，不重试**（避免烧空额度还傻等）；
+   - `429` 或 `5xx` → 限流/瞬时故障 → **指数退避重试**（`min(2**attempt, cap)`）；
+   - 其余 `4xx` → 不重试，直接上抛给调用方判断。
+   本项目 `taskvm/benchmark/model_client.py` 目前的实现若还没有这个分层（尤其是"401/403/402 立即致命，不要浪费重试次数"），应参照 `internal_mesh_client.FatalAPIError` 的做法补上。
+
+## B.2 模型命名规律（2026-08-05 probe 结果，供 `TASKVM_DEFAULT_MODEL` 选型参考）
+
+Probe 方法：用文档给定 key 逐个模型发一次最小 `chat.completions` 请求，记录 HTTP 状态码与错误体；对 429 的模型额外做了 8 秒间隔重试排除"瞬时抖动"的可能。
+
+| 模型名 | 结果 | 说明 |
+|---|---|---|
+| `gpt-5.6-sol` | ✅ 200，畅通 | **W1 建议默认模型**（比原计划的 `gpt-5.5` 更可靠，且已经是大纲原定的目标模型之一） |
+| `gemini-3-flash-preview` / `gemini-3.6-flash` | ✅ 200，畅通 | 网关内部路由为 `google/gemini-...` 前缀，价格通常远低于旗舰模型，适合"UI-gen 之外"的批量/调试调用 |
+| `glm-5.2` / `glm-5v-turbo` | ✅ 200，畅通；`glm-5v-turbo` 已验证支持 vision（`image_url` + `data:image/...;base64,...` 标准 OpenAI 格式可用） | `glm-5v-turbo` 可作为 compiler 读取 screenshot 这一步的**备选/兜底视觉模型** |
+| `aws.claude-sonnet-4.6` / `aws.claude-opus-4.8` | ✅ 200，畅通 | **关键命名规律**：网关上 AWS Bedrock 托管的 Anthropic 模型必须带 `aws.` 前缀，不带前缀会报 `400 不支持的模型类型`（如 `claude-opus-4.8`、`claude-opus-4.7`、`claude-opus-4.6` 均 400，加上 `aws.` 前缀后 `aws.claude-opus-4.8` 立即 200） |
+| `deepseek-v4-pro` / `deepseek-v4-flash` / `kimi-k3` / `MiniMax-M3` / `LongCat-2.0` | ✅ 200，畅通 | 全部一次性成功，可作平价备选 |
+| `gpt-5.5` | ⚠️ 429（限流，非失效） | 大纲/W1 方案原定的默认模型；当前 key 在此模型上配额很紧，高并发场景（如 N≥3 samples 并发跑）大概率会被限流卡住，建议改用 `gpt-5.6-sol` 或加大重试间隔 |
+| `claude-sonnet-5` / `claude-opus-5` | ⚠️ 429（限流，非失效） | 大纲 §7 提到的目标模型之一；命名本身合法（不是 400，说明模型存在），只是配额几乎耗尽/未开通，**不要**尝试加 `aws.` 前缀（探测过 `aws.claude-sonnet-5`/`aws.claude-opus-5` 均返回 400，说明这两个模型不走 AWS 通道，命名不需要改） |
+| `gpt-5.6-terra` / `gpt-5.6-luna` / `kimi-k2.7-code` | ⚠️ 429（限流，非失效） | 同上，配额紧张，非命名或鉴权问题 |
+| `claude-opus-4.8` / `4.7` / `4.6`（不带 `aws.` 前缀） | ❌ 400 不支持的模型类型 | 网关不认这个裸模型名；必须用 `aws.claude-opus-4.x` 形式 |
+
+**结论对 W1 落地的直接影响**：`taskvm/benchmark/model_client.py` 里 `TASKVM_DEFAULT_MODEL` 的默认值建议从 `gpt-5.5` 改为 **`gpt-5.6-sol`**（本身就在大纲候选名单里，且当前 key 下畅通、无限流风险，不需要额外申请配额）；若后续要接入 Anthropic 系模型做对比实验，记得非 `aws.` 前缀的 `claude-sonnet-5`/`claude-opus-5` 目前受限流卡着，短期内更稳妥的替代是 `aws.claude-sonnet-4.6` / `aws.claude-opus-4.8`。
+
+## B.3 配置管理方式的可借鉴模式
+
+`wm/lds/config.yaml` + `config_loader.py` 展示了一个比"硬编码在 `.py` 里"更工程化的模式，值得 TaskVM 的 `benchmark/model_client.py` 参考：
+- `base_url` / `api_key` / `model_name` 集中放在 yaml 的 `vlm.api` 节，而不是散落在各脚本里；`api_key` 留空则**自动回退读环境变量**（`INTERNAL_API_KEY`），本地开发和 CI 环境切换不需要改代码。
+- `provider: local | api` 的双模式开关（本地 vllm/sglang 起的 OpenAI 兼容端点 vs. 远程公司网关），方便 W1 阶段先用小模型本地联调 prompt/schema，再切到远程前沿模型做正式 kill test，不需要改调用代码只需要切 yaml 一行。
+- 这与本项目 §7 已经确定的"`OPENAI_API_KEY` 环境变量 + 可覆盖"的做法是同一思路，无需改架构，只是提醒 coding agent **把 model 名的默认值和限流应对策略也纳入可配置项**，不要硬编码成单一模型不可切换。
+
+## B.4 与本项目既有决策的关系（不改变任何已锁定决策，仅补充工程实现细节）
+
+本节纯属"如何正确调用公司内部 API"的工程细节补充，**不涉及、不重新打开**大纲正文任何一个已拍板的产品/研究决策（不改变"前沿通用模型 + A2UI v0.8 spec 注入"的主线、不改变"两个模型角色独立"的设计、不改变 W1 kill test 的范围）。唯一的具体行动项：`taskvm/benchmark/model_client.py` 的默认模型名与限流/致命错误分层策略应按 B.1、B.2 调整，避免 W1 跑 kill test 时把"限流"误诊断为"模型不可用"或"compiler 出错"，污染 sub-kill 的判断依据。

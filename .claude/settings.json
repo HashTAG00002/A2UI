@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/hadoop-mt-ocr/dolphinfs_ssd_hadoop-mt-ocr/zhangyuzhe09/SenseAct/build/synthesize/**)",
+      "Read(//mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/zhangyuzhe09/SenseAct/build/synthesize/**)",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import flask; print\\('flask', flask.__version__\\)\")",
+      "Bash(python -c \"import openai; print\\('openai', openai.__version__\\)\")",
+      "Bash(python -c \"import requests; print\\('requests', requests.__version__\\)\")",
+      "Bash(python -c \"import PIL; print\\('pillow', PIL.__version__\\)\")",
+      "Bash(/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/conda/envs/senseact/bin/python -c ' *)",
+      "Bash(pkill -f \"taskvm.apps.calendar.app\")",
+      "Bash(curl -s --max-time 2 http://localhost:3013/health)"
+    ]
+  }
+}

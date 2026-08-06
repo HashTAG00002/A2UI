@@ -13,6 +13,10 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg
 
 # Node
 node_modules/
@@ -21,5 +25,13 @@ build/
 
 # Logs
 *.log
+
+# Secrets / local env
+.env
+.env.*
+
+# TaskVM runtime artifacts (harness/replay_engine._try_screenshot writes here)
+taskvm_obs_*.png
+*.png
 
 references/

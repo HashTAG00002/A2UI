@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}TaskVM · {{ site }}{% endblock %}</title>
+  <style>
+    body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+           margin: 0; background: #f5f5f7; color: #1d1d1f; }
+    header { background: #1d1d1f; color: #fff; padding: 10px 18px; }
+    header .brand { font-weight: 600; }
+    header .sub { opacity: .7; font-size: 13px; margin-left: 8px; }
+    main { max-width: 900px; margin: 18px auto; background: #fff;
+           border-radius: 10px; padding: 18px 22px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e5e5e7; font-size: 14px; }
+    th { color: #6e6e73; font-weight: 600; font-size: 12px; text-transform: uppercase; }
+    tr.event-row[data-event-id] { cursor: pointer; }
+    tr.event-row[data-event-id]:hover { background: #f5f5f7; }
+    .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; }
+    .pill.work { background: #e8f0fe; color: #1a73e8; }
+    .pill.personal { background: #fce8e6; color: #d93025; }
+    .muted { color: #6e6e73; }
+    form.inline { display: inline; }
+    input[type=date], input[type=text] { padding: 4px 6px; border: 1px solid #d2d2d7; border-radius: 6px; }
+    button { padding: 4px 10px; border: 0; border-radius: 6px; background: #1a73e8; color: #fff; cursor: pointer; }
+    .meta { font-size: 12px; color: #6e6e73; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <header><span class="brand">TaskVM</span><span class="sub">Calendar</span></header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

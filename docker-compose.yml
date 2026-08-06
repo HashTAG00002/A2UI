@@ -1,0 +1,35 @@
+version: "3.9"
+# TaskVM W1 apps — two minimal resettable Flask apps.
+# Calendar :3013, TaskBoard :3014. In-memory (no DB volume for W1).
+services:
+  calendar:
+    build: .
+    image: taskvm-apps
+    container_name: taskvm-calendar
+    working_dir: /app
+    command: python -m taskvm.apps.calendar.app --port 3013 --host 0.0.0.0
+    ports:
+      - "3013:3013"
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3013/health').read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  taskboard:
+    build: .
+    image: taskvm-apps
+    container_name: taskvm-taskboard
+    working_dir: /app
+    command: python -m taskvm.apps.taskboard.app --port 3014 --host 0.0.0.0
+    ports:
+      - "3014:3014"
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3014/health').read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
