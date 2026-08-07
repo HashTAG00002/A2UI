@@ -1,0 +1,1771 @@
+[A2UI]**竞品补充！！**
+================
+
+【提问 轮数1】
+[文件不支持导出]
+额外发现：协议已经进化了两个大版本
+顺带查证到一个对项目路线选择很关键的信息，来源是官方 Evolution Guide（https://a2ui.org/specification/v0.9-evolution-guide/）：
+协议站点的版本序列是 v0.8 (Legacy) → v0.9 (Previous Stable) → v0.9.1 (Current，官方当前推荐) → v1.0 (Candidate)。
+v0.9 相比 v0.8 是一次哲学级重构：官方原文写道 v0.8 是 "Structured Output First"（为强制 JSON 模式/function calling 设计，深层嵌套，"often confusing for an LLM to generate"），而 v0.9 改为 "Prompt-First / In-Context Schema"——即专门为"把协议规范塞进 system prompt 给通用 LLM 用"这种场景重新设计过，消息名全部改了（如 beginRendering→createSurface，surfaceUpdate→updateComponents），组件包裹方式从"键名即类型"（{"Text": {...}}）改成了更省 token、更利于模型生成的判别字段式（{"component": "Text", "text": "..."}）。
+这恰好正中 TaskVM 当前的用法场景（system prompt 注入协议规范）。这不代表现在就该升级——W1 kill test 已经用 v0.8-变体的写法跑通，中途换协议版本有风险——但这是一个值得你知晓、并在 W2 收尾/W3 规划时决策"要不要考虑升级到 v0.9.1"的重要背景信息，而不是一个我可以替你悄悄做主的决定。
+我的建议（不是决定，交给你判断）
+不需要立即改动代码。W1 已经 PASS，且这个偏差目前不影响判分逻辑。
+这个发现应该被加入我之前梳理的"W1 收尾清单"，作为第 4 项：A2UI 组件白名单需要基于官方原文重新核实/选择版本（v0.8 官方 catalog vs 是否升级到 v0.9.1），而不是继续沿用 Macaron 论文私改的那份。
+如果你认可，我可以把这个作为具体一条写进给 coding agent 的 W2 开工指令（连同之前谈到的 Calendar 服务掉线、限流分层未实现两项），并把官方 GitHub 原文链接一并附上，让 agent 直接去核对/决策，而不是像现在这样凭一篇论文的转录内容假设它就是标准。
+要我现在就把这一条正式补充进 W2 开工指令草稿里吗？
+
+你推荐我们在taskVM这个CHI工作里使用什么版本的A2UI协议呢？
+另外这种Agentic UI + GUI Agent真的没人结合着做过吗？
+
+【回答内容 轮数1】
+我会把问题拆成两层：先判断 **TaskVM 现在该锁哪一版协议**，再查清“Agentic UI × GUI Agent”已有工作到底做到哪一步，避免把“相邻”误判成“没人做”。
+
+【回答内容 轮数1】
+## 我的结论
+
+**TaskVM 从 W2 开始应以 A2UI v0.9.1 作为默认协议版本。**
+
+但不要把它做成一次全局重写。更稳妥的决策是：
+
+> **v0.9.1 作为正式 target；v0.8 保留为 W1 回归适配器；不采用 v1.0 Candidate；TaskVM 内部的 task state、semantic patch、executor 和 verifier 均不得依赖 A2UI 版本。**
+
+官方目前已将 v0.8 标为 Legacy、v0.9.1 标为 Current production release，v1.0 仍是 Candidate。v0.9.1 属于 v0.9 协议家族的小修订，而不是又一次大重构。
+
+## 为什么应该现在切 v0.9.1
+
+### 1. 它与 TaskVM 的模型调用方式精确匹配
+
+你们现在的路线是把协议规范直接塞进 system prompt，让通用模型生成界面；项目文档也明确写了“不部署 Macaron 模型，使用前沿通用模型 + 完整协议规范注入”。fileciteturn0file0L186-L195
+
+v0.9 的整次重构就是针对这种模式：
+
+- 从 Structured Output First 改为 Prompt First；
+- 深层包装改成扁平判别字段；
+- typed key-value adjacency list 改为普通 JSON；
+- 增加可随 catalog 一起注入 prompt 的自然语言规则；
+- 增加结构化 `VALIDATION_FAILED` 修复循环；
+- 明确 client→server 的 data-model 同步。
+
+这不是“新版总是更好”，而是**新版针对你们正在使用的生成方式重新设计了协议**。
+
+### 2. W2 是最后一个低成本迁移窗口
+
+既然 W1 已经 PASS，目前只有两个应用和简单表单，迁移主要发生在 renderer/parser/prompt 层。到了 W3，benchmark 输出、缓存、baseline、失败分类和实验日志都开始依赖具体 schema，再换版本会昂贵很多。
+
+因此我不建议“W1 已跑通，所以一路留在 v0.8”；我建议：
+
+- **冻结 W1 v0.8 结果作为 regression fixture；**
+- **用同一批 W1 case 跑一次 v0.9.1 compatibility gate；**
+- gate 通过后，W2、W3 和论文正式实验全部用 v0.9.1。
+
+这不重新打开 W1 的方向判断，只是在进入规模化实验前更换 wire format。
+
+### 3. 不应直接使用官方 Basic Catalog 全集
+
+建议采用：
+
+> **A2UI v0.9.1 envelope + 一个冻结版本的 TaskVM Minimal Catalog。**
+
+例如只保留 TaskVM 当前真正需要的文本、布局、按钮、日期时间、单选/多选、文本输入和状态提示组件。Catalog 可以从官方 Basic Catalog 导入或裁剪，但需要独立版本号，例如：
+
+```text
+org.taskvm.catalog/task-projection/v0.1
+```
+
+v0.9 家族原生支持 custom catalog；官方也明确把 catalog 视为 agent 与 renderer 之间的能力契约，而不是必须全部采用的固定组件白名单。
+
+这样可以同时获得：
+
+- 官方协议兼容性；
+- 固定实验自由度；
+- 防止模型生成未实现组件；
+- 避免 A2UI Basic Catalog 后续变化污染实验；
+- 更清楚地区分“TaskVM 的任务投影设计”和“A2UI 的通用组件集合”。
+
+### 4. 为什么暂时不选 v1.0
+
+v1.0 的 `actionResponse`、action ID 和 client-server RPC 对 TaskVM 看起来很诱人，但它仍是 Candidate。更重要的是：
+
+**`actionResponse` 只能证明协议层收到了或处理了一个动作，不能证明真实 Calendar、TaskBoard、Drive 已正确改变。**
+
+TaskVM 的核心必须继续由独立 verifier 读取应用 ground truth，检查 expected diff、non-interference 和 reconciliation。不能让协议 ACK 偷换成 round-trip correctness。v1.0 的这些功能未来可以作为 transport enhancement，但不应进入当前论文的可信根。
+
+## 建议的迁移 gate
+
+用 W1 已通过的相同任务，对 v0.8 和 v0.9.1 比较五项：
+
+1. 首次输出 schema-valid rate；
+2. validation repair 次数；
+3. prompt 与输出 token；
+4. UI 是否表达同一组 task-state 字段和编辑操作；
+5. 最终 round-trip fidelity 与 non-interference 是否完全不变。
+
+只要 v0.9.1 renderer 能跑通、核心保真指标不退化，就正式切换。这里的核心原则是：
+
+> **A2UI 是可替换的呈现协议，不是 TaskVM 的内部状态表示，更不是论文的贡献本体。**
+
+---
+
+# “Agentic UI + GUI Agent”真的没人结合吗？
+
+**宽泛地说，已经有人结合；按照 TaskVM 的完整定义，我目前没有找到一个公开工作同时完成全部闭环。**
+
+不能在论文里 claim：
+
+> “We are the first to combine agentic UI with GUI agents.”
+
+这个说法太粗，而且很容易被反例击穿。
+
+应该分三层看。
+
+## 第一层：GUI Agent 配一个人与 Agent 交互的 GUI——很多人做了
+
+Magentic-UI 支持浏览器执行、计划编辑、暂停、接管和 action guard；AgentGUI 支持长任务轨迹可视化与 steering；Sidekick 为正在执行的 CUA 提供 ambient cue、摘要和多模态反馈。它们当然都属于“GUI Agent + 用户界面”。turn805627academia36turn319027academia24
+
+但它们的界面主要投影的是：
+
+- Agent 的计划；
+- Agent 的动作轨迹；
+- Agent 当前是否卡住；
+- 用户应该何时介入。
+
+不是多个既有应用的 live task state。你们文档已经准确指出，Sidekick 的系统本身不执行、不写回，其界面压缩的是 actions，而 TaskVM 压缩的是 applications。fileciteturn0file0L89-L99
+
+## 第二层：Agent 动态生成任务 UI——也已经有人做了
+
+Macaron-A2UI、DuetUI 和 SaC 都明确属于 generative/agentic UI：
+
+- Macaron-A2UI 研究模型怎样生成轻量可执行 UI action；
+- DuetUI 让用户直接操作动态生长的任务 UI，从而反向塑造 Agent 意图；
+- SaC 把动态 application 本身提升为 human-agent interaction state。citeturn299841academia15turn299841academia14turn299841academia13
+
+但公开材料中的关键缺口分别是：
+
+- Macaron 明确把“对既有界面的动作执行”排除在研究目标之外；
+- DuetUI 的外部服务执行是模拟的；
+- SaC 的 application 本身就是 state，而不是多个真实应用状态的缓存或投影，并明确留下 write-capable execution、事务一致性与 ground-truth 同步问题。fileciteturn0file0L60-L80
+
+## 第三层：真正接近“生成任务入口 + 跨 App Agent 执行”——AOHP 已经很近
+
+AOHP 是最需要认真处理的系统近邻。它在 Android OS 层提供 personalized service composition、generated service entrances，并让 agent 通过多种接口调用底层服务。它已经碰到了“用户操作任务级入口，Agent 处理多个底层 App/服务”这条大方向。citeturn776448academia24
+
+但它与 TaskVM 的核心研究对象仍不同：
+
+- AOHP 研究 OS 如何成为 agent-native harness；
+- TaskVM 研究一个任务投影是否忠实代表多个不受统一 contract 约束的既有应用；
+- AOHP 的评测集中在任务完成、成本、效率和安全策略；
+- TaskVM 要证明用户编辑一个 task variable 后，目标变更发生、无关状态不动、冲突被重新同步。
+
+你们现有文档对 AOHP 的判断基本成立：它是**工程组合意义上最近的 near miss**，但没有 TaskVM 的 editable live projection + independent round-trip verifier。fileciteturn0file0L81-L87
+
+## 因此真正可守住的 gap
+
+截至 **2026 年 8 月 6 日**，我能查到的公开工作中，没有发现一个系统同时满足这四条：
+
+1. 从多个**既有应用的实时状态**自底向上生成任务界面；
+2. 用户直接修改界面中的**任务语义变量**；
+3. GUI/API Agent 把修改传播回多个真实应用；
+4. 独立 verifier 从 ground truth 检查目标变化、非干涉和重新同步。
+
+这正好也是你们已经锁定的四锚点：`existing applications / live state / executable binding / round-trip verification`。fileciteturn0file0L12-L20
+
+论文里最安全的表述不是“没人把两者结合过”，而是：
+
+> **To our knowledge, prior work has explored generative task interfaces and agent execution over existing GUIs largely as separate interaction layers. TaskVM connects them through an editable projection of live cross-application state, with independently verified write-back to the underlying applications.**
+
+中文就是：
+
+> **既有工作分别研究了生成式任务界面和面向既有 GUI 的 Agent 执行；TaskVM 研究的是二者之间缺失的可执行状态绑定：把多个真实应用的实时状态编译为可编辑任务投影，并独立验证其跨应用写回。**
+
+所以，这个方向不是“完全没人碰过的空白地带”，而是一个已经出现多个邻居、但**完整 round-trip 机制仍然缺位的窄而锋利的交叉点**。这反而比“无人区”更适合 CHI：问题已被多个方向共同逼近，而你们能给出一个此前没有被闭合的技术与交互闭环。
+
+
+【提问 轮数2】
+不对，agenticUI这个词好像有点大，我指的不是那种给agent用的UI适配agent使用的UI，而是agent生成的UI，即agentic GenUI这种，在这个缩小范围内，Agentic GenUI + GUI Agent有人做过吗？
+
+【提问 轮数3】
+不对，agenticUI这个词好像有点大，我指的不是那种给agent用的UI适配agent使用的UI，而是agent生成的UI，即agentic GenUI这种，在这个缩小范围内，Agentic GenUI + GUI Agent有人做过吗？
+
+【回答内容 轮数3】
+I’ll reassess the narrower intersection: agent-generated human-facing task UIs coupled to GUI/computer-use agents operating existing software, excluding agent dashboards and standalone generative apps.
+
+【回答内容 轮数3】
+I’m applying a stricter test: runtime UI generation and real GUI manipulation must form one closed-loop system, not rely on predefined tools or simulated services.
+
+【回答内容 轮数3】
+对，这个限定非常关键。**我前一个回答需要修正：如果严格指“Agent 动态生成给人操作的 UI（Agentic GenUI）＋ GUI/Computer-Use Agent 操作既有软件”，那么已经有人做过。**
+
+目前我查到最直接、几乎无歧义的公开学术反例是 **AgentLens: Adaptive Visual Modalities for Human–Agent Interaction in Mobile GUI Agents**，2026 年 4 月发布的预印本。它明确把 **GenUI 放进了移动 GUI Agent 的执行循环里**。turn553404view1
+
+## 直接命中的工作：AgentLens
+
+AgentLens 的运行方式是：
+
+```text
+用户委托任务
+→ GUI Agent 在后台操作真实第三方 App
+→ 到需要用户输入或选择的时刻
+→ Agent 调用 generate_ui
+→ 另一个 GenUI Agent 动态生成 HTML 界面
+→ 用户在生成界面上选择
+→ GUI Agent 根据选择继续操作真实 App
+```
+
+它的 GUI Agent 使用点击、滚动、输入等动作操作第三方 Android App，并通过 Virtual Display 在后台执行。主 Agent 的动作空间里除了普通设备操作，还有 `speak` 和 `ask`；每个交互动作可以选择 Full UI、Partial UI 或 `generate_ui`。`generate_ui` 会把自然语言界面说明发送给一个独立的 GenUI Agent，由后者生成 HTML 界面并渲染为弹窗。turn630791view1
+
+论文首页的送餐案例就是非常清楚的组合：
+
+1. GUI Agent 在后台打开并操作送餐 App；
+2. 需要用户选食物类别时，生成一个新的类别选择 GenUI；
+3. 用户在生成界面中点击；
+4. Agent 回到真实 App 继续执行；
+5. 选具体商品时展示真实 App 的 Partial UI；
+6. 付款时展示完整真实界面。turn553404view1
+
+所以，下面这个 claim 已经不能用了：
+
+> “TaskVM is the first system to combine Generative UI with GUI agents.”
+
+**AgentLens 是一个直接反例。**
+
+---
+
+## 但 AgentLens 与 TaskVM 的连接方式仍然不同
+
+最准确的区分不是“有没有把两个东西放在一起”，而是：
+
+> **生成出来的 UI 在系统中承担什么语义角色？**
+
+### AgentLens：GenUI 是即时沟通与交接界面
+
+AgentLens 的生成界面主要服务于 `ask` / `speak`：
+
+- 收集一次选择；
+- 请求一次确认；
+- 简洁地重排信息；
+- 展示一次执行结果；
+- 然后 GUI Agent 继续原本的 App 工作流。
+
+它是一个 **just-in-time interaction overlay**。论文自己的设计原则也明确说，界面只在需要输入、确认或 awareness 的 decision-critical moment 出现。
+
+它的核心循环更像：
+
+```text
+GUI Agent：我现在需要一个用户选择
+→ 临时生成一个界面
+→ 用户回答
+→ GUI Agent 继续
+```
+
+### TaskVM：GenUI 是真实软件状态的可执行投影
+
+TaskVM 要做的则是：
+
+```text
+多个真实 App 的 live state
+→ 编译成持续存在的任务状态界面
+→ 用户直接修改任务变量
+→ 修改被编译成跨 App semantic patch
+→ GUI/API Agent 写回多个真实应用
+→ verifier 从 ground truth 独立验证
+→ 重新同步生成界面
+```
+
+你们锁定的四个锚点正是：
+
+`existing applications / live state / executable binding / round-trip verification`。fileciteturn0file0L14-L19
+
+例如，AgentLens 的 GenUI 可能问：
+
+> “你想吃哪一种？”
+
+用户选择“Pizza”，Agent 随后继续点外卖 App。
+
+TaskVM 的界面则显示：
+
+> “发布日期：8 月 14 日”
+
+用户把它改成 8 月 18 日，这不是在回答 Agent 的问题，而是在**修改一个有跨软件语义绑定的世界状态变量**：Calendar 会议、TaskBoard deadline、Docs 日期等都要随之改变，并且无关对象必须保持不动。
+
+因此可以把差异压缩成一句：
+
+> **AgentLens 生成的是 GUI Agent 与用户之间的临时对话控件；TaskVM 生成的是用户与软件世界之间的持久状态控制面。**
+
+---
+
+## 一个更锋利的区别：AgentLens 遇到 GenUI 不可信时“退回真实 UI”
+
+AgentLens 的 formative study 发现，用户担心生成界面会幻觉价格、付款信息或菜单选项。因此它的解决方式是：
+
+- 低风险、适合重排的信息才用 GenUI；
+- 需要真实性时使用从真实 App 截取的 Partial UI；
+- 高风险支付步骤显示完整真实 App UI；
+- 论文明确把 GenUI 限制在低风险任务。
+
+这其实暴露了一个与 TaskVM 很相关、但解决方式不同的问题：
+
+```text
+AgentLens：
+生成 UI 可能不忠实
+→ 高风险时不要生成，退回真实 UI
+
+TaskVM：
+生成 UI 必须代表真实状态
+→ 建立 executable binding
+→ 写回后由独立 verifier 检查
+→ 冲突时 reconciliation
+```
+
+也就是说，AgentLens 主要研究的是：
+
+> **GUI Agent 在什么时候应该用哪种视觉交互模态？**
+
+而 TaskVM 研究的是：
+
+> **生成界面怎样成为真实应用状态的可信、可编辑、可验证投影？**
+
+这是一个很强的切割点。甚至可以说，AgentLens 证明了“GenUI + GUI Agent”组合确实有价值，同时也用用户研究直接证明了**没有状态保真机制时，用户不会信任纯生成界面处理重要状态**。这是我根据其设计和结果做出的研究定位推论。turn630791view0
+
+---
+
+## 其他几篇在这个窄定义下分别处于哪里
+
+### DuetUI：有 GenUI，有执行 Agent，但不是真实 GUI Agent
+
+DuetUI 会动态生成任务界面，用户也能直接操作界面，ServiceAgent 会响应这些操作；但它的 external services 是通过 LLM 模拟的，不是在真实已有应用 GUI 中执行。作者也明确把真实外部服务整合和实时 source verification 留给未来工作。turn630791view3
+
+因此它是：
+
+```text
+Agent-generated UI + simulated service execution
+```
+
+而不是严格意义上的：
+
+```text
+Agent-generated UI + GUI Agent over real existing apps
+```
+
+### SaC：有完整动态应用，但目前不能写外部系统
+
+SaC 的 agentic application 很接近“生成界面成为交互层”，但论文明确承认当前实现不能提交表单、写数据、触发外部服务或修改外部系统；它还直接把事务一致性和前端—ground-truth 同步列为未解决问题。
+
+### Macaron-A2UI：专门做 GenUI，但主动排除了既有界面执行
+
+Macaron-A2UI 是生成 UI 的模型和评测体系，目标是生成用于信息收集、偏好细化、确认和多目标组织的可执行 UI action。它属于 GenUI 这一侧，而不负责 GUI Agent 对既有应用的 action execution。
+
+你们已有材料对它的边界记录得很准确：论文明确将 assistant-side Generative UI 与 action execution over an existing interface 区分开来。fileciteturn0file0L77-L80
+
+---
+
+## 所以，重新整理后的研究版图是
+
+| 工作 | Agent 生成 UI | GUI Agent 操作真实应用 | 生成 UI 直接影响后续执行 | 持久 live-state 投影 | 跨 App 写回 | 独立 verifier |
+|---|---:|---:|---:|---:|---:|---:|
+| **AgentLens** | 是 | 是 | 是 | 否 | 否 | 否 |
+| **DuetUI** | 是 | 否，服务模拟 | 是 | 否 | 模拟 | 否 |
+| **SaC** | 是 | 否 | 当前否 | App 本身是 state | 否 | 否 |
+| **Macaron-A2UI** | 是 | 否 | 只到 UI action | 否 | 否 | 否 |
+| **TaskVM** | 是 | 是 | 是 | **是** | **是** | **是** |
+
+这里最重要的修正是：
+
+> **AgentLens 已经占据了“Agentic GenUI × GUI Agent”这个组合层面的 novelty。**
+
+但它没有占据：
+
+> **Agentic GenUI as a persistent executable projection of live cross-application state.**
+
+---
+
+## TaskVM 最安全的新版表述
+
+不再说：
+
+> Prior work has not combined Generative UI with GUI agents.
+
+建议改为：
+
+> **Prior work has paired just-in-time generated interfaces with GUI agents as a communication and handoff modality. TaskVM instead turns the generated interface into a persistent executable projection of live state across existing applications: user edits are compiled into cross-application actions, and the resulting state is independently verified and reconciled.**
+
+中文可以写成：
+
+> **已有工作已将即时生成界面用于 GUI Agent 的信息展示、用户询问和执行交接。TaskVM 研究的不是这种临时沟通界面，而是将生成界面变成多个既有应用实时状态的持久可执行投影：用户修改任务语义变量，系统将其写回真实应用，并依据独立 ground truth 验证和重新同步。**
+
+## 最终判断
+
+**有人做过，而且 AgentLens 是必须正面引用的直接相关工作。**
+
+更准确地说：
+
+- “GenUI + GUI Agent”已经有人做；
+- “GenUI 作为 GUI Agent 的即时询问、展示和 handoff 层”已经被 AgentLens 做得相当明确；
+- 我目前仍未找到公开工作完成 TaskVM 所要求的完整闭环：
+  **多应用 live state → 持久生成式任务投影 → 用户编辑语义变量 → GUI Agent 跨应用写回 → 独立验证 non-interference 与 reconciliation。**
+
+因此，在你现在缩小后的分类里，**AgentLens 应当取代 Sidekick/AOHP，成为“组合层面最直接的 related work”**；而 TaskVM 的 novelty 必须从“首次组合两个模块”，收紧为“首次建立两者之间的可执行状态绑定与可验证 round trip”。
+
+
+【提问 轮数4】
+还有吗？越多越好，按相关性排序
+
+【回答内容 轮数4】
+I’ll expand using strict tiers: full matches, one-link gaps, then conceptual neighbors, requiring runtime human-facing UI generation, executable user input, and agents operating existing software.
+
+【回答内容 轮数4】
+AOHP moves up: it generates task-level service entrances while agents invoke existing apps through GUI, structured UI, APIs, or CLI, though it resembles OS-level composition rather than live state projection.
+
+【回答内容 轮数4】
+有，而且我需要再修正一次排序：
+
+> **在“Agent 运行时生成给人操作的 UI，并由这个 UI 驱动 GUI Agent 继续操作既有软件”这个严格定义下，Morae 比 AgentLens 更直接、更接近 TaskVM。**
+
+为了不把“沾了 GenUI 或 GUI Agent 一边”也算成撞车，我按六个判据排序：
+
+1. 是否在运行时生成面向人的交互 UI；
+2. 用户对生成 UI 的操作是否进入后续执行；
+3. 是否由 GUI/Computer-Use Agent 操作既有软件；
+4. 生成 UI 是否持续投影真实应用状态；
+5. 是否跨多个应用；
+6. 是否有独立 ground-truth verifier。
+
+TaskVM 真正要求的是后四个锚点同时成立：`existing applications / live state / executable binding / round-trip verification`。fileciteturn0file0L14-L19
+
+---
+
+# S 级：严格意义上的直接命中
+
+## 1. Morae — **目前最直接的学术反例**
+
+**Morae: Proactively Pausing UI Agents for User Choices，UIST 2025**
+
+它的完整循环是：
+
+```text
+用户给出 Web 自动化任务
+→ UI Agent 在真实网站中执行
+→ 每一步读取当前 DOM、截图、任务和动作历史
+→ 检测到用户偏好不明确
+→ 动态生成无障碍、可交互的选择 UI
+→ 用户在生成 UI 中选择
+→ 自动化继续操作原网站
+```
+
+论文明确说，Morae 在每个自动化步骤分析当前 UI state 和历史动作，遇到关键歧义时暂停，并“dynamically generates accessible and interactive UIs”，用户作出选择后自动化继续。底层 Agent 基于 TaxyAI，通过 DOM 执行点击和文本输入，覆盖购物、旅行、Calendar、Docs、Drive 等真实网站。
+
+这意味着 Morae 已经完成：
+
+- Agent 生成 UI；
+- UI 给人操作；
+- 用户操作改变后续计划；
+- GUI Agent 继续操作既有软件；
+- 生成内容来自当前真实网页状态，而非纯粹从初始 prompt 猜测。
+
+它和 TaskVM 的关键区别不是“有没有组合”，而是生成 UI 的语义角色：
+
+- **Morae：decision-point UI**，在自动化遇到歧义时生成一次性选择器；
+- **TaskVM：persistent task-state projection**，持续显示并编辑多个应用的真实任务状态。
+
+Morae 没有：
+
+- 持久任务界面；
+- 多应用统一状态投影；
+- 一个 task variable 对多个 app object 的绑定；
+- 写回后的 non-interference 检查；
+- reconciliation；
+- 独立 ground-truth verifier。
+
+但下面这个 claim 已经被 Morae 击穿：
+
+> “No prior work lets users manipulate a generated interface to steer a GUI agent acting on existing software.”
+
+它甚至比 AgentLens 更危险，因为 Morae 的生成控件明确来源于**当前真实网页中的候选项**，而且用户选择直接决定下一步真实网页操作。
+
+---
+
+## 2. AgentLens — **最明确使用“GenUI + Mobile GUI Agent”术语的工作**
+
+**AgentLens: Adaptive Visual Modalities for Human–Agent Interaction in Mobile GUI Agents，2026**
+
+AgentLens 让 Mobile GUI Agent 在后台 Virtual Display 中操作未修改的第三方 Android App，并根据交互时刻选择：
+
+- Full UI；
+- Partial UI；
+- GenUI。
+
+当 Agent 选择 `generate_ui` 时，会调用独立 GenUI Agent 生成 HTML/CSS 弹窗；用户在弹窗中选择后，GUI Agent 继续操作真实 App。论文因此明确把 GenUI 作为 GUI Agent 执行过程中的一种 just-in-time visual modality。citeturn941819academia1
+
+它比 Morae更强调“视觉交互模态”，但生成 UI 和原 App 被有意解耦，主要用于：
+
+- 询问用户；
+- 展示选项；
+- 总结信息；
+- 请求确认；
+- 报告执行结果。
+
+因此：
+
+```text
+Morae：
+当前真实 UI 中出现歧义
+→ 生成结构化选择 UI
+→ 选择决定网页执行
+
+AgentLens：
+GUI Agent 需要与用户沟通
+→ 选择 GenUI 作为视觉表达模态
+→ 用户回应后继续执行
+```
+
+AgentLens 同样没有持久 live-state projection、跨 App semantic binding 和独立 round-trip verification。
+
+---
+
+## 3. Generative UI Computer-Use Agent with LangGraph.js — **工程系统命中，学术证据较弱**
+
+这是一个公开的全栈工程示例，组合了：
+
+- OpenAI Computer Use；
+- Scrapybara 虚拟机；
+- LangGraph.js；
+- 实时任务 UI；
+- 执行步骤可视化；
+- 暂停、恢复和终止控制。
+
+公开介绍直接称其为 “Generative UI Computer Use Agent”。
+
+但需要谨慎：
+
+- 公开材料更清楚地证明了“CUA + 动态前端”；
+- 没有充分证明每个任务的语义控件是由 Agent 根据底层软件状态动态生成的；
+- 已公开的 UI 更像 execution console、streaming state 和控制面板；
+- 不是经过同行评审的研究系统。
+
+所以它可以作为**工程趋势证据**，但不应像 Morae、AgentLens 那样当作确定的学术 novelty 反例。
+
+---
+
+# A 级：只差一层，属于必须认真切割的近邻
+
+## 4. AOHP — **跨 App 与任务级入口最接近**
+
+**An Open-Source OS-Level Agent Harness，2026**
+
+AOHP 修改 Android/AOSP 层，提供：
+
+- Personalized Service Composition；
+- Generated Service Entrances；
+- 多 App 服务聚合；
+- Agent 对真实第三方应用和系统资源的访问；
+- 后台 Virtual Display 和结构化 Agent 接口。
+
+它已经在做“把多个 App 的能力组合成一个面向任务的入口”。但它的目标是 OS 如何成为 agent-native harness，而不是从多个应用的 live state 编译一个可编辑任务投影；它也没有用户编辑任务变量后的独立 round-trip verifier。fileciteturn0file0L81-L87
+
+它对 TaskVM 的威胁主要在：
+
+```text
+cross-app composition
++ generated task-level entrance
++ real app execution
+```
+
+缺少的是：
+
+```text
+live state projection
++ editable semantic variables
++ independent verification
++ reconciliation
+```
+
+按“完整系统形态相似度”看，它仍然应位居最重要近邻之一。
+
+---
+
+## 5. DuetUI — **生成 UI 和执行闭环都有，但真实服务是模拟的**
+
+DuetUI 会根据任务分解逐步生成界面，用户直接操作这些界面，操作又进入 Agent 的下一轮生成和执行。它因此拥有非常完整的：
+
+```text
+Agent scaffolds UI
+→ user manipulates UI
+→ manipulation steers Agent
+→ UI continues evolving
+```
+
+但其 ServiceAgent 对 external services 的执行由 LLM 模拟，并不通过 GUI Agent 操作真实既有应用。citeturn710875academia1 fileciteturn0file0L71-L75
+
+因此它是：
+
+> **GenUI + agent execution abstraction**
+
+而不是：
+
+> **GenUI + GUI Agent over existing software**
+
+它仍是 TaskVM 在“人直接操纵生成 UI”这一半最强的相关工作之一。
+
+---
+
+## 6. Software as Content（SaC）— **持久动态应用最接近，但没有外部写回**
+
+SaC 将动态生成的 application 设为人和 Agent 之间持续演化的交互状态。它比 Morae、AgentLens 更接近 TaskVM 的“持久任务应用”体验，因为 UI 不只是一次性的询问控件，而是跨多轮持续存在和变化。citeturn710875academia0
+
+但 SaC 当前实现不能：
+
+- 提交表单；
+- 写外部数据；
+- 调用外部服务；
+- 修改外部系统；
+- 处理跨系统事务；
+- 同步前端与外部 ground truth。
+
+更根本的区别是：
+
+- **SaC：generated application 本身就是 state；**
+- **TaskVM：generated surface 只是多个真实应用状态的投影，永远不是 source of truth。**
+
+这些边界在其 limitation 中写得非常直接。fileciteturn0file0L60-L70
+
+---
+
+## 7. Jelly — **task-state representation 层极其接近**
+
+**Generative and Malleable User Interfaces with Generative and Evolving Task-Driven Data Model，CHI 2025**
+
+Jelly 从用户任务生成：
+
+- object-relational schema；
+- dependency graph；
+- structured data；
+- UI specification；
+- 持久、可演化的任务 UI。
+
+用户可以直接操作生成的 UI，操作会被翻译成对底层 task-driven data model 的修改；模型再驱动 UI 和数据更新。
+
+它和 TaskVM 的结构相似度很高：
+
+```text
+Jelly:
+prompt
+→ task-driven data model
+→ generated UI
+→ user manipulation
+→ update model
+
+TaskVM:
+existing app states
+→ task-state model
+→ generated UI
+→ user manipulation
+→ semantic patch
+→ update real apps
+```
+
+关键分界：
+
+- Jelly 的 task-driven model 是系统内部的主要状态；
+- TaskVM 的 task state 是对外部真实应用的绑定与缓存；
+- Jelly 不使用 GUI Agent 写回既有应用；
+- Jelly 不验证跨应用 non-interference。
+
+**Jelly 很可能应该进入 TaskVM 主文 related work，而不只是附录。**
+
+---
+
+## 8. A-Mash — **没有 GenAI，但 existing-app projection 极其接近**
+
+**A-Mash: Providing Single-App Illusion for Multi-App Use through User-centric UI Mashup，MobiCom 2022**
+
+A-Mash 可以：
+
+- 从未修改的既有 Android App 动态提取 UI；
+- 把不同 App 的 UI 嵌入同一个 wrapper；
+- 保持原 App 与聚合 UI 同步；
+- 让用户在一个界面中操纵多个真实 App。
+
+它甚至明确宣称为多个 unmodified legacy apps 提供 synchronized single-app illusion。
+
+它缺少：
+
+- LLM/Agent 生成任务抽象；
+- task semantic variables；
+- GUI Agent 执行；
+- 自动 cross-app dependency propagation；
+- verifier。
+
+但从系统谱系看，A-Mash 是一个非常重要的前 GenAI 祖先：
+
+> **它证明了“多个既有 App 的可操作同步投影”并不是 TaskVM 首次提出；TaskVM 的新意必须是 Agent 自动进行 task abstraction、semantic binding、跨 App effect propagation 和验证。**
+
+这是目前大纲里相对缺失、值得补进 related work 的一篇。
+
+---
+
+## 9. Savant — **真实异质软件统一控制，但界面还是自然语言**
+
+**Enabling Uniform Computer Interaction Experience for Blind Users through Large Language Models，ASSETS 2024**
+
+Savant 允许盲人用户用统一自然语言操作不同桌面应用。它把自然语言转换为一系列 screen-reader actions，在按钮、输入框、下拉框等真实控件上执行。citeturn172856academia12
+
+它完成的是：
+
+```text
+uniform semantic command
+→ heterogeneous app control
+```
+
+没有：
+
+```text
+live app state
+→ generated visual task interface
+```
+
+所以它是 TaskVM 的“统一执行入口”近邻，而不是 GenUI 直接反例。
+
+---
+
+## 10. Computer-Use Agents as Judges for Generative UI / AUI-Gym — **两个模块都有，但拓扑反了**
+
+这项工作让 Coder Agent 生成网站，再让 Computer-Use Agent 在生成的网站上完成任务、评价可用性，并将导航轨迹压缩成 CUA Dashboard，反馈给 Coder 继续修改界面。citeturn526274academia12
+
+循环是：
+
+```text
+Coder 生成 UI
+→ CUA 操作生成 UI
+→ CUA 评价可操作性
+→ Coder 修改 UI
+```
+
+TaskVM 是：
+
+```text
+GUI Agent 操作既有 UI
+→ 生成给人使用的任务 UI
+→ 人操作生成 UI
+→ GUI Agent 写回既有 UI
+```
+
+因此它确实组合了 Generative UI 和 CUA，却是**设计与评测闭环**，不是**人—生成 UI—真实软件执行闭环**。
+
+论文中最好引用它来说明：
+
+> GenUI 与 CUA 的组合已经出现在 agent-native UI design 中，但 TaskVM 研究相反方向：生成给人操纵的界面，并将操作落实到既有软件。
+
+---
+
+## 11. WebVIA — **读取既有 UI，再生成可交互 UI，但用于复刻开发**
+
+WebVIA 包含：
+
+1. Exploration Agent 操作和探索目标网站；
+2. 捕获多状态截图；
+3. UI2Code 模型生成可执行、可交互代码；
+4. Validator 验证交互行为。
+
+它构成：
+
+```text
+Agent explores an existing UI
+→ generates an interactive UI implementation
+→ validates it
+```
+
+但生成的界面是目标网站的代码复刻，不是给用户操作以控制原网站的中间层。citeturn526274academia13
+
+对 TaskVM 来说，它证明：
+
+- GUI exploration 可以为动态 UI generation 提供输入；
+- 交互行为可以被自动验证；
+- 但生成界面和被观察界面之间不是持续双向绑定。
+
+---
+
+## 12. InfiniteWeb — **生成整个 GUI 环境供 GUI Agent 操作**
+
+InfiniteWeb 自动生成大规模、功能完整的多页面网站和对应 task evaluators，再用这些环境训练 GUI Agent。它把“UI 生成、GUI Agent 执行、程序化验证”都放进一个系统。
+
+但它的目标是：
+
+```text
+generate training environments for agents
+```
+
+而不是：
+
+```text
+generate a task interface for humans
+over existing applications
+```
+
+因此是基础设施相关工作，不是直接交互范式竞争者。
+
+---
+
+# B 级：GenUI 一侧高度相关，但没有 GUI Agent 写回
+
+以下工作不属于严格的“GenUI + GUI Agent”命中，但会占据 TaskVM 的 UI-generation、task-model 或协议叙事空间。
+
+## 13. Macaron-A2UI
+
+专注 assistant-side Generative UI，使用声明式组件协议和可信 catalog；论文明确将自己的目标与“action execution over an existing interface”区分开。fileciteturn0file0L77-L80
+
+**TaskVM 可复用其协议或评测思路，但正好做它排除的执行一侧。**
+
+## 14. Generative Interfaces for Language Models
+
+研究 LLM 根据 query 主动生成任务特定 UI，并比较生成界面与聊天界面；不涉及操作既有 GUI。citeturn113527academia15
+
+## 15. Portal UX Agent
+
+LLM 生成 typed composition template 和 component specification，再由确定性 renderer 从可信组件集装配 UI。与 TaskVM 的 bounded catalog/A2UI 路线高度相似，但没有 GUI Agent 或外部状态绑定。citeturn113527academia13
+
+## 16. OpenGenerativeUI / CopilotKit
+
+工程框架允许 Agent 在运行时返回 HTML、SVG 或结构化前端元素，适合做动态地图、图表、表单和工具界面；没有天然提供对任意既有应用 GUI 的 live binding。
+
+## 17. LangGraph Generative UI
+
+Agent 可以根据状态选择和渲染 React 组件，并将前端事件回传 graph state。它解决的是 Agent state 与 generated frontend 之间的连接，不是外部 App ground truth。
+
+## 18. A2UI
+
+A2UI 是声明式 Agent-to-UI 传输协议，提供 catalog、surface 和 data-model 同步能力。它可能成为 TaskVM 的 renderer wire format，但不负责观察或操作真实 App，也不提供 round-trip correctness。
+
+## 19. AG-UI
+
+AG-UI 面向前端与 Agent runtime 的事件、状态和流式同步。它解决的是“Agent 和其自有前端怎样同步”，不是“生成前端怎样忠实投影第三方应用”。
+
+## 20. CHI Playground / Schema-driven Agent Prompt UI
+
+这一类工具根据 JSON Schema 动态生成收集用户输入的 UI，典型用途是 approval、guidance 和 structured input。它们接近 Morae 的 clarification widget，但通常不包含真实 GUI Agent 执行。
+
+---
+
+# C 级：GUI Agent + 人类交互一侧相关，但没有 Agentic GenUI
+
+这些工作不能当“GenUI + GUI Agent”的反例，但会覆盖暂停、纠错、接管、解释和 mixed initiative。
+
+## 21. CowPilot
+
+人在 Web Agent 执行期间可以暂停、修改、接管和恢复自动化。它是强 mixed-initiative GUI Agent，但没有动态生成任务 UI；Morae 也把它作为交互式 UI Agent 的前序工作。
+
+## 22. MIWA
+
+Mixed-Initiative Web Automation 让用户获得更强的控制、信心和介入能力，但交互层仍围绕既有网页和自动化过程，并非 Agent 生成的新任务界面。Morae 将其列为 language-driven interactive UI agent 相关工作。
+
+## 23. META-GUI
+
+支持在移动 GUI 中进行多模态、多轮对话和操作执行，但回应主要是语言与原界面动作，不生成新的可操作任务 UI。
+
+## 24. LLM4UI
+
+LLM 对移动 UI 执行总结、问答和操作；具有 GUI understanding 和 action execution，但没有 persistent GenUI surface。
+
+## 25. WebLINX
+
+面向真实网站导航的多轮人—Agent 对话数据和模型，支持用户在执行过程中提供指导，但交互形态仍是 dialogue，不是生成式 UI。
+
+## 26. Magentic-UI
+
+支持计划审阅、执行状态、action guard、暂停和用户接管。它是 Agent workspace，而非根据应用 live state 生成的任务控制面。
+
+## 27. Sidekick
+
+为 CUA 执行提供环境提示、摘要和多模态反馈，但它明确不执行动作，只作为通信层；其 UI 压缩的是 Agent actions，而不是 applications。fileciteturn0file0L89-L94
+
+## 28. OS-Kairos
+
+研究何时让人介入 GUI Agent、怎样适时获取帮助或控制，属于 adaptive human intervention，不提供 Agent-generated task UI。
+
+## 29. VeriOS
+
+重点是 GUI Agent 执行中的验证、错误检测和恢复。它对 TaskVM verifier 设计有方法价值，但验证对象是 Agent trajectory/outcome，而不是生成界面的 projection fidelity。
+
+## 30. Mobile-Aptus
+
+研究移动 GUI Agent 如何适应执行错误、环境变化和任务变化，属于动态 replanning/recovery 一侧，没有 GenUI。
+
+## 31. UI-Genie
+
+通过 reward model、受控轨迹扰动和 self-improvement 改善移动 GUI Agent，并强调 outcome verification；没有人操作的 generated UI。citeturn941819academia2
+
+## 32. ShowUI
+
+统一视觉—语言—动作模型，直接从截图理解并操作 Web、Mobile 和 Desktop GUI；是可复用 executor，而非 GenUI 系统。citeturn941819academia3
+
+## 33. ScreenAgent
+
+通过截图、鼠标和键盘动作控制真实计算机，包含 planning、acting 和 reflection；没有生成的人类任务界面。
+
+## 34. Savant 前序系统：JustSpeak、CaptiSpeak、ConWeb
+
+这些系统通过语音或自然语言为异质 GUI 提供统一控制，解决“用户不想学习每个应用的交互语法”，但没有动态任务 UI 和跨应用状态模型。它们在 Morae 的 related work 中被系统梳理。
+
+---
+
+# D 级：与 TaskVM benchmark、state abstraction 和跨 App 执行相关
+
+它们不是 GenUI 竞品，但可能是系统与评测章节的重要引用。
+
+## 35. WindowsWorld
+
+2026 年的跨应用 GUI Agent benchmark，专门评测 Windows 上的专业化、多步骤、cross-application workflow，并包含 intermediate inspection。它可以支持 TaskVM 关于“现有 GUI benchmark 多为单 App，跨 App 工作流需要专门评测”的论述。
+
+## 36. MyPCBench
+
+在带有个人数据和 17 个模拟真实 Web App 的桌面环境中评测 personal computer-use agents，强调 logged-in、跨数字生活场景。它与 TaskVM 的 multi-app task environment 很接近，但不生成给人的任务界面。
+
+## 37. HiSA
+
+对 GUI Agent 的长历史进行 hierarchical state abstraction，将原始轨迹压缩成 abstracted steps、refined contexts 和 patterns。它和 TaskVM 都强调“不要把完整 trajectory 当作主要状态”，但 HiSA 的抽象供 Agent 推理使用，不是给用户操作的 live task state。
+
+## 38. OmniACT
+
+评测模型从屏幕和自然语言任务生成可执行桌面/Web 操作程序。它可以支撑 TaskVM executor 基线，但没有 GenUI。citeturn172856academia14
+
+## 39. InfiniteWeb 的 task evaluator
+
+除环境生成外，它自动生成可验证任务 evaluator，这一点对 TaskVM 的隐藏 canonical graph 和程序化 verifier 有方法价值。
+
+## 40. AUI-Gym 的 programmatic verifier
+
+AUI-Gym 会程序化检查生成网站中的任务是否可执行。虽然验证目标不同，但它提供了“生成 UI 不应只看视觉质量，而要检查 task solvability”的相关论据。citeturn526274academia12
+
+---
+
+# 一张压缩后的核心比较表
+
+| 工作 | 运行时生成给人的 UI | 操作真实既有 GUI | 用户操作生成 UI 驱动执行 | 持久 live-state 投影 | 跨 App | 独立 round-trip verifier |
+|---|---:|---:|---:|---:|---:|---:|
+| **Morae** | 是 | 是，Web | **是** | 否，决策点临时 UI | 否 | 否 |
+| **AgentLens** | 是 | 是，Mobile | **是** | 否，临时 overlay | 否 | 否 |
+| **LangGraph CUA demo** | 部分可确认 | 是 | 证据不充分 | 否 | 未证明 | 否 |
+| **AOHP** | 部分／任务入口 | 是 | 部分 | 部分 | **是** | 否 |
+| **DuetUI** | **是** | 否，服务模拟 | **是** | 界面持续演化 | 模拟 | 否 |
+| **SaC** | **是** | 否 | 部分 | **是，但 app 本身是 state** | 否 | 否 |
+| **Jelly** | **是** | 否 | **是** | **是，但内部 model 是 state** | 数据域可聚合 | 否 |
+| **A-Mash** | 否，提取原控件 | 真实 App | 用户直接操作原控件 | **同步的真实 UI** | **是** | 否 |
+| **AUI-Gym** | 是 | CUA 操作生成网站 | 方向相反 | 否 | 否 | 有 task verifier，但不是 round trip |
+| **TaskVM** | **是** | **是** | **是** | **是** | **是** | **是** |
+
+---
+
+# 按“对 TaskVM novelty 的危险程度”重新排序
+
+这和单纯的技术相似度略有不同。
+
+## 第一危险：Morae
+
+它直接占据：
+
+> **generated UI at GUI-agent decision points, with user input controlling subsequent execution**
+
+因此以后不能再写“首次让人通过生成 UI 控制 GUI Agent”。
+
+## 第二危险：AgentLens
+
+它直接占据：
+
+> **GenUI as a human–GUI-agent interaction modality**
+
+因此不能写“首次把 Generative UI 用作 GUI Agent 的人机交互层”。
+
+## 第三危险：AOHP
+
+它占据：
+
+> **generated task/service entrances over multiple real apps**
+
+因此 TaskVM 必须强调 live-state projection、semantic variable binding 和 verifier，而不能只强调“统一入口”。
+
+## 第四危险：Jelly / SaC
+
+它们分别占据：
+
+- task-driven persistent generated UI；
+- persistent dynamic application as interaction state。
+
+因此 TaskVM 不能把“持续存在的小应用”或“task state 驱动 UI”单独当 novelty。
+
+## 第五危险：A-Mash
+
+它占据：
+
+> **可操作、同步的多既有 App 单界面聚合**
+
+所以 TaskVM 的 existing-app projection 不能单独 claim first；必须和 Agent 自动抽象、语义绑定、GUI 执行、验证同时讲。
+
+## 第六危险：DuetUI
+
+它占据：
+
+> **用户操作生成 UI，操作反向塑造 Agent 执行**
+
+但真实服务执行是模拟的，因此相对容易通过 existing software + ground truth 拉开。
+
+---
+
+# 我现在会怎样写 TaskVM 的 related-work 核心句
+
+不能再写：
+
+> Prior work has not combined Generative UI with GUI agents.
+
+建议改成：
+
+> **Prior work has introduced generated interfaces at decision points in web automation and as just-in-time visual communication for mobile GUI agents. Other systems have explored persistent generative task interfaces, cross-application UI composition, and agent execution over existing software separately. TaskVM connects these lines through a persistent executable projection of live cross-application state: user edits are compiled into actions over existing applications, whose intended effects, non-interference, and subsequent reconciliation are independently verified.**
+
+中文：
+
+> **既有工作已经在 Web 自动化的决策点生成用户选择界面，也已将 GenUI 作为移动 GUI Agent 的即时视觉沟通模态；另一些系统分别研究了持久生成式任务界面、跨应用 UI 聚合以及面向既有软件的 Agent 执行。TaskVM 的贡献不是首次把这些模块放在一起，而是建立一个持久、可执行、可验证的跨应用实时状态投影：用户编辑任务变量，系统将编辑编译为对既有应用的操作，并独立验证目标效果、非干涉与重新同步。**
+
+---
+
+# 最值得立刻加入主文献表的八篇
+
+按优先级，我建议主文 Related Work 至少正面处理：
+
+1. **Morae**
+2. **AgentLens**
+3. **AOHP**
+4. **Jelly**
+5. **SaC**
+6. **DuetUI**
+7. **A-Mash**
+8. **Macaron-A2UI**
+
+其中：
+
+- Morae 和 AgentLens 放在同一个 **Generated Interaction during GUI-Agent Execution** 小节；
+- Jelly、SaC、DuetUI、Macaron 放在 **Generative and Malleable Task Interfaces**；
+- AOHP、A-Mash、Savant 放在 **Cross-Application and Uniform Interaction Layers**；
+- Sidekick、CowPilot、MIWA、Magentic-UI 放在 **Human–GUI-Agent Collaboration and Oversight**；
+- AUI-Gym、WebVIA、InfiniteWeb 可以放进系统或评测相关工作，而不必占主叙事太多篇幅。
+
+截至 **2026 年 8 月 6 日**，本轮公开资料检索里，已经可以确认至少有 **两篇严格的学术直接命中：Morae 与 AgentLens**；另有一个公开工程样例把 Generative UI 与 Computer Use 放在同一全栈系统中。与此同时，我仍未发现一个公开系统同时完成：
+
+```text
+多个既有应用的实时状态
+→ 持久生成式任务投影
+→ 用户编辑跨应用语义变量
+→ GUI/API Agent 写回多个真实应用
+→ 独立验证目标效果与非干涉
+→ 冲突检测和 reconciliation
+```
+
+所以 TaskVM 的安全位置已经不是“首次组合 GenUI 和 GUI Agent”，而是更具体、也更可守的：
+
+> **将 Agentic GenUI 从临时询问／沟通界面，提升为多个既有应用实时状态的持久、可执行、可独立验证的控制投影。**
+
+
+【提问 轮数5】
+还有吗？越多越好，按相关性排序
+
+【回答内容 轮数5】
+I’ll expand the list using a “stricter matches first” order: generative human-usable UI, user operability, GUI/computer-use agents controlling real software, and closed-loop writeback/verification.
+
+
+【提问 轮数6】
+还有吗？越多越好，按相关性排序
+
+【回答内容 轮数6】
+I’ll expand the list by separating direct matches, near-complete matches, and conceptual neighbors, retaining only verifiable papers or official project pages.
+
+【回答内容 轮数6】
+Morae and AgentLens remain the strongest strict matches. I’ll prioritize TaskLens, Spatula, and AppLess, verifying true GUI-agent write-back, while placing GenerativeGUI among non-strict GenUI neighbors.
+
+【回答内容 轮数6】
+有。继续往外挖以后，**最重要的新发现是 ALLOY**。它应当进入最相关工作的前三名，而且从 TaskVM 的 framing 风险看，它甚至可能比 AgentLens 更危险。
+
+我仍按 TaskVM 的核心判据排序：界面是否由 Agent 运行时生成、是否给人直接操作、操作是否驱动 GUI/Computer-Use Agent、是否来自既有应用 live state、是否跨应用、是否有独立 round-trip verifier。TaskVM 自己锁定的是 `existing applications / live state / executable binding / round-trip verification` 四锚点。fileciteturn0file0L14-L19
+
+# 第一档：真正命中“Agentic GenUI × GUI Agent”
+
+## 1. Morae — 当前最接近“从真实 UI 生成决策界面”的工作
+
+Morae 在 Web GUI Agent 执行过程中读取当前网页 DOM、截图、用户请求和动作历史，检测到未明确的选择后暂停，并动态生成无障碍、可交互的选择界面。用户选择后，Agent 继续操作真实网站。
+
+它已经具备：
+
+- 当前真实网页状态进入 GenUI；
+- 用户操作生成界面；
+- 生成界面的选择驱动真实网页自动化；
+- 结果回到原网站。
+
+它缺的是持久任务状态、多应用状态绑定、跨应用 effect propagation、non-interference 和独立 ground-truth verifier。
+
+**TaskVM 区分句：**
+
+> Morae generates decision interfaces from a current application state; TaskVM generates a persistent executable projection of task state distributed across applications.
+
+---
+
+## 2. ALLOY — 本轮新增，可能是对 TaskVM framing 最危险的工作
+
+**ALLOY: Generating Reusable Agent Workflows from User Demonstration，2025 预印本。**
+
+ALLOY 记录用户在真实浏览器中的操作，由多 Agent 自动抽象成一个任务级、图结构的可视工作流。这个工作流不是固定 dashboard，而是系统根据演示推断并生成的；用户可以直接编辑节点和依赖，然后让 LLM Web Agents 通过浏览器自动化执行该工作流，并将工作流泛化到新任务。citeturn643379academia42
+
+它完成了：
+
+```text
+真实浏览器操作
+→ Agent 推断高层任务结构
+→ 生成可视、可编辑的任务级界面
+→ 用户直接修改界面
+→ Web Agents 执行修改后的流程
+```
+
+这比 AgentLens 更接近 TaskVM 的原因是：
+
+- 它的界面是持续存在的，不是一次性弹窗；
+- 它暴露的是 task-level abstraction，不是点击轨迹；
+- 用户直接编辑高层任务结构；
+- 编辑结果会由浏览器 Agent 真实执行。
+
+但它投影的是**过程／程序**：
+
+```text
+这个任务应该按照什么步骤执行？
+```
+
+TaskVM 投影的是**世界状态**：
+
+```text
+这个任务在多个真实应用里现在处于什么状态？
+```
+
+因此二者最锋利的切割是：
+
+> **ALLOY lets users edit the program executed by browser agents; TaskVM lets users edit the task state that multiple applications must realize.**
+
+或者更简洁：
+
+> **ALLOY projects procedure; TaskVM projects state.**
+
+ALLOY 也没有证明：
+
+- 当前生成界面与多个应用 ground truth 持续同步；
+- 一个任务变量绑定多个应用对象；
+- 用户修改后的 expected diff；
+- 无关状态不动；
+- 外部修改后的 reconciliation。
+
+**这篇必须进入主文 Related Work，不能放附录。**
+
+---
+
+## 3. AgentLens — 最明确使用“GenUI + Mobile GUI Agent”组合的工作
+
+AgentLens 让移动 GUI Agent 在后台 Virtual Display 中操作真实第三方 Android App，并在需要用户输入、确认或 awareness 时，在 Full UI、Partial UI 和 GenUI 三种视觉模态之间选择。其 GenUI 由独立的生成 Agent 创建，用户响应后主 GUI Agent 继续操作真实 App。citeturn201406academia42
+
+它已经占据：
+
+> **GenUI as a human–GUI-agent interaction modality.**
+
+但其 GenUI 主要是：
+
+- 临时询问；
+- 选择器；
+- 确认；
+- 结果摘要；
+- 执行交接。
+
+不是持续同步的 task-state surface。
+
+最准确的切割仍然是：
+
+> **AgentLens generates a temporary communication surface between the user and the GUI agent; TaskVM generates a persistent control surface between the user and the underlying software state.**
+
+---
+
+## 4. AOHP — 跨应用和“生成任务入口”最接近
+
+AOHP 是建立在 AOSP 上的 OS-level agent harness，包含 personalized service composition、adaptive user interfaces、后台执行和对多个真实 App 的访问。它明确试图把多个 App 的服务组合成面向用户的任务级入口。citeturn125369academia1
+
+它已经碰到了：
+
+```text
+generated task/service entrance
++ multiple real applications
++ agent execution
+```
+
+但没有做到：
+
+```text
+live-state task projection
++ user-editable semantic variable
++ expected cross-app state diff
++ independent verifier
++ reconciliation
+```
+
+因此它不是严格的 GenUI 直接反例，但在**系统整体形态**上仍然非常接近。
+
+---
+
+## 5. Generative UI Computer-Use Agent with LangGraph.js — 工程实现命中
+
+公开工程示例将 OpenAI Computer Use、Scrapybara 虚拟机、LangGraph.js 和所谓 Generative UI 放在同一个系统里，包含执行过程的动态呈现、截图、暂停、恢复和终止。
+
+但公开材料支持得最明确的是：
+
+```text
+CUA + dynamically updated execution UI
+```
+
+而不是：
+
+```text
+CUA reads application state
+→ semantically generates task-specific controls
+→ user edits controls
+→ CUA writes those edits back
+```
+
+所以它是工程趋势证据，不宜当作与 Morae、ALLOY、AgentLens 同等级的学术直接反例。
+
+---
+
+# 第二档：只缺一个关键连接，必须正面处理
+
+## 6. A-Mash — 多个既有 App 的同步可操作投影
+
+A-Mash 从未修改的 Android App 中动态提取 UI，将不同 App 的控件嵌入一个 wrapper，并保持交互和状态同步，形成“single-app illusion”。
+
+它已经占据：
+
+> **多个真实既有应用 → 一个同步、可操作的统一界面。**
+
+缺的是：
+
+- Agent 自动抽象；
+- Agentic GenUI；
+- task semantic variables；
+- 自动依赖传播；
+- independent verifier。
+
+因此 TaskVM 不能 claim“首次把多个既有 App 做成一个可操作界面”；只能 claim 自动 task abstraction、semantic binding 和 verified write-back 的组合。
+
+---
+
+## 7. Jelly — 持久任务状态模型与可编辑生成 UI
+
+Jelly 从用户任务生成 task-driven data model，再据此生成持续、可修改的界面；用户可以通过直接操作或自然语言修改 UI，修改被翻译为底层模型的变化。
+
+它与 TaskVM 的结构几乎同构：
+
+```text
+Jelly:
+task intent → task model → generated UI → manipulation → model update
+
+TaskVM:
+real app states → task model → generated UI → manipulation
+→ semantic patch → real app update → verification
+```
+
+关键差异是：
+
+- Jelly 的内部 task model 是主要状态；
+- TaskVM 的 task state 只是外部真实应用的绑定投影；
+- Jelly 不通过 GUI Agent 写回既有软件；
+- Jelly 不检查 non-interference。
+
+---
+
+## 8. DuetUI — 人操作生成 UI 并驱动 Agent，但服务执行是模拟的
+
+DuetUI 的 Agent 会逐步搭建任务界面，用户直接操作界面，操作又反馈给 Agent，影响后续界面与任务执行。citeturn932354academia2
+
+它已经占据：
+
+> **Direct manipulation of generated interfaces steers agent behavior.**
+
+但它主要从意图自顶向下生成，而且外部服务执行不是对真实既有 GUI 的可靠写回。因此与 TaskVM 的分界仍是：
+
+```text
+DuetUI: intent → generated task UI → simulated/abstracted service execution
+TaskVM: live applications → executable projection → real application write-back
+```
+
+---
+
+## 9. Software as Content — 持久生成式应用作为交互状态
+
+SaC 提出动态生成的 agentic application 作为人和 Agent 的主要交互层，界面持续存在并随交互演化。citeturn932354academia1
+
+它占据的是：
+
+> **persistent dynamic software as the human-agent interaction layer.**
+
+TaskVM 不能把“持久小应用”“动态 application”“UI 作为 interaction state”本身当 novelty。
+
+真正区别是 source of truth：
+
+- SaC：生成的 application 本身构成 interaction state；
+- TaskVM：生成 surface 永远只是多个外部应用状态的 projection。
+
+---
+
+## 10. Generative UI as an Accessibility Bridge
+
+这项 2026 工作总结了在 C2C 电商中运行时重新生成 HTML、提供适配式交互和辅助输入的多个研究实例，直接体现了：
+
+```text
+existing website/content
+→ runtime regenerated human-facing interface
+```
+
+它没有 GUI Agent 写回环节，但在“从既有软件现场生成替代性 UI”这一半非常接近 Morae 和 TaskVM。citeturn981210academia2
+
+---
+
+## 11. Ply — 生成式 Trigger–Action Programming
+
+Ply 是 UIST 2025 的 Generative Trigger-Action Programming 系统，用 LLM 生成并组织自动化行为。它更像生成可执行自动化程序，而不是从当前应用状态生成 UI，也没有证据表明使用通用 GUI Agent；但它与 TaskVM 的 `semantic patch → executable behavior` 侧非常接近。
+
+适合放在：
+
+> **End-user programming and agent workflow generation**
+
+而不是主要 GenUI 竞品小节。
+
+---
+
+## 12. SUGILITE — 跨第三方 App 的可泛化手机自动化
+
+SUGILITE 允许用户在普通 Android App 中演示任务，根据自然语言、UI hierarchy 和操作演示生成可复用自动化脚本，并可跨多个第三方 App 执行。
+
+它不生成新的 task UI，但已经占据：
+
+- 从既有 GUI 中抽象任务；
+- 生成可执行中间表示；
+- 在第三方 App 中落实；
+- 在界面变化时进行一定的 context checking。
+
+它是 TaskVM 的重要历史技术祖先。
+
+---
+
+## 13. PUMICE — 从自然语言和 GUI 演示学习任务与概念
+
+PUMICE 允许用户通过自然语言和真实移动 App GUI 演示，递归教会 Agent 新的任务、条件和概念。citeturn503021academia44
+
+它不生成任务界面，但和 TaskVM 的 binding compiler 高度相关：
+
+> 用户级语义概念如何对应第三方 GUI 中的真实对象、条件和操作？
+
+因此它对 `Cross-App Binding Critic / Task World Compiler` 的 related work 比对 GenUI 更重要。
+
+---
+
+## 14. EmbeWebAgent — Agent 嵌入既有 Web UI
+
+EmbeWebAgent 通过轻量前端 hooks、ARIA/URL observations、函数注册表和 MCP，将 Web Agent 直接嵌入现有 React/Angular UI，并支持从 GUI primitives 到高层动作的混合执行。citeturn866749academia1
+
+它解决：
+
+```text
+agent ↔ live existing UI integration
+```
+
+但不自动生成新的 task-specific user interface。
+
+它和 TaskVM 的差异是：
+
+- EmbeWebAgent 把 Agent 放进现有 UI；
+- TaskVM 把多个现有 UI 的状态编译成一个新 UI。
+
+---
+
+## 15. Moldable — 生成式个人软件与跨 App Agent
+
+Moldable 是一个工程产品，允许用户通过自然语言生成和重塑本地应用，各应用暴露小型 API，统一 Agent 可以跨这些应用行动。
+
+它看起来很像：
+
+```text
+generated personal apps
++ cross-app agent
++ persistent user-facing software
+```
+
+但这些 App 是在同一受控平台内新生成的，并非对不受统一 contract 约束的既有第三方软件进行 live projection。因此它更接近 SaC，而不是 TaskVM。
+
+---
+
+# 第三档：GenUI 与执行组合存在，但方向或拓扑不同
+
+## 16. Computer-Use Agents as Judges for Generative UI / AUI-Gym
+
+Coder Agent 生成网站，CUA 在生成网站中执行任务和评价可操作性，再把评价反馈给 Coder 修改网站。citeturn909726academia0
+
+它的方向是：
+
+```text
+Agent generates UI
+→ CUA operates generated UI
+→ CUA judges UI
+```
+
+TaskVM 是：
+
+```text
+GUI Agent operates existing UI
+→ Agent generates human-facing task UI
+→ human edits generated UI
+→ GUI Agent writes back
+```
+
+二者都组合了 GenUI 和 CUA，但控制拓扑相反。
+
+---
+
+## 17. ViMo
+
+ViMo 为移动 App Agent 生成未来 GUI observation，帮助 Agent 预测动作结果和规划。citeturn201406academia44
+
+它确实有“生成 GUI + GUI Agent”，但生成的 GUI 是给 Agent 做 world-model rollout，不是给人操作。因此不属于你限定的 Agentic GenUI，但容易被关键词检索误收。
+
+---
+
+## 18. WebGen-Agent
+
+WebGen-Agent 生成网站代码，并使用截图反馈和 GUI-Agent 测试反馈来持续修改网站。citeturn957225academia12
+
+同样属于：
+
+> **GUI agents evaluating agent-generated interfaces**
+
+而不是：
+
+> **users manipulating generated interfaces to control existing software.**
+
+---
+
+## 19. MAIC-UI
+
+MAIC-UI 从教材、PPT 和 PDF 生成可交互课程软件，并支持局部增量编辑和自动验证。citeturn981210academia3
+
+它的重要性在于证明：
+
+- 长期存在的生成式应用；
+- 可交互；
+- 可局部修改；
+- 有 generate–verify–optimize 循环。
+
+但它不操作既有软件。
+
+---
+
+## 20. LiveFigure
+
+LiveFigure 让 VLM Agents 规划、生成并通过 PowerPoint 界面细化可编辑科学插图。citeturn957225academia15
+
+这是另一种“Agent 使用 GUI 生成可供人编辑的 UI/artifact”：
+
+```text
+Agent → PowerPoint GUI → editable artifact → human edits
+```
+
+但生成的是内容工件，不是控制底层应用状态的任务界面。
+
+---
+
+## 21. DrawAI
+
+DrawAI 将图片恢复为结构化、可直接操作的图形对象，并通过 agentic code-render-validate-revise 循环保障 fidelity 和 editability。citeturn823923academia1
+
+它与 TaskVM 的概念共鸣很强：
+
+> 把扁平表示重新编译成可编辑结构，同时平衡 fidelity 与 editability。
+
+但其对象是图形文件，不是多个 live applications。
+
+---
+
+## 22. GraphFlow
+
+GraphFlow 把可视工作流图作为可执行 specification，并提出 contracts、事件日志、重试与审计机制。citeturn823923academia0
+
+它不是 GenUI 系统，但与 TaskVM 的“可见高层表示必须具有正式执行语义和验证契约”高度相关。可以在 verifier/system architecture 部分引用，而不是 GenUI related work 主段。
+
+---
+
+# 第四档：只有 GUI Agent 一侧，但对 TaskVM executor 和 benchmark 很重要
+
+以下不是 GenUI 直接竞品，却可能被审稿人拿来问“为什么不用现有 GUI Agent / AgentOS”。
+
+## 23. UFO / UFO2
+
+UFO 在 Windows 多应用间使用 GUI/control information 完成自然语言任务；UFO2 进一步提供 HostAgent、AppAgent、GUI/API hybrid control 和隔离虚拟桌面。citeturn125369academia0turn125369academia3
+
+它们有：
+
+- 跨 App 执行；
+- task decomposition；
+- hybrid action layer；
+- desktop AgentOS。
+
+没有：
+
+- Agent 生成给人的 task UI；
+- 用户编辑 task state；
+- round-trip projection fidelity。
+
+---
+
+## 24. MAI-UI
+
+MAI-UI 强调 native agent–user interaction、GUI 与 MCP 混合执行，以及 device–cloud 协作。citeturn909726academia2
+
+它值得关注“Agent 怎样在执行中与用户交互”，但当前公开摘要没有证明它生成持续、可操作的任务界面。
+
+---
+
+## 25. ActionEngine
+
+ActionEngine 离线探索 GUI 并建立可更新的状态机记忆，在线阶段生成完整可执行程序，失败时重新 grounding 和修复。citeturn260269academia0
+
+它与 TaskVM 的 JVM 隐喻有技术相似性：
+
+```text
+GUI → intermediate state machine → executable program
+```
+
+但其 intermediate representation 只供 Agent 执行，不给用户操作。
+
+---
+
+## 26. Avenir-Web
+
+Avenir-Web 使用 grounding experts、experience-imitation planning 和 task-tracking checklist 操作真实 Web。citeturn812321academia1
+
+可作为 TaskVM GUI executor baseline，但没有 GenUI。
+
+---
+
+## 27. MolmoWeb
+
+MolmoWeb 是开放的视觉 Web Agent，直接从截图生成浏览器动作，不依赖 DOM 或 accessibility tree。citeturn643379academia47
+
+它适合验证 TaskVM 的 executor 是否能从 DOM-based executor 替换为纯视觉 executor，但不改变 TaskVM 的交互贡献。
+
+---
+
+## 28. BrowserAgent
+
+BrowserAgent 通过 Playwright 直接操作原始网页，强调类人的滚动、点击和输入动作。citeturn812321academia3
+
+同样属于 executor 候选，不是 GenUI。
+
+---
+
+## 29. HIDAgent
+
+HIDAgent 通过物理 HID 键盘和鼠标模拟，让 UI Agents 操作 Android、iOS、Windows、macOS 等不同设备。
+
+它对 TaskVM 的价值在跨设备 appendix 或真实设备 demo，而非 novelty。
+
+---
+
+## 30. OpenApps
+
+OpenApps 提供可在内容和视觉设计上生成大量变体的 App 环境，用于测量 GUI Agent 对 reskin、layout 和内容变化的可靠性。citeturn125369academia2
+
+这与 TaskVM 已规划的 rename/reskin/schema OOD 非常贴近，甚至可能比传统 OSWorld 更适合作为 OOD 方法论引用。
+
+---
+
+## 31. MyPCBench
+
+MyPCBench 在包含个人数据和 17 个模拟真实 Web App 的桌面环境中测试 personal computer-use agents。
+
+它不生成 UI，但与 TaskVM 的多应用、logged-in、personal task environment 很接近。
+
+---
+
+## 32. UI-Genie
+
+UI-Genie 通过结果 reward model、轨迹扰动、hard negatives 和 outcome verification 自我提升移动 GUI Agent。citeturn240589academia2
+
+它对 TaskVM verifier 的方法论相关性强，但验证的是 Agent trajectory/outcome，不是 projection round trip。
+
+---
+
+## 33. Mobile-Agent-v3 / v3.5
+
+Mobile-Agent-v3 系列覆盖桌面、移动和浏览器，并扩展到工具调用、记忆和多 Agent 场景。citeturn240589academia1turn240589academia3
+
+它们适合作为执行后端，但不涉及用户可操作的生成任务投影。
+
+---
+
+## 34. MagicGUI
+
+MagicGUI 将 grounding、planning、动作语义和 human-agent interaction action space 统一到移动 GUI Agent 中。citeturn240589academia0
+
+依然缺少 Agentic GenUI surface。
+
+---
+
+# 第五档：正在形成中的 GenUI 研究议程
+
+CHI 2026 的 Generative UI workshop 已经出现一批与 TaskVM 局部相关、但多数还只是 position paper 或早期概念的工作：
+
+35. **MAGUS: an LLM Multi-Agent Tool for Generative Accessibility of GUIs from User Stories**
+
+36. **Maintenance of Personal Generative User Interfaces**
+
+37. **Negotiated Agency in Generative User Interfaces**
+
+38. **Not Another EHR: Reimagining Physician Information Needs with Generative AI**
+
+39. **Situated and Dynamic Human-AI Communication through Generative Interaction-Augmented Instruction at Runtime**
+
+40. **User Agency in Runtime Malleable Software Under Change Aversion**
+
+41. **User-Constructed Information Architecture as a Persistence Layer for GenUI**
+
+42. **Evaluating Personalised Generative User Interfaces on an AI-Mediated Web**
+
+这些标题表明社区正在向 runtime、persistence、agency、maintenance、accessibility 和 AI-mediated Web 扩张；但公开 workshop 页面尚不足以证明其中任何一项已经实现“GenUI + GUI Agent + 真实软件写回”的完整系统。它们更适合作为 ongoing research watchlist，而不是 confirmed collision。
+
+---
+
+# 第六档：协议与工程基础设施，不是研究 novelty
+
+## 43. A2UI
+
+A2UI 支持 Agent 生成声明式、可交互 UI，用户事件返回 Agent，Agent 再更新 surface；当前生产版本为 v0.9.1。协议本身不负责观察、操作或验证第三方 GUI。
+
+## 44. MCP Apps
+
+MCP Apps 允许 MCP server 返回沙箱化的交互 HTML，UI 内的操作通过 MCP JSON-RPC 返回 host，并进入统一审计和 consent 路径。
+
+它使下面的系统组合变得容易：
+
+```text
+agent/tool server
+→ generated interactive UI
+→ user action
+→ tool call
+```
+
+但 tool/API write-back 不等于 GUI Agent write-back，更不等于 independent ground-truth verification。
+
+## 45. CopilotKit
+
+CopilotKit 支持 Agent 在应用、Slack 和 Teams 中渲染交互组件，并同步 Agent 与前端状态。
+
+它是 implementation substrate，不是 TaskVM 的研究反例。
+
+---
+
+# 更新后的“对 TaskVM novelty 最危险”排序
+
+不是按关键词相似度，而是按审稿人最可能认为“你这不是已经有人做了吗”的风险排序：
+
+1. **ALLOY**
+   已经有持久、任务级、Agent 生成、用户可编辑的界面，并由 Web Agents 执行。必须用 **procedure projection vs state projection** 切开。
+
+2. **Morae**
+   已经从当前真实 GUI 状态动态生成交互控件，并让用户选择驱动 GUI Agent。必须用 **decision-point UI vs persistent task-state surface** 切开。
+
+3. **AgentLens**
+   已明确占据 “GenUI as a modality for interacting with GUI agents”。必须用 **communication surface vs software-state control surface** 切开。
+
+4. **A-Mash**
+   已经实现多个真实既有 App 的同步可操作单界面聚合。必须强调 Agent 自动 task abstraction、semantic binding 和 verifier。
+
+5. **AOHP**
+   已有跨 App service composition、generated entrance 和真实执行。必须强调 live-state projection 与 round-trip fidelity。
+
+6. **Jelly**
+   已有生成式 task data model、持久 UI、直接操作和模型更新。必须强调 external applications remain source of truth。
+
+7. **SaC**
+   已占 persistent dynamic application 这一宏观范式。必须让出“大范式”，守住 external ground truth。
+
+8. **DuetUI**
+   已占用户直接操作生成 UI 来塑造 Agent。必须强调 bottom-up live state、真实软件与 verification。
+
+9. **SUGILITE / PUMICE / ALLOY / Ply 这条谱系**
+   已经长期研究“人可理解的高层任务表示怎样变成对真实 GUI 的自动执行”。TaskVM 不能把“生成一个中间表示再执行”本身当 novelty。
+
+10. **A2UI / MCP Apps / CopilotKit**
+    已让 Agent-generated interactive surfaces 迅速基础设施化。因此论文不能把“用协议生成几个控件”写成贡献。
+
+# 当前最准确的总判断
+
+截至 **2026 年 8 月 6 日**，至少可以确认三项真正意义上的直接组合：
+
+- **Morae**：实时网页状态 → 生成选择 UI → 用户选择 → Web Agent 继续；
+- **ALLOY**：浏览器演示 → Agent 生成可编辑任务工作流 → 用户修改 → Web Agents 执行；
+- **AgentLens**：Mobile GUI Agent 执行 → 生成临时 GenUI → 用户回应 → GUI Agent 继续。
+
+所以：
+
+> **“首次组合 Agentic GenUI 与 GUI Agent”已经完全不能 claim。**
+
+而且 ALLOY 使下面这个 claim 也变得危险：
+
+> “首次让用户直接操纵 Agent 生成的高层任务界面来控制 GUI Agents。”
+
+因为 ALLOY 已经做了，只不过它操纵的是 workflow/procedure。
+
+本轮仍未找到一个公开系统同时完成：
+
+```text
+多个既有应用的实时状态
+→ 持久生成式任务投影
+→ 用户编辑跨应用任务语义变量
+→ GUI/API Agent 将变量写回多个真实应用
+→ 独立检查 expected effects
+→ 独立检查 non-interference
+→ 外部状态改变后的 reconciliation
+```
+
+因此 TaskVM 最可守、也最精确的新定位应当是：
+
+> **Prior work has generated decision interfaces for GUI agents, editable workflows executed by web agents, and persistent task-specific applications. TaskVM instead generates a persistent executable projection of live state distributed across existing applications: users edit task-state variables rather than agent procedures, and the resulting cross-application effects, non-interference, and reconciliation are independently verified.**
+
+中文：
+
+> **既有工作已经为 GUI Agent 生成即时决策界面，也已经生成可编辑、可由 Web Agents 执行的任务工作流，并探索了持久的生成式任务应用。TaskVM 的区别在于，它生成的是分布于多个既有应用中的实时任务状态之持久可执行投影：用户修改的不是 Agent 的执行程序，而是软件世界应达到的任务状态；系统随后独立验证跨应用效果、非干涉与重新同步。**
+
+一句最锋利的版本：
+
+> **Morae projects a choice. AgentLens projects a conversation. ALLOY projects a procedure. TaskVM projects the state of the software world.**
+
+
+【提问 轮数7】
+结合以上所有内容，给出tex压缩包下载链接，按层级分：S级撞车，A级撞车。。
+
+【回答内容 轮数7】
+我会把现有讨论整理成一套可直接编译的 LaTeX 包：按 **S/A/B/C/D** 级分层，明确“撞车点、缺口、TaskVM 切割句、论文可用表述”，并把未经充分核验的条目单列为观察名单。
+
+【回答内容 轮数7】
+已核实最关键的直接反例：**Morae、AgentLens、ALLOY** 都确实形成了“生成界面—用户操作—Agent 后续执行”的闭环；它们会进入 S 级。TaskVM 的防线将收紧为“跨应用实时状态投影 + 写回 + 独立验证”，而不是“首次组合 GenUI 与 GUI Agent”。
+
+【回答内容 轮数7】
+已整理完成，基于 TaskVM 的四个锁定锚点：`existing applications / live state / executable binding / round-trip verification`。fileciteturn0file0L12-L20
+
+文档按以下层级组织：
+
+- **S 级撞车**：Morae、ALLOY、AgentLens。三者已分别完成决策界面、可编辑 Agent 工作流、GenUI 交互模态与 GUI Agent 执行的组合。citeturn797522academia24turn454998academia36turn454998academia37
+- **A 级撞车**：AOHP、A-Mash、Jelly、DuetUI、SaC、Macaron-A2UI、TaskLens、MAESTRO。
+- **B 级撞车**：Spatula、AUI-Gym、WebVIA、GenUI 框架、SUGILITE/PUMICE、可复用 Agent 工作流等。
+- **C 级相邻工作**：Sidekick、Magentic-UI、CowPilot、UFO/UFO2、GUI Agent steering 与监督系统。
+- **D 级技术底座**：跨应用 benchmark、执行模型、验证器、A2UI/MCP Apps/AG-UI 等协议基础设施。
+- 另附未充分核验的**观察名单**，避免把工程宣传或关键词相似误写成正式 novelty 反例。
+
+包内含完整 XeLaTeX 源码、分章节文件、BibTeX、README、Makefile，以及已编译的 15 页 PDF。协议部分也纳入了 **A2UI v0.9.1 target + v0.8 regression adapter** 的更新建议；官方目前将 v0.9.1 标为 Current、v0.8 标为 Legacy。
+
+[下载 TeX 完整压缩包](sandbox:/mnt/data/TaskVM_GenUI_GUIAgent_Collision_Map_TeX.zip)
+
+[单独下载编译版 PDF](sandbox:/mnt/data/taskvm_related_work_tex/TaskVM_GenUI_GUIAgent_Collision_Map.pdf)

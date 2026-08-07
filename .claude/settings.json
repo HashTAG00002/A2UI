@@ -10,7 +10,14 @@
       "Bash(python -c \"import PIL; print\\('pillow', PIL.__version__\\)\")",
       "Bash(/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/conda/envs/senseact/bin/python -c ' *)",
       "Bash(pkill -f \"taskvm.apps.calendar.app\")",
-      "Bash(curl -s --max-time 2 http://localhost:3013/health)"
+      "Bash(curl -s --max-time 2 http://localhost:3013/health)",
+      "Bash(python3 -m json.tool)",
+      "Bash(python3 -c ' *)",
+      "Bash(cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui/docs/references/AOHP-paper/ && echo \"=== title/abstract region ===\"; grep -n -i \"\\\\\\\\\\\\\\\\title\\\\|\\\\\\\\\\\\\\\\begin{abstract}\\\\|\\\\\\\\\\\\\\\\end{abstract}\\\\|AOHP\\\\|Agentic\\\\|human.*plan\\\\|outline\" main.tex | head -30; echo \"=== abstract content ===\"; sed -n '/\\\\\\\\begin{abstract}/,/\\\\\\\\end{abstract}/p' main.tex | head -50)",
+      "Bash(sed -n '/\\\\\\\\begin{abstract}/,/\\\\\\\\end{abstract}/p' main.tex)"
+    ],
+    "additionalDirectories": [
+      "/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui"
     ]
   }
 }

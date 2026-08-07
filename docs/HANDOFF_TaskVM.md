@@ -7,93 +7,74 @@
 ## 0. 你是谁、要做什么、时间线
 
 - 你是 **TaskVM** 项目的 coding agent（多 agent 并行开发模式，非单人手写）。
-- 这是一篇 **CHI 2027 full paper** 的工程实现，tech-heavy HCI 工作。
-- 今天 **2026-07-30**；deadline **≈ 2026-09-10 AoE**，无延期、**只剩 6 周**。
-- 你的第一周（W1, 7/30–8/6）**只做一个 kill test**（见 §4），不是搭全系统。W1 是真 gate，不是里程碑。
+- 这是一篇 **CHI 2027 full paper** 的工程实现，tech-heavy HCI 工作，train-free 主线。
+- 今天 **2026-08-06**；deadline **≈ 2026-09-10 AoE**，无延期、**约 5 周**。
+- **W1 已 PASS**（commit `1d8feee`，binding F1=1.0 + round-trip 1.0 + neg-control 0.3，见 §3）。你现在直接进 **W2**（见 §4、§8）。W2-W5 是建 VM 的其余性质（回退/两区/JVM-moment/reconciliation/OOD）——这些是 VM 之所以叫 VM 的证据，建不出来论文退回"可编辑任务面"（撞 ALLOY/Jelly）。
 
 ---
 
 ## 1. 唯一权威文档（开工前必读第一件事）
 
-路径：`docs/A2UI_开工大纲_v0_心智模型对齐版.md`（**文件名仍带 v0 字样，但内容已是"锁定版"**，文内标题已改为"TaskVM 开工大纲（单一权威文档·锁定版）"）。
+路径：`docs/A2UI_开工大纲_v0_心智模型对齐版.md`（**文件名仍带 v0 字样，但内容已是"VM 框架一次成型版"**）。
 
-这是**唯一**开工基础。15+1 个开放问题已全部拍板。任何冲突以此文档为准：
-- 早期材料 `docs/oracle/` 下的 5 份原始 txt（HCI-UI 总纲 / GenUI 调研 / 与 DuetUI 差异 / 与 SaC+Sidekick 差异 / CHI 工作计划）是**只读参考**，不是决策源。
-- 4 篇竞品论文 tex 在 `docs/references/`（DuetUI / SaC / Sidekick / Macaron-A2UI）+ AOHP 技术报告。
+这是**唯一**开工基础。任何冲突以此文档为准：
+- 早期材料 `docs/oracle/` 下的 5 份原始 txt 是**只读参考**，不是决策源。
+- 9 篇竞品/自家论文 tex 在 `docs/references/`（ALLOY / Morae / AgentLen / Jelly / SaC / DuetUI / AOHP / Macaron-A2UI / sidekick）——每篇的逐字核对负样本对比见权威文档 §3。
 
 ---
 
-## 2. 一句话心智模型 + 四锚点（不能丢的先验 #1）
+## 2. 一句话心智模型 + VM 框架五性质（不能丢的先验 #1）
 
-**人操作任务，Agent 操作应用。** Agent 把多个正在运行的**既有应用**的实时状态，反向编译成一个可编辑、可执行、可验证的任务界面；用户改一个任务变量，Agent 把改动可靠写回多个真实应用，独立 verifier 读 ground-truth 判定"改的发生、没改的不动、界面重新同步"。
+**人治理任务（governance），Agent 自治应用（autonomy）。** TaskVM 把多个正在运行的**既有应用**的实时状态，反向编译成一个**可双向操纵、可回退、可验证、substrate 无关**的任务虚拟机界面；用户在界面同时操纵只读区（多 app 实时核心状态投影）+ 可读可写区（进度推进/回退/checkpoint），像操纵一个统一低认知负载 app。GUI Agent=编码器+执行器（读 app→VM-state，写回 app），GenUI 模型=解码器（VM-state→界面），双向忠实。
 
-四锚点（**四者同时存在**才与 DuetUI 拉开距离，缺一不可）：
-`existing applications` / `live state` / `executable binding` / `round-trip verification`。
+**VM 框架五性质（同时存在才拉开差距；旧四锚点只抓冰山一角"跨app"）**：
+1. **bottom-up live projection**（自底向上实时投影，随世界状态动态重投影，非用户触发）
+2. **bidirectional executable binding**（一变量→多 app+写回，双向；GUI Agent 编码器 / GenUI 解码器）
+3. **substrate-independence**（JVM moment：同操作跨 Stack A/B 界面稳定语义一致轨迹不同）
+4. **governance over autonomy**（人设 checkpoint+随时回退，**非**"审核后继续"；安全性下放自动 verifier。**核心词 governance 人侧，不是 autonomous agent 侧**——与 AgentLens/ALLOY 方向相反）
+5. **round-trip verification + reversibility**（独立 GT verifier + 非干涉硬门 + 负对照≤0.3 + reconciliation + **回退后真实 app 复原 compensation/saga**）
 
-冻结 RQ：*Can an agent compile live, fragmented application state into an executable task-specific interface that users can directly manipulate with verifiable cross-application effects?*
+**9 篇竞品无一同时做到性质 2-5**（实证矩阵见权威文档 §4.2）。冻结 RQ：*Can an agent compile live, fragmented application state into a task virtual machine that users can govern — manipulating a bidirectional projection to drive, roll back, and verify cross-application effects across heterogeneous existing software?*
 
 ---
 
 ## 3. 你要搭什么（核心构念 + 架构骨架）
 
-**一等贡献 = 可执行投影保真性（Executable Projection Fidelity）本身**——"任务界面是多个真实应用状态的忠实、可执行、可验证的投影"这件事。**不是**安全压缩前沿（SCF 已降级为衍生贡献，见 §6）。
+**一等贡献 = 可治理的可执行 VM 本身**（人治理 VM-state，Agent 在真实 app 中实现并验证该状态）。**不是**安全压缩前沿（SCF 已降级为衍生贡献，见 §6）。
 
-**主闭环**：`UI Agent ↔ Shared Execution State ↔ 生成式 UI`，人位于循环之外、作为**任务起始时的主动 milestone/checkpoint 设定者**（见 §6 地雷）。Shared Execution State 保存目标/计划/已执行动作/真实结果/当前应用状态/artifact/失败重试/风险/待确认操作——**不是聊天历史**。
+**主闭环**：`User (governance) ↔ GenUI (decoder) ↔ Shared VM-state ↔ GUI Agent (encoder/executor) ↔ 真实 apps`。Shared VM-state 保存目标/计划/已执行动作/真实结果/当前 app 状态/可回退事务日志——**不是聊天历史**。人位于 governance 侧（设 checkpoint + 随时回退），**不**在 autonomous 侧做"审核后继续"。
 
-**八步往返**：Observe → Abstract → Project → Manipulate → Compile → Execute → Verify → Reconcile。
+**八步往返**：Observe → Abstract → Project → Manipulate → Compile → Execute → Verify → Reconcile（+ Rollback 作为 governance 可逆层）。
 
-**架构骨架**（目录树，W1 只动加粗部分）：
+**架构骨架**（目录树，**W1 已实现粗体部分，W2-W5 建其余**）：
 ```
 taskvm/
-├── apps/                  # 自建可重置 Web 应用（sqlite 后端，复用 SenseAct engine 模式）
-│   ├── calendar/  taskboard/  drive/
-│   │   └── engine/        # reward.py(判成功) / injector.py(初始状态+可选外部并发注入) / *_db.py
-│   └── _heldout/          # held-out 黑盒 app（OOD；对模型黑盒，对 verifier 白盒 via state adapter）
-├── harness/               # browser_controller(Playwright) / state_adapter(reset·seed·read-canonical) / trace_capture / replay_engine / shadow_txn
-├── task_state/            # representation / compiler(Apps→TaskWorld) / entity_binding / dependency_graph / projection_policy(规则/启发式，不追求 Pareto)
-├── execution/             # patch_compiler(编辑→semantic patch) / replanner / action_dispatcher(GUI/MCP/API hybrid)
-├── verifier/              # app_state_checks / cross_app_checks / non_interference / round_trip_checks / reconciliation
-├── workspace_ui/          # renderer / editable_components / live_sync（先结构化文本/表单，不追求花哨）
-├── benchmark/             # task_templates(40) / initial_states(隐藏 canonical graph) / user_edits / ood_splits / live_runs；API 成本追踪复用 SenseAct cost_model.py
+├── apps/                  # 自建可重置 Web 应用（sqlite/内存后端，复用 SenseAct engine 模式）
+│   ├── calendar/  taskboard/  drive/  _heldout/
+│   │   └── engine/        # reward.py(判成功) / injector.py(初始状态+外部并发注入) / *_db.py
+├── harness/               # browser_controller(Playwright) / state_adapter(reset·seed·read-canonical) / trace_capture / replay_engine / shadow_txn(★回退/compensation, W2-W3 建)
+├── task_state/            # representation(VM-state schema) / compiler(GUI Agent=编码器→VM-state) / entity_binding(★双向绑定,一变量→多 app) / dependency_graph(effect 传播) / projection_policy(规则/启发式,不追求 Pareto)
+├── execution/             # patch_compiler(VM 变量→semantic patch) / replanner / action_dispatcher(GUI/MCP/API hybrid) / rollback(★compensation/saga,W3 建)
+├── verifier/              # app_state_checks / cross_app_checks / non_interference(硬门) / round_trip_checks / reconciliation(★随世界重投影,W3-W4) / rollback_verify(★回退后真实复原,W3)
+├── workspace_ui/          # renderer / editable_components / live_sync  ★两区分离:只读区(投影)+可读可写区(governance),W2-W3 建
+├── benchmark/             # task_templates / initial_states(隐藏 canonical graph) / user_edits / ood_splits / live_runs；API 成本追踪复用 SenseAct cost_model.py
 ├── baselines/             # 规则/类型匹配·prompt-only·frontier+shadow·人工 binding 上界·规则+critic
 ├── user_study/            # 4 条件
 └── evaluation/  docker-compose.yml  README.md
 ```
-**W1 只动**：`apps/{calendar,taskboard}` + `harness/{state_adapter,replay_engine,trace_capture}` + `task_state/{representation,compiler}` + `verifier/round_trip_checks` + `workspace_ui/renderer`。**先 replay-mode**，跑通 compiler→UI→patch→执行→verifier 整条链。
+**W1 已实现并 PASS**（commit `1d8feee`，非 cherry-pick）：`apps/{calendar,taskboard}` + `harness/{state_adapter,replay_engine,trace_capture}` + `task_state/{representation,compiler,entity_binding,dependency_graph,projection_policy(rule stub)}` + `execution/{patch_compiler,action_dispatcher}` + `verifier/{canonical_state,round_trip_checks,non_interference}` + `workspace_ui/renderer` + `benchmark/{fixtures,model_client,cost_model,a2ui_spec}` + `evaluation/run_w1_killtest`。
+**W1 实测**：2 任务×3 样本 binding F1=1.0（仅从 a11y/DOM 观测发现跨 app 绑定），round-trip 三检全 1.0，**neg-control=0.3**，**non-interference 硬门**（违反钳≤0.3），**no-leak 静态可强制**。跨 gpt-5.5/gpt-5.6-sol 可复现。
+**三个承重不变量（违反任一即 void）**：① read-path-is-GUI/write-path-is-API split（compiler 读渲染 GUI 观测永不读 DB）；② no-leak canonical state（verifier-only GT）；③ negative-control（broken dispatcher 必须 ≤0.3）。
 
-**仓库命名**：目录建议 `taskvm/`；若迁移成本高，保留 `a2ui/` 作仓库目录但内部模块/类名统一 `TaskVM` 前缀。**项目代号已从 A2UI 更名为 TaskVM**（见 §6）。
-
----
-
-## 4. W1 唯一目标：kill test（gate，不是里程碑）
-
-```
-2 个 Web 应用（Calendar + TaskBoard）
-→ Agent 在线执行（frontier CUA API，不训练）
-→ 实时任务界面（先结构化文本/简单表单，不追求花哨）
-→ 用户修改一个任务变量（如：发布日期 8/14 → 8/18）
-→ Agent 跨应用落实（Calendar 会议移动 + TaskBoard 依赖 deadline 同步）
-→ 独立 verifier 用隐藏 canonical state 判定：
-   ✓ 改的发生（两 app 都改对）  ✓ 没改的不动  ✓ 界面重新同步
-```
-**三个 sub-kill（任一触发即调整方向）**：
-1. round-trip 跑不通 → 立即收缩到方向二（少量 typed cross-app operators），不加更多 UI/模型；
-2. 规则系统在 tool/app OOD 上已和模型一样好 → 删除训练；
-3. 只有"每个任务手写 React 页 + binding"才跑得通 → 停（那是定制 dashboard，不是 software compiler）。
-
-**W1 硬约束**：不训练、不上 OSWorld、不接真实商业账户、不做花哨 UI、先 replay-mode 跑通整条链再小规模 live。
+**仓库命名**：目录保留 `a2ui/`（迁移成本不值得），内部包 `taskvm/`，类名 TaskVM 前缀。**项目代号 = TaskVM**。
 
 ---
 
-## 5. 你的第一个动作（立即执行）
+## 4. 你的第一个动作（W2，立即执行）
 
-进入 **plan 模式**，产出 W1 具体代码方案，覆盖这 6 项，方案给用户确认后再动手写代码：
-1. **仓库骨架**：§3 目录树，至少初始化 W1 涉及的子目录 + `docker-compose.yml` + `README.md`。
-2. **Calendar + TaskBoard 两个极简可重置 Web 应用接口**：sqlite 后端；复用 SenseAct `scenarios/<name>/engine/{reward,injector,*_db}.py` 模式；接口含 `reset()/seed()/read-canonical-state()`。
-3. **canonical task graph 的隐藏与读取机制**：verifier 用隐藏 canonical state 作 GT；模型推理时只见 screenshot/DOM/a11y/tool schema/trajectory，**永不接触 DB**。
-4. **replay 引擎**：用记录的 screenshot/DOM/action/state-diff 重放，开发期快速调试 + 大规模离线 benchmark。
-5. **compiler/binding 的 frontier-API 调用契约**：调 GPT-5.6-sol / Claude-Sonnet-5 类前沿通用模型；把 **A2UI v0.8 协议完整 spec**（4 种消息类型 `surfaceUpdate`/`dataModelUpdate`/`beginRendering`/`deleteSurface` 的 schema，几千 token）直接注入 system prompt（这是 Macaron 论文自己对标的 full-prompt baseline 做法，**不需要 skill 机制、不下载 Macaron 模型**）；输入 = task/screenshot/DOM/a11y/trajectory/tool schema → 输出 = typed task-state graph + binding。
-6. **verifier 的 round-trip 判定逻辑**：改的发生 / 没改的不动 / 界面重新同步。
+**W1 已 PASS，不重做。直接进 W2。** W2 目标：第 3 app（Drive）+ state adapter 泛化 + **两区 UI 分离**（只读区投影 + 可读可写区 governance）+ **回退骨架**（`execution/rollback` compensation/saga）+ live-mode 小规模。
+**W2 gate**：两区可分别操纵；回退骨架能撤销单 app 单步。
+**注意**：W2-W5 是建 VM 其余性质（回退/两区/JVM-moment/reconciliation/OOD）——这些是 VM 之所以叫 VM 的证据，建不出来论文退回"可编辑任务面"（撞 ALLOY/Jelly）。
 
 ---
 
@@ -101,22 +82,23 @@ taskvm/
 
 > 以下每条都是已拍板决策或已核实事实，**不要重新打开**。
 
-1. **四锚点同时存在**才与 DuetUI 拉开距离——`existing applications` / `live state` / `executable binding` / `round-trip verification`。少一个就被竞品吸收。
+1. **VM 框架五性质同时存在**才拉开差距（§2）。少一个就被竞品吸收。**尤其：governance（人侧）≠ autonomous（agent 侧），不要搞混**——AgentLens 侧重 autonomous 下何时介入，ALLOY 人类监督工作流，TaskVM 是 governance 大前提下尽量自治，方向相反。
 2. **verifier 永远来自环境状态**（sandbox 隐藏 canonical state），**绝不让生成 binding 的模型自评**。这是核心诚实性约束。
 3. **不部署 Macaron 已训练模型（Grande/Venti）**。主线 = 前沿通用模型（GPT-5.6-sol / Claude-Sonnet-5）+ A2UI v0.8 协议 spec 注入 system prompt。不下载模型 → 不算复用其训练产物 → 不 pin 死在 A2UI v0.8（协议升级只换 prompt 文本）。
 4. **两个模型角色独立**：(1) Agentic UI 生成模型（多 app 状态→任务界面）；(2) compute-use 执行模型（在真实 App 里操作）。即使同用一家厂商的模型，也是**两次独立调用、不共享 context**。
 5. **SCF 已降级为衍生贡献**。一等贡献 = 可执行投影本身。`projection_policy` 模块**保留**在架构里但用**规则/启发式**实现，**不跑 Pareto 实验**；SCF 完整三轴测量与 Pareto 写入 Discussion / Future Work。**不要**为 SCF 搭策略学习模块挤占 W1 kill test 资源。
-6. **demo 开场必须用"操纵+写回+verifier"弧**（权威文档 §4.3 的 4 步：拖日期→真实 app 同步改→verifier 非干涉确认→外部改 Jira 触发 reconciliation 标红）。**绝不用"状态仪表盘"开场**（"四 agent 进度条 + 暂停/查看日志/继续" = 跨应用版 Sidekick，死路）。
-7. **人的角色 = "任务起始时的主动 milestone/checkpoint 设定者"**，**不是**"低频授权节点"。用户**特别讨厌**"人审核 Agent 结果、确认后才能继续"这种 Sidekick 式人工中制介入（原话："我特别讨厌这种人类中制介入的研究，因为它太老了"）。正确口径：人控制"要做到哪里"（事前设定目标深度/checkpoint），**不控制"怎么验证安全"**——安全性/边界检查全部下放给**自动 verifier**，不需要人在提交前做最终审核。论文措辞与 demo 设计都必须避免任何会被读成"人审核后才能继续"的句式。
+6. **demo 开场必须用"操纵+写回+verifier+回退+跨substrate"四步弧**（权威文档 §4.4：改日期→真实 app 同步改→verifier 非干涉→撤销真实复原→外部改触发 reconcile→跨 Stack 稳定）。**绝不用"状态仪表盘"开场**（"四 agent 进度条 + 暂停/查看日志/继续" = 跨应用版 Sidekick，死路）。
+7. **人的角色 = "任务起始时主动设 checkpoint + 随时回退的 governance 者"**，**不是**"低频授权节点"或"审核者"。用户**特别讨厌**"人审核 Agent 结果、确认后才能继续"这种 Sidekick 式人工中制介入（原话："我特别讨厌这种人类中制介入的研究，因为它太老了"）。正确口径：人治理（设 checkpoint + 回退），**不审核**；安全性/边界检查全部下放给**自动 verifier**。论文措辞与 demo 设计都必须避免任何会被读成"人审核后才能继续"的句式。
 8. **"统一信息实体"只是 `task_state` 数据结构的叙事包装**（"同一任务变量在不同 App 里的绑定关系集合"），**不是**独立于 task_state、本体论意义上更根本的新实体。**不建独立模块**，仅作 Discussion 叙事升华。否则会撞 SaC 的"the application itself becomes the interaction state"语言，与"real state 永远留在真实 App 里、surface 只是投影、绝非 source of truth"的核心防御论点矛盾。
 9. **项目代号 = TaskVM**（不再用 A2UI 作代号）。`A2UI` 是 Google 2025 年发起的通用 agentic UI 声明式协议名（`a2ui.org` v0.8），Macaron-A2UI（COLM 2026）是 Mind Lab 团队的开源第三方工作，与本项目及本团队无归属关系、**不是本项目前作**。三者不要混淆。TaskVM 实现中仍可选择性复用 A2UI v0.8 协议作 UI 渲染层传输格式（见第 3 条），与更名不冲突。
 10. **AOHP 是相邻工作、不撞车**（已全文核对，`docs/references/AOHP-paper/`）。AOHP 改 OS 内核/框架层、无 round-trip verification、personalization 是跨 App 偏好记忆而非任务变量绑定——三点均与我们正交。可借鉴其 **checkpoint-weighted completion rate** 评分方式（比二元成功/失败细粒度），用于 verifier 打分设计。
 11. **benchmark 混合**：3 白盒自建（Calendar/TaskBoard/Drive，sqlite）+ 1 held-out 黑盒（对模型黑盒/对 verifier 白盒 via state adapter）。**held-out = 两者都要**：1 个真未见 app（验迁移）+ 已见 app 的 rename/reskin/schema 变体（验反捷径），分别报 OOD 指标。
 12. **Mail app = out**（Drive 作第 3 个 app，Mail 永久 optional）。**benchmark 规模 = 40 模板 / 800 实例 / OOD 占 ~20%**。
 13. **用户研究 = 4 条件**（后置非阻塞，自动评测是论文主体）：C0 原始多 app GUI / C1 静态只读聚合 dashboard / C2 chat agent + 全 app 工具访问（Claude/GPT + 3 app MCP 工具，真正 non-inferiority 对手）/ C3 我们的投影。**非劣性 margin = C3 成功率不低于 C2 的 5 个百分点**（实验前定死）。**N=18 within-subject**。IRB：若所在机构无正式 IRB，走轻量自述路径（自愿参与/知情同意/数据匿名化），W5 pilot + 后置正式，不阻塞投稿。
-14. **reconciliation 机制 = re-read-on-action**（用户编辑/定时心跳触发重读）+ 冲突时**标红不静默覆盖**，给出"底层已变 / 你的编辑 / 合并选项"。**并发修改注入**：不建"协作者"角色，只在 `apps/<name>/engine/injector.py` 预留最简"benchmark 自己主动注入外部状态变更"接口（定时脚本或手动 trigger 直接向 DB insert 一条冲突事件），列为 **W4+ 可选加分项，非 W1-W3 核心路径**。
+14. **reconciliation 机制 = re-read-on-action**（用户编辑/定时心跳触发重读）+ 冲突时**标红不静默覆盖**，给出"底层已变 / 你的编辑 / 合并选项"。**并发修改注入**：不建"协作者"角色，只在 `apps/<name>/engine/injector.py` 预留最简"benchmark 自己主动注入外部状态变更"接口，W3 用（governance kill-test 的 reconciliation 部分）。
 15. **跨设备 = appendix showcase**，不当贡献。**wind-tunnel（CUA 模拟用户）= 推迟，本期不建**。
 16. **训练 = 诚实 Go/No-Go**（W4 决策点）：seen app prompt≈92% 但 renamed≈71%、unseen≈54%、错误集中在同名异义/隐含依赖时才训轻量 QLoRA critic（3B–7B，标签来自 cloned sandbox 真实 state diff，**非 LLM 自评**）。否则 train-free。**绝不为了 tech-heavy 硬训**。
+17. **回退/撤销 = compensation/saga 真实复原 app 变更**（不是内部 model cheap rollback——Jelly 那种）——这是 VM 事务性，W3 建，是 governance kill-test 的核心。
 
 ---
 
@@ -133,18 +115,19 @@ taskvm/
 
 ---
 
-## 8. 6 周排期（你按此推进）
+## 8. 5 周排期（VM 框架，W1 已 PASS，分布式 kill-test）
 
-| 周 | 日期 | 目标 | 必须完成的纵向切片 |
+> 用户确认：W1 一下午 agent 就做完了，不用一周；不需要训练模型，尽力赶上 CHI。VM 框架下 kill-test 是分布式的，每个 VM 性质都有自己的 gate。
+
+| 周 | 日期 | 目标 | 必须完成的纵向切片 + gate |
 |---|---|---|---|
-| **W1** | 7/30–8/6 | **Kill test**（唯一 gate） | 2 app（Calendar+TaskBoard）replay-mode + frontier CUA API；跑通 compiler→UI→patch→执行→verifier 整条链。不训练。跑不通即收缩方向二 |
-| **W2** | 8/7–8/13 | 第 3 app + live 小规模 + 投影 UI | Drive + state adapter 泛化 + live-mode 小规模 + 结构化投影 UI（不花哨）+ stale-state 检测 |
-| **W3** | 8/14–8/20 | **Benchmark + 基线 + 自动主实验**（论文主表来源） | 40 模板→800 实例 + 隐藏 canonical graph + 各 baseline（规则/prompt/人工 binding）+ 7 指标 overnight API 跑完 |
-| **W4** | 8/21–8/27 | OOD + 签名实验 + 训练 Go/No-Go + 失败分析 | rename/reskin/unseen-app OOD split + app-substitution 不变性小版（2 stack × 2-3 app 当一个 figure）+ reconciliation demo + 训练决策（大概率 train-free）+ failure analysis |
-| **W5** | 8/28–9/3 | 用户研究 + 论文主体并行 | 若 IRB 就绪：~12-18 人 within-subject 4 条件；并行写 Intro/RW/System/Benchmark/Eval |
-| **W6** | 9/4–9/10 | 冻结 + 投稿 | 重跑终值 + 统计/可视化 + ablation + figure + demo 视频 + 匿名化 + 全文收敛 + 投稿 |
+| **W2** | 8/7–8/13 | 第 3 app + 两区 UI + 回退骨架 | Drive app + state adapter 泛化；`workspace_ui` 两区分离（只读区投影 + 可读可写区 governance）；`execution/rollback`（compensation/saga）骨架；live-mode 小规模。**gate：两区可分别操纵，回退骨架能撤销单 app 单步** |
+| **W3** | 8/14–8/20 | **governance kill-test（rollback + reconciliation）** + benchmark 雏形 | 跨 app 回退忠实（Rollback Fidelity）+ 外部并发注入触发 reconciliation 标红；`verifier/rollback_verify` + `verifier/reconciliation`；benchmark 40 模板/800 实例 + 隐藏 canonical graph + 各 baseline。**gate：W3 rollback kill-test + reconciliation kill-test 双 PASS（neg-control 仍 ≤0.3）** |
+| **W4** | 8/21–8/27 | **JVM-moment + OOD kill-test（命门）** + 训练 Go/No-Go | Stack A/B（2 stack × 2-3 app）substrate-invariance；OOD split（rename/reskin/未见 app）；训练决策（大概率 train-free）；failure analysis。**gate：JVM-moment kill-test + OOD kill-test（命门，binding F1>0.6）** |
+| **W5** | 8/28–9/3 | 用户研究 + 论文主体并行 | 若 IRB 就绪：~12-18 人 within-subject 4 条件（C0 raw-multi-app / C1 static-read-only / C2 chat-agent+tools non-inferiority / C3 ours），非劣性 margin=C3 不低于 C2 的 5pp，N=18；并行写 Intro/RW/System/Benchmark/Eval。IRB 无则走轻量自述路径，pilot + 后置正式，不阻塞投稿 |
+| **W6** | 9/4–9/10 | 冻结 + 投稿 | 重跑终值 + 统计/可视化 + ablation + figure（teaser 用 §4.4 四步弧）+ demo 视频 + 匿名化 + 全文收敛 + 投稿 |
 
-**最关键风险**：W1/W4 的 round-trip 可靠性。若 compiler 不能可靠把任务变量绑到正确的真实 app 对象、actuator 不能可靠写回——无论时间够不够，论文核心都站不住。**W6 风格功能冻结**：禁止新增 OSWorld 全量/记忆/长期 history/UI 风格生成/多任务族/通用 Agent OS/训练（除非 W4 看到 OOD gap）。
+**最关键风险**：① **W4 OOD 是命门**（W1 只测近同构 date-move，泛化未证）——建议 W2 收尾就备 OOD fixture，W3 benchmark 嵌 OOD split 提前跑，别等 W4 才发现不泛化。② **W3 rollback/reconciliation 工程量**——compensation/saga 跨真实 app 是 VM 事务性硬骨头。**功能冻结**（W6）：禁止新增 OSWorld 全量/记忆/长期 history/UI 风格生成/多任务族/通用 Agent OS/训练（除非 W4 OOD gap）。
 
 ---
 
@@ -171,12 +154,14 @@ taskvm/
 
 ## 11. 开工即守（checklist）
 
-- [ ] 先读 `docs/A2UI_开工大纲_v0_心智模型对齐版.md`（唯一权威文档，锁定版）。
+- [ ] 先读 `docs/A2UI_开工大纲_v0_心智模型对齐版.md`（唯一权威文档，VM 框架一次成型版）。
 - [ ] 项目代号用 **TaskVM**（不用 A2UI 作代号）。
+- [ ] **W1 已 PASS，直接进 W2**（建第3app + 两区UI + 回退骨架）。
 - [ ] 这是**独立项目**，不拖入其他仓库（SenseAct 仅作工程模式参考，路径见 §7，不混入代码）。
 - [ ] 自动评测为主体、用户研究后置不阻塞。
 - [ ] 训练是 Go/No-Go 而非默认；不部署 Macaron 已训练模型。
-- [ ] 主线用前沿通用模型 + A2UI v0.8 协议 spec 注入 prompt；两个模型角色独立。
-- [ ] demo 开场用"操纵+写回+verifier"弧（§4.3），绝不用状态仪表盘开场。
-- [ ] 人的角色 = 任务起始时的主动 milestone 设定者，不是低频授权节点；安全性下放给自动 verifier。
-- [ ] 进入 plan 模式，产出 W1 代码方案（§5 的 6 项），给用户确认后再动手写代码。
+- [ ] 主线用前沿通用模型 + A2UI v0.8 协议 spec 注入 prompt；两个模型角色独立（解码器=UI生成 vs 编码器+写回=compute-use）。
+- [ ] demo 开场用 §4.4 四步弧（操纵+写回+verifier+回退+跨substrate），绝不用状态仪表盘开场。
+- [ ] 人的角色 = governance 者（设 checkpoint + 随时回退），不是审核者；安全性下放给自动 verifier。
+- [ ] 回退 = compensation/saga 真实复原 app 变更（不是内部 model cheap rollback）。
+- [ ] VM 框架五性质同时存在才拉开差距；governance（人侧）≠ autonomous（agent 侧），不要搞混。
