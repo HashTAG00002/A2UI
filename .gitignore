@@ -34,5 +34,33 @@ build/
 # TaskVM runtime artifacts (harness/replay_engine._try_screenshot writes here)
 taskvm_obs_*.png
 *.png
+# 论文插图例外：docs/our_tex/figures/ 下的图片需要随 subtree 同步到 Overleaf，不能被忽略
+!docs/our_tex/figures/**/*.png
 
 references/
+
+# Local chromium system-lib bucket (conda-forge libs for headless launch on restricted box)
+.chromelibs/
+
+# Vendored thirdparty targets (MobileGym demo — large, kept local; see docs/HANDOFF_TaskVM.md §1.3)
+taskvm/thirdparty/
+
+# LaTeX build artifacts (docs/our_tex/, synced with Overleaf via git subtree)
+docs/our_tex/**/*.aux
+docs/our_tex/**/*.bbl
+docs/our_tex/**/*.blg
+docs/our_tex/**/*.fdb_latexmk
+docs/our_tex/**/*.fls
+docs/our_tex/**/*.log
+docs/our_tex/**/*.out
+docs/our_tex/**/*.synctex.gz
+docs/our_tex/**/*.toc
+docs/our_tex/**/*.lof
+docs/our_tex/**/*.lot
+docs/our_tex/**/*.nav
+docs/our_tex/**/*.snm
+docs/our_tex/**/*.vrb
+docs/our_tex/*.pdf
+
+# Local-only Overleaf credentials (never commit tokens)
+docs/our_tex/.env.local

@@ -1,0 +1,48 @@
+% ==============================================================
+% A2UI / TaskVM paper — main entry point
+% Synced with an Overleaf project via git subtree
+% (see ../scripts/sync_to_overleaf.sh).
+% Local compile: bash scripts/compile.sh
+% (plain pdflatex + bibtex, no latexmk dependency)
+% ==============================================================
+\documentclass[11pt]{article}
+
+% ---------- packages ----------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{geometry}
+\geometry{margin=1in}
+
+% ---------- figures ----------
+% All figures/tables should be generated from the real experiment
+% outputs in eval_results/ (via the repo's evaluation scripts).
+% Do not hand-draw plots or hand-copy numbers into the paper.
+\graphicspath{{figures/}}
+
+\title{A2UI / TaskVM: [Paper Title Placeholder]}
+\author{HashTAG\_00001}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+[Abstract placeholder -- to be drafted by the writing agent, grounded in
+the taskvm/ implementation and the eval\_results/ experiment data.]
+\end{abstract}
+
+\input{sections/introduction}
+\input{sections/related_work}
+\input{sections/method}
+\input{sections/experiments}
+\input{sections/conclusion}
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\end{document}
