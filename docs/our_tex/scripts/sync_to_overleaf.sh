@@ -15,9 +15,11 @@
 #      或者直接在下面生成的 remote URL 里内嵌 token（见 REMOTE_URL 拼接逻辑）。
 #
 # 用法：
-#   bash docs/our_tex/scripts/sync_to_overleaf.sh init    # 首次初始化 subtree（仅需一次）
-#   bash docs/our_tex/scripts/sync_to_overleaf.sh push    # 把本地改动推到 Overleaf（触发云端重新编译）
-#   bash docs/our_tex/scripts/sync_to_overleaf.sh pull    # 把 Overleaf 网页端的改动拉回本地
+#   bash docs/our_tex/scripts/sync_to_overleaf.sh init      # 首次初始化：用本地内容去"种"到一个空的 Overleaf 项目
+#   bash docs/our_tex/scripts/sync_to_overleaf.sh push      # 把本地改动推到 Overleaf（触发云端重新编译）
+#   bash docs/our_tex/scripts/sync_to_overleaf.sh pull      # 把 Overleaf 网页端的改动合并回本地（两边历史相关时用）
+#   bash docs/our_tex/scripts/sync_to_overleaf.sh overwrite # 反向初始化：Overleaf 项目已有内容（如模板），
+#                                                            # 用它整个覆盖本地 docs/our_tex（scripts/ 目录会保留）
 #
 # 原理：
 #   Overleaf 项目本质上是一个 Git remote (https://git.overleaf.com/<id>)。
@@ -113,8 +115,47 @@ case "${cmd}" in
     git subtree pull --prefix="${PREFIX}" "${REMOTE_NAME}" "${BRANCH}" --squash -m "sync: pull from overleaf"
     echo "✅ 拉取完成，请检查 git diff 确认合并结果"
     ;;
+  overwrite)
+    ensure_remote
+    if [ ! -d "${PREFIX}" ]; then
+      echo "!! ${PREFIX} 目录不存在" >&2
+      exit 1
+    fi
+    echo ">> 警告：这会用 Overleaf remote (${REMOTE_NAME}/${BRANCH}) 的内容覆盖本地 ${PREFIX}"
+    echo ">> 会保留 ${PREFIX}/scripts/ 目录（同步脚本本身），其余内容会被删除后由 Overleaf 内容替代"
+    read -r -p "确认继续？输入 yes 继续: " confirm
+    if [ "${confirm}" != "yes" ]; then
+      echo "已取消"
+      exit 0
+    fi
+
+    # 备份 scripts/，因为 git subtree add 要求目标目录不存在
+    tmp_scripts_backup="$(mktemp -d)/scripts"
+    if [ -d "${PREFIX}/scripts" ]; then
+      cp -r "${PREFIX}/scripts" "${tmp_scripts_backup}"
+    fi
+
+    # git subtree add 要求 prefix 目录不能已存在，先移出工作区（用 git rm 走版本控制）
+    git rm -r --quiet "${PREFIX}"
+    rmdir "${PREFIX}" 2>/dev/null || true
+    git commit -m "chore: remove local ${PREFIX} before overwriting from overleaf template" --quiet
+
+    echo ">> 从 Overleaf remote 拉取模板内容到 ${PREFIX}"
+    git subtree add --prefix="${PREFIX}" "${REMOTE_NAME}" "${BRANCH}" --squash -m "Add ${PREFIX} from overleaf ACM template"
+
+    # 恢复 scripts/（同步脚本本身，不应被模板覆盖）
+    if [ -d "${tmp_scripts_backup}" ]; then
+      rm -rf "${PREFIX}/scripts"
+      cp -r "${tmp_scripts_backup}" "${PREFIX}/scripts"
+      git add "${PREFIX}/scripts"
+      git commit -m "chore: restore sync scripts after overleaf template overwrite" --quiet
+    fi
+
+    echo "✅ 覆盖完成：${PREFIX} 现在是 Overleaf 模板内容 + 原有 scripts/"
+    echo "   请检查 ${PREFIX}/main.tex 等文件，确认模板结构，必要时调整 compile.sh 里的 MAIN 变量"
+    ;;
   *)
-    echo "用法: $0 {init|push|pull}"
+    echo "用法: $0 {init|push|pull|overwrite}"
     exit 1
     ;;
 esac
