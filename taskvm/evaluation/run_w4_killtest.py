@@ -148,12 +148,19 @@ def run_gate1(host: str) -> tuple[Gate1Result, str, str]:
 
 
 def run_gate2(model: str | None, samples: int, host: str,
-              cost_model: CostModel) -> tuple[Gate2Result, dict]:
-    """OOD kill-test (命门). Reuses run_ood_recon machinery. Returns (result, full_report)."""
+              cost_model: CostModel, *, executor: str = "api",
+              gui_screenshot_dir: str | None = None) -> tuple[Gate2Result, dict]:
+    """OOD kill-test (命门). Reuses run_ood_recon machinery. Returns (result, full_report).
+
+    ``executor`` (E10 rework, Task4): 'api' (legacy) or 'gui_agent' (real GUI
+    executor drives the OOD write path — mail set_state/set_priority + outlook_cal
+    reschedule_appointment via browser automation)."""
     records = []
     for fx in all_ood_tasks():
         rec = run_one_ood_task(fx, model=model, temperature=None, samples=samples,
-                               host=host, cost_model=cost_model)
+                               host=host, cost_model=cost_model,
+                               executor=executor,
+                               gui_screenshot_dir=gui_screenshot_dir)
         records.append(rec)
     sm = summarize_ood(records)
     # gate-2 PASS conditions (honest, handoff §1 + user decision 2026-08-07):
@@ -206,6 +213,14 @@ def main(argv=None):
     parser.add_argument("--neg-control", action="store_true")
     parser.add_argument("--out", default=None)
     parser.add_argument("--visual", action="store_true", default=True)
+    parser.add_argument("--execution-mode", choices=["api", "gui_agent"],
+                        default="api",
+                        help="E10 rework (Task4): 'api' (legacy) or 'gui_agent' "
+                             "(real GUI executor drives the OOD write path — mail "
+                             "set_state/set_priority + outlook_cal reschedule via "
+                             "browser automation). Default 'api'.")
+    parser.add_argument("--gui-screenshot-dir", default=None,
+                        help="dir for GUI executor step screenshots (gui_agent mode)")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s")
@@ -222,6 +237,13 @@ def main(argv=None):
                          f"(start it: python -m taskvm.apps.{app}.app)"); sys.exit(2)
 
     cost_model = CostModel()
+    # Task4: wire GUI executor cost_model so GUI calls are in the report
+    gui_shot_dir = args.gui_screenshot_dir
+    if args.execution_mode == "gui_agent":
+        if gui_shot_dir is None:
+            gui_shot_dir = str(EVAL_DIR / f"w4_gui_visual_{time.strftime('%Y%m%d_%H%M%S')}")
+        from taskvm.execution.gui_executor import get_executor
+        get_executor().cost_model = cost_model
     ts = time.strftime("%Y%m%d_%H%M%S")
 
     if args.neg_control:
@@ -244,9 +266,12 @@ def main(argv=None):
                 f"(A:{g1.stack_a_op} B:{g1.stack_b_op})")
 
     logger.info("\n=== GATE-2: OOD kill-test (命门) — REAL model ===")
-    g2, ood_full = run_gate2(args.model, args.samples, args.host, cost_model)
+    g2, ood_full = run_gate2(args.model, args.samples, args.host, cost_model,
+                             executor=args.execution_mode,
+                             gui_screenshot_dir=gui_shot_dir)
     logger.info(f"gate-2: verdict={g2.verdict} semantic_f1_max={g2.overall_semantic_f1_max} "
-                f"triples_f1_max={g2.overall_triples_f1_max}")
+                f"triples_f1_max={g2.overall_triples_f1_max} "
+                f"(execution_mode={args.execution_mode})")
 
     # neg-control on the cross-app core task (release_reschedule) — the honesty anchor
     neg = run_neg_control(get_task("release_reschedule"),
@@ -259,6 +284,7 @@ def main(argv=None):
     report = {
         "ts": ts, "week": "W4", "model": args.model or model_client.TASKVM_DEFAULT_MODEL,
         "n_ood_samples": args.samples,
+        "execution_mode": args.execution_mode,   # E10 rework (Task4): tag GUI vs API
         "gate": {"gate1_jvm_moment_substrate_invariance": g1.passed,
                  "gate2_ood_kill_test": g2.passed,
                  "neg_control_le_030": neg_ok},
@@ -268,7 +294,13 @@ def main(argv=None):
         "neg_control": {"score": neg["score"], "passed": neg_ok},
         "PASS": overall,
     }
-    out = Path(args.out) if args.out else EVAL_DIR / f"w4_{ts}.json"
+    if args.execution_mode == "gui_agent":
+        report["executor"] = {"driver": "playwright",
+                              "grounding_model": args.model or model_client.TASKVM_DEFAULT_MODEL,
+                              "gui_screenshot_dir": gui_shot_dir}
+    out = Path(args.out) if args.out else (
+        EVAL_DIR / f"w4_gui_{ts}.json" if args.execution_mode == "gui_agent"
+        else EVAL_DIR / f"w4_{ts}.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2))
     visual_dir = None

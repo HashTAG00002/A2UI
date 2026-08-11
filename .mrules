@@ -578,3 +578,19 @@ E12 根因：重试从头完整重走表单流程（View→Edit→改字段→Re
 4. **不需要任何代码修复** —— Task1 的 `map_gt_var_id_to_compiler` 已经解决了"patch 阶段因 var_id 字符串不匹配而 0 ops"的问题（如果 mobilegym killtest 走 patch 路径的话）；binding_discovery 的 f1=0 只是一个诊断值，不影响实际链路（mobilegym 的 round_trip_and_rollback 用 GT binding 驱动，不走 compiler）。
 
 **诚实标注**：本轮没改任何代码（诊断结论是"无需修复"），但这个诊断本身有价值——避免下一个 agent 误以为是 prompt/观测问题去改 mobilegym_bridge.py 或 compiler prompt，浪费工作量。真正的 f1=0 根因是指标口径，已在 E11/E13(Task1) 记录。
+
+### Task4：mail + outlook_cal P5 端到端（W4 OOD kill-test gui_agent，honest per-task results）
+
+交接要求：对 mail + outlook_cal 两个 held-out app 跑真实 GUI P5。
+
+**实现**：给 `run_w4_killtest.py` + `run_ood_recon.py` 加 `--execution-mode gui_agent` 支持（`_build_adapters_for` + `run_one_ood_task` + `run_gate2` + `main` 全链路透传 executor + gui_screenshot_dir + cost_model 接入 GUI executor + report.execution_mode + executor 字段 + w4_gui_ 文件名）。
+
+**验证（`eval_results/w4_gui_20260811_152838.json`，1 sample/task，gui_agent）—— honest per-task**：
+- **overall PASS=True**，gate1 (JVM-moment calendar+outlook_cal)=True，gate2 (OOD)=True (verdict=OOD_MARGINAL_GRANULARITY)，neg=0.3 (GUI-free, honest)。
+- **outlook_release_reschedule (reskin)**: score=1.0, f1=1.0, f1_sem=1.0, f1_triples=1.0, broke=None — **outlook_cal GUI 执行器全链路 PASS**（reschedule_appointment + taskboard 跨 app saga 通过真实浏览器手势完成）。
+- **set_mail_priorities (mail set_priority)**: score=0.75, f1_sem=1.0, f1_triples=1.0, broke=None — **mail GUI 执行器基本 PASS**（0.75 = 大部分 priority 变更落地，有轻微不完整；非满分但不是失败）。
+- **send_launch_announcement (mail set_state)**: score=0.3, f1=0.0, f1_sem=0.0, f1_triples=1.0, broke=dispatch_partial, **var_id_mapping.mapped=None** — **失败**。根因：compiler 把 GT 的单一 `announcement_send_state` var 拆成了多个 var（binding-set 不等），`map_gt_var_id_to_compiler` 按 binding-set 相等对齐找不到匹配 → 0 ops → GUI 执行器未触发。这是 Task1 修复的边界情况（compiler 拆分 vs GT 合并），不是 GUI 执行器问题。
+
+**诚实结论**：3 个 OOD 任务里 1 个全 PASS（outlook_cal）、1 个基本 PASS（mail set_priority 0.75）、1 个失败（mail set_state，var_id 映射边界）。**不用 mock 掩盖**（E11 教训）：mail set_state 的 0.3 如实报告。整体 verdict=OOD_MARGINAL_GRANULARITY（gate 用 max semantic f1，mail set_state 的 f1_sem=0.0 拉低了 mean 但 max 仍过线）。要彻底解决 mail set_state 需要更鲁棒的 var_id 对齐（允许 1-to-many 拆分匹配）—— follow-on。
+
+**注**：本轮只跑了 1 sample/task（QPM 限制下 W4 gate1+gate2+neg 已耗 ~7min）。交接要求"≥3 samples"未完全满足 —— 如实标注，3-sample 全量跑留 final 阶段（受 QPM 约束）。

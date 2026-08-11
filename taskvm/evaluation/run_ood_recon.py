@@ -54,10 +54,15 @@ NEG_CONTROL_MAX = 0.3
 SAMPLES_DEFAULT = 3
 
 
-def _build_adapters_for(fixture, host: str):
-    """Build adapters for exactly the task's required apps (focused context)."""
+def _build_adapters_for(fixture, host: str, *, executor: str = "api",
+                        gui_screenshot_dir: str | None = None):
+    """Build adapters for exactly the task's required apps (focused context).
+
+    ``executor`` (E10 rework, Task4): 'api' (legacy) or 'gui_agent' (real GUI
+    executor for the write path)."""
     apps = required_apps(fixture)
-    return make_adapters(apps=apps, host=host)
+    return make_adapters(apps=apps, host=host, executor=executor,
+                         gui_screenshot_dir=gui_screenshot_dir)
 
 
 def _health_check(adapters: dict, host: str) -> None:
@@ -92,9 +97,15 @@ def _varid_agnostic_accuracy(bacc: dict) -> dict:
 
 
 def run_one_ood_task(fixture, *, model: str | None, temperature, samples: int,
-                     host: str, cost_model: CostModel) -> dict:
-    """Run N real-model samples on one OOD task + a neg-control. Returns the record."""
-    adapters = _build_adapters_for(fixture, host)
+                     host: str, cost_model: CostModel,
+                     executor: str = "api",
+                     gui_screenshot_dir: str | None = None) -> dict:
+    """Run N real-model samples on one OOD task + a neg-control. Returns the record.
+
+    ``executor`` (E10 rework, Task4): 'api' (legacy) or 'gui_agent' (real GUI
+    executor drives the write path via browser automation)."""
+    adapters = _build_adapters_for(fixture, host, executor=executor,
+                                   gui_screenshot_dir=gui_screenshot_dir)
     _health_check(adapters, host)
     cat = OOD_CATEGORIES[fixture.task_id]
 
