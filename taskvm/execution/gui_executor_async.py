@@ -38,12 +38,33 @@ from typing import Any, Awaitable, Callable
 
 from taskvm.benchmark import model_client
 from taskvm.benchmark.cost_model import CostModel
-from taskvm.execution.gui_executor import (GROUNDING_SYSTEM, _build_instruction,
+from taskvm.execution.gui_executor import (GROUNDING_SYSTEM,
                                             GuiExecutorFailure, MODEL_ROLE)
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_STEPS = 20   # MobileGym sim pages are richer than desktop apps
+
+# ── E14-core ablation switch (Task A, .mrules) ──────────────────────────────
+# Set TASKVM_ABLATION_COORD=old to reproduce the PRE-E14 coordinate pipeline
+# (hardcoded _norm_to_px(x,y,(400,800)) + page.mouse.click, bypassing
+# MobileGym's own norm_0_1000 calibration) for a clean before/after
+# measurement of "how much did the coordinate-pipeline fix alone contribute".
+# Default (unset / "new") uses the E14 fix: env.step(Action.click(...)).
+# This is a TEMPORARY ablation-only switch (not a permanent config knob) —
+# added to answer .mrules E14-core's "no ablation was ever run" gap without
+# requiring parallel git worktrees. Remove once the ablation is documented in
+# E15 (kept for reproducibility until then).
+import os as _os_ablation
+ABLATION_COORD_MODE = _os_ablation.environ.get("TASKVM_ABLATION_COORD", "new")
+
+
+def _norm_to_px_old_wrong_viewport(x_norm: float, y_norm: float) -> tuple[float, float]:
+    """The EXACT pre-E14 buggy transform (commit 4e7d34b), reproduced verbatim
+    for the ablation: hardcoded (400,800) viewport guess (real is (360,800),
+    an 11% systematic X error)."""
+    viewport = (400, 800)
+    return (x_norm / 1000.0 * viewport[0], y_norm / 1000.0 * viewport[1])
 
 
 async def _screenshot_data_url(page) -> str:
@@ -144,7 +165,21 @@ async def _execute_action_async(page, action: dict, viewport: tuple[int, int],
         if isinstance(c, list) and len(c) >= 2:
             x_norm, y_norm = float(c[0]), float(c[1])
             tgt = ""
-            if env is not None:
+            if ABLATION_COORD_MODE == "old":
+                # E14-core ablation (Task A): reproduce the EXACT pre-E14
+                # coordinate bug — hardcoded wrong (400,800) viewport +
+                # page.mouse.click (bypasses MobileGym's own calibration).
+                x, y = _norm_to_px_old_wrong_viewport(x_norm, y_norm)
+                try:
+                    el = await _element_at_point(page, x, y)
+                    if el:
+                        tgt = f" → {el.get('tag','?')}"
+                        if el.get("text"):
+                            tgt += f" '{el['text'][:30]}'"
+                except Exception:
+                    pass
+                await page.mouse.click(x, y)
+            elif env is not None:
                 try:
                     css_x, css_y = _norm_to_css(x_norm, y_norm, env)
                     el = await _element_at_point(page, css_x, css_y)
@@ -295,6 +330,54 @@ async def gui_act_async(*, env, page, instruction: str,
     return trace
 
 
+def _build_wechat_instruction(chat_id: str, text: str, undo: bool) -> str:
+    """Wechat-specific goal instruction (Task C fix, .mrules E15).
+
+    Bug this replaces: ``gui_write_async`` used the SHARED
+    ``gui_executor._build_instruction`` template, which is written for the
+    DESKTOP apps' edit-form pattern ("click into the {entity} (e.g. a
+    View/Detail link), open its edit form, ... click 'Review changes' and in
+    the confirm dialog click the 'Confirm move' / submit button"). Wechat has
+    NO view/detail link, NO edit form, and NO confirm dialog — it's already
+    the chat detail page (the bridge's ``_navigate_wechat`` deep-links there
+    BEFORE the grounding loop starts), and sending a message is just
+    type-into-composer + Enter. Observed failure mode (E15, screenshot
+    evidence in ``eval_results/mobilegym_wechat_postcss_*``): the model,
+    faced with an instruction describing a UI pattern that doesn't exist,
+    searched for a "way to open an edit form" (repeatedly tapping a
+    search-like icon) and ended up typing the entity_id string itself into a
+    search/contact box, never reaching the actual composer — a goal-level
+    instruction MISMATCH bug, not a coordinate/viewport bug (the composer WAS
+    reachable after Task C's CSS fix)."""
+    if undo:
+        return (
+            "On this wechat chat page (already open — do NOT navigate away), "
+            "try to UNDO the most recently sent message. Look for a long-press "
+            "menu, a delete/recall option, or any other real UI affordance on "
+            "the last message bubble that lets you remove or recall it. "
+            "If you find one, use it, then output {\"action\":\"done\"}. "
+            "If wechat's chat UI offers NO way to delete/recall a sent "
+            "message (no long-press menu, no recall button), output "
+            "{\"action\":\"fail\",\"reason\":\"...\"} — do NOT type into any "
+            "search box or navigate to a different chat.")
+    return (
+        "You are ALREADY on the correct wechat chat detail page (the one "
+        "chat this task is about) — do NOT search for a contact, do NOT "
+        "navigate to a different chat, and do NOT type the chat id anywhere. "
+        "At the bottom of the screen there is a message composer text box "
+        "(an empty white input field) next to a '+' icon and a smiley icon. "
+        f"1) Tap directly on that composer text box to focus it. "
+        f"2) Type EXACTLY this message text: {text!r} "
+        f"3) Press Enter to send it (or tap the send button that appears). "
+        f"4) After sending, verify the message bubble now appears in the chat "
+        f"history above the composer. "
+        f"Output {{\"action\":\"done\"}} only once you can see the sent "
+        f"message bubble in the chat. If the composer is not visible, it may "
+        f"be at the very bottom of the screen — look there first before "
+        f"trying anything else. If sending is truly impossible via this "
+        f"page's UI, output {{\"action\":\"fail\",\"reason\":\"...\"}}.")
+
+
 async def gui_write_async(*, env, page, sid: str, chat_id: str, text: str,
                           undo: bool = False, model: str | None = None,
                           cost_model: CostModel | None = None,
@@ -305,10 +388,14 @@ async def gui_write_async(*, env, page, sid: str, chat_id: str, text: str,
     Thin wechat-specific wrapper over the generic ``gui_act_async``: builds
     the wechat send_message instruction + the navigate/wait_ready hooks,
     then delegates to ``gui_act_async``. Kept for backward compatibility with
-    ``mobilegym_bridge.mutate_wechat`` (which still calls this signature)."""
-    instruction = _build_instruction(
-        app="wechat", entity_kind="chat", entity_id=chat_id,
-        field="messages", value=text, operator="send_message", undo=undo)
+    ``mobilegym_bridge.mutate_wechat`` (which still calls this signature).
+
+    Instruction: uses ``_build_wechat_instruction`` (Task C / E15 fix), NOT
+    the shared desktop-app-style ``gui_executor._build_instruction`` — see
+    that function's docstring for why the generic template caused the model
+    to search for a nonexistent "edit form" instead of just typing into the
+    already-visible composer."""
+    instruction = _build_wechat_instruction(chat_id, text, undo)
 
     async def _navigate_wechat():
         # warm wechat + deep-link to the chat (the app's own OS navigation —

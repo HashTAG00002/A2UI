@@ -288,13 +288,36 @@ class MobileGymBridge:
         """Read X posts from the LIVE DOM (not from state). X's post table
         lives in a base dataset (posts.json, loaded via preload()) that is
         NOT part of the zustand store — so state['apps']['x']['posts'] is
-        always an empty dict. The posts ARE rendered in the DOM as action
-        bar buttons carrying ``data-action-params='{"id":"p_..."}'``.
+        always an empty dict. The posts ARE rendered in the DOM, each in a
+        ``<div data-post-id="p_...">`` container (Task B, 2026-08-12 fix —
+        added to ``XTimelinePostCard.tsx``'s root div; a small, non-invasive
+        markup addition, not a behavior change).
 
-        This reads those data attributes + the store's toggle lists
+        This reads that attribute + the store's toggle lists
         (``user.likedPostIds`` etc. — which ARE in the store) to produce the
         same row schema as before: [{id, is_liked, is_retweeted,
-        is_bookmarked, content_preview}].
+        is_bookmarked, content}].
+
+        Bug this replaces (E14-honest rec'd fix, .mrules Task B): the old
+        reader found post ids via ``[data-action-params]`` action-bar
+        buttons, then walked UP via ``b.closest('[class*="flex flex-col"]')``
+        to find a "post card" container for the content preview — but no
+        ancestor of the action bar actually has a class matching
+        ``flex flex-col`` (verified: the real ancestor chain is
+        ``border-b p-4 ...`` at the post root, `flex` (avatar+body row) two
+        levels up, `flex-1 min-w-0` for the body — none contain the literal
+        substring "flex flex-col" together). The ``closest`` call always
+        returned null, so the code fell through to the
+        ``b.parentElement?.parentElement?.parentElement`` fallback, which for
+        the LIKE button (``XPostActionBar`` renders a flat row of buttons)
+        walks up to a grandparent shared across ALL action-bar icons in the
+        SAME row (not the whole post), and for adjacent/first posts on the
+        timeline this often resolved to the same ancestor for multiple posts
+        (or one that also captured the top navigation bar's text if the DOM
+        was still settling) — producing identical/wrong content previews per
+        .mrules E14-honest. The new ``data-post-id`` selector reads content
+        DIRECTLY from that post's own container — one query, no ancestor
+        walking, so it cannot cross-contaminate between posts.
 
         Requires the X app to be OPEN (timeline visible) — callers must
         ``open_app('x')`` before invoking this."""
@@ -302,27 +325,14 @@ class MobileGymBridge:
         liked = set(user.get("likedPostIds", []) or [])
         retweeted = set(user.get("retweetedPostIds", []) or [])
         bookmarked = set(user.get("bookmarkedPostIds", []) or [])
-        # Read post ids + content from the DOM's data-action-params.
-        # Each post has 4 action buttons (retweet/like/bookmark/share) all
-        # carrying the same {id: postId} params. We dedupe by post id.
         dom_posts = await self.env.page.evaluate("""() => {
-            const btns = document.querySelectorAll('[data-action-params]');
-            const seen = new Set();
+            const cards = document.querySelectorAll('[data-post-id]');
             const posts = [];
-            for (const b of btns) {
-                const action = b.getAttribute('data-action') || '';
-                if (!action.includes('.post.')) continue;
-                try {
-                    const p = JSON.parse(b.getAttribute('data-action-params') || '{}');
-                    const pid = p.id;
-                    if (!pid || seen.has(pid)) continue;
-                    seen.add(pid);
-                    // Walk up to the post container to grab content preview.
-                    let card = b.closest('[class*="flex flex-col"]') ||
-                               b.parentElement?.parentElement?.parentElement;
-                    const content = card ? card.textContent?.substring(0, 100) : '';
-                    posts.push({id: pid, content: content || ''});
-                } catch(e) {}
+            for (const card of cards) {
+                const pid = card.getAttribute('data-post-id');
+                if (!pid) continue;
+                const content = card.textContent?.substring(0, 200) || '';
+                posts.push({id: pid, content});
             }
             return posts;
         }""")
@@ -518,12 +528,32 @@ class MobileGymBridge:
             # runs) and walk up from its package dir to find
             # ``<mobilegym_repo>/apps/X/data/posts.json``. This is robust to
             # where the repo is checked out (no hardcoded absolute path).
+            # ── E14-core ablation switches (Task A, .mrules) ─────────────────
+            # TASKVM_ABLATION_POSTS=old reproduces the PRE-E14 broken
+            # posts.json path (wrong dirname-walk depth: 3 levels up from
+            # a2ui/, which lands INSIDE a2ui/ itself, not the mobilegym repo
+            # sibling) — silently fails (caught by except Exception below,
+            # same as the real pre-fix bug) so content_hint stays "".
+            # TASKVM_ABLATION_INSTRUCTION=old reproduces the PRE-E14
+            # instruction (no "check the icon actually changed color" step —
+            # the model could prematurely output done after a single tap
+            # without verifying it landed).
+            ablation_posts = os.environ.get("TASKVM_ABLATION_POSTS", "new")
+            ablation_instr = os.environ.get("TASKVM_ABLATION_INSTRUCTION", "new")
             import json as _json
             content_hint = ""
             try:
                 import bench_env as _be
-                _mobilegym_repo = os.path.dirname(
-                    os.path.dirname(os.path.abspath(_be.__file__)))
+                if ablation_posts == "old":
+                    # pre-E14 buggy path: 3 dirname() calls from THIS file
+                    # (taskvm/harness/mobilegym_bridge.py) — lands at
+                    # a2ui/ itself (a2ui/apps/X/data/posts.json), which does
+                    # not exist -> FileNotFoundError -> caught below -> "".
+                    _mobilegym_repo = os.path.dirname(os.path.dirname(
+                        os.path.dirname(os.path.abspath(__file__))))
+                else:
+                    _mobilegym_repo = os.path.dirname(
+                        os.path.dirname(os.path.abspath(_be.__file__)))
                 _posts_json_path = os.path.join(
                     _mobilegym_repo, "apps", "X", "data", "posts.json")
                 with open(_posts_json_path) as f:
@@ -535,25 +565,37 @@ class MobileGymBridge:
             except Exception as e:
                 logger.warning(f"[bridge] could not read posts.json: {e}")
             logger.info(f"[bridge] mutate_x: post={post_id} "
-                        f"content_hint={content_hint[:60]!r}")
-            instruction = (
-                f"On this X (Twitter) app timeline, {verb} a specific post. "
-                f"The target post contains this text: \"{content_hint}\". "
-                f"Find that post on the timeline. Below the post text there is "
-                f"an action bar with a row of small icons. The icons from left "
-                f"to right are: comment (speech bubble), repost (green arrows), "
-                f"like (heart), views (chart), bookmark (ribbon). "
-                f"You need to tap the {icon_desc} — it is the THIRD icon from "
-                f"the left in that action bar row. Tap it once. "
-                f"IMPORTANT: after tapping, take a moment to look at the heart "
-                f"icon again — if the {verb} succeeded, the {icon_desc} should "
-                f"turn {done_color} and change from outline to FILLED. If it is "
-                f"still outline/uncolored, your tap may have missed — try tapping "
-                f"it again more precisely. Only output {{\"action\":\"done\"}} "
-                f"when you can see the {done_color} filled state. "
-                f"If the post is not visible, scroll to find it. "
-                f"If you cannot find the post after scrolling, output "
-                f"{{\"action\":\"fail\",\"reason\":\"...\"}}.")
+                        f"content_hint={content_hint[:60]!r} "
+                        f"ablation_posts={ablation_posts} ablation_instr={ablation_instr}")
+            if ablation_instr == "old":
+                # pre-E14 instruction: single tap, no post-tap verification
+                # step, no explicit action-bar icon ordering/count hint.
+                instruction = (
+                    f"On this X (Twitter) app timeline, {verb} a specific post. "
+                    f"The target post contains this text: \"{content_hint}\". "
+                    f"Find that post and tap the {icon_desc} in its action bar. "
+                    f"Output {{\"action\":\"done\"}} when you have tapped it. "
+                    f"If you cannot find the post, output "
+                    f"{{\"action\":\"fail\",\"reason\":\"...\"}}.")
+            else:
+                instruction = (
+                    f"On this X (Twitter) app timeline, {verb} a specific post. "
+                    f"The target post contains this text: \"{content_hint}\". "
+                    f"Find that post on the timeline. Below the post text there is "
+                    f"an action bar with a row of small icons. The icons from left "
+                    f"to right are: comment (speech bubble), repost (green arrows), "
+                    f"like (heart), views (chart), bookmark (ribbon). "
+                    f"You need to tap the {icon_desc} — it is the THIRD icon from "
+                    f"the left in that action bar row. Tap it once. "
+                    f"IMPORTANT: after tapping, take a moment to look at the heart "
+                    f"icon again — if the {verb} succeeded, the {icon_desc} should "
+                    f"turn {done_color} and change from outline to FILLED. If it is "
+                    f"still outline/uncolored, your tap may have missed — try tapping "
+                    f"it again more precisely. Only output {{\"action\":\"done\"}} "
+                    f"when you can see the {done_color} filled state. "
+                    f"If the post is not visible, scroll to find it. "
+                    f"If you cannot find the post after scrolling, output "
+                    f"{{\"action\":\"fail\",\"reason\":\"...\"}}.")
 
             from taskvm.execution.gui_executor_async import (
                 gui_act_async, GuiExecutorFailure)
