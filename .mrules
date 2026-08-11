@@ -634,3 +634,147 @@ E12 根因：重试从头完整重走表单流程（View→Edit→改字段→Re
 | Task7 (MobileGym binding f1=0 诊断) | ✅ 诊断完成，无需修复 | f1_varid_semantic=1.0 f1_triples=1.0 | var_id 标签差异（同 Task1 类），不是 prompt/观测问题 |
 
 **主线核心结论（honest）**：E10 点破的两个空白（GUI 执行器 + GenUI 解码器）现在都是真实模型调用。主线 5 app 的 GUI 执行器在真实 GUI 模式下 3/3 core tasks PASS（verdict PASS，neg=0.3）。mail/outlook_cal 部分 PASS。MobileGym 移动端 grounding 是当前模型能力的真实边界（诚实 FAIL，不用硬编码 sequence 掩盖）。GenUI 解码器接入 live server + formal schema 校验生效。
+
+---
+
+## ⭐ E14-core — 核心元结论：MobileGym VM Moment 是"换任务"还是"修 harness bug"？诚实回答 + 消融实验缺失的教训
+
+**[session:2026-08-12，用户质问"E14 到底是修正了哪一点才涌现的？还是只是换了个任务？"]**
+
+### 用户问的是什么、为什么必须正面回答
+
+用户（HashTAG_00001）在 E14 落盘后直接质问："现在 mobilegym 上的 VM Moment，最核心的是修正了哪一点之后才涌现的？之前的核心 bug 是什么，还是说只是换换了一个任务？"
+
+这个问题直击 E14 叙事的一个潜在美化风险：如果 VM Moment 只是"把一个必失败的任务（wechat 多步序列写）换成一个必成功的任务（X 离散单击）"，那它就**不是 harness 修复的胜利，而是任务挑选的幸存者偏差**——这在科学上和 E11 "用 mock 1.0 掩盖真实 GUI 0.3"是同一类错误，只是更隐蔽。必须诚实拆解。
+
+### 诚实拆解：三个修复是"耦合打包验证"的，没有做严格消融
+
+**事实层（git + 文件时间戳证据）**：
+- `4e7d34b`（Task3, wechat 迁移到 gui_write_async）用的是**旧坐标管线**：`_norm_to_px(x,y,(400,800))` + `page.mouse.click(css_x,css_y)`（`git show 4e7d34b:taskvm/execution/gui_executor_async.py` 第 67/116/126/193 行确认）。E13 的 wechat round_trip=0.3 就是用这个旧管线跑出来的。
+- 当前工作区未提交的 diff（`gui_executor_async.py` +197/-56 行、`mobilegym_bridge.py` +201 行）把坐标管线换成 `env.step(Action.click([norm]))`，**同时**引入了 X app（`mutate_x`）和 instruction 验证步骤。**这三个改动没有分阶段 commit，是在同一个调试过程（19:27-20:40）里交织完成的**，没有 A/B 对照数据。
+
+**能从证据合理推断的**（但不是严格证明的）：
+
+| 修复 | 性质 | 证据强度 | 推断 |
+|---|---|---|---|
+| 任务选择（wechat 多步 → X 离散单击） | **最大的杠杆** | 强（理论清晰） | wechat 需要 open→deep-link→focus textarea（视口外）→type→enter 5 步全对，任何一步失败整体失败；X 只需单击一个 24px 图标。即便坐标完全正确，wechat 仍会因 textarea 在视口下方（rect.y≈858 > 视口 800）而 FAIL。**换任务是必要条件，不是充分条件**。 |
+| 坐标管线（hardcode 400→env.step norm_0_1000） | **必要前提** | 中（间接证据） | E13 wechat FAIL 时坐标已经偏（400 vs 360），但 wechat 的核心困难是 textarea 视口外不是 X 偏移，所以坐标修复对 wechat 可能改善有限。早期 X toggle 失败轨迹（`eval_results/mobilegym_x_toggle_20260811_192759/`）里 `click(298,964) → svg` 说明探针能命中 svg，但 toggle 仍失败——**命中图标 ≠ 状态切换成功**，坐标修复是"能点到"的前提但不是"点对了效果"的保证。 |
+| instruction 验证步骤（要求模型点击后检查颜色变化） | **让成功率从"偶尔"变"稳定 94%"的关键** | 中（逻辑合理但无对照） | 早期失败轨迹里模型点一下就输出 done（基于"我点了"），instruction 改进后模型必须看到颜色变化才 done（基于"我确认了结果"）。20:40 最终 killtest 里典型 trace 是 2 步（click→done），说明模型在正确 instruction 下能快速确认。 |
+
+**无法严格证明的**：到底"坐标修复 alone"能不能让 X toggle 达到 50%？到底"任务换 X alone + 旧坐标管线"能不能达到 30%？**没有这两个对照数据点，就不能说"就是坐标修复"或"就是任务换了"**——只能诚实地说"三个修复耦合打包，共同把成功率从 ~0% 提到 94.4%，其中任务选择的杠杆最大，坐标修复是必要前提，instruction 验证步骤是稳定性的关键"。
+
+### 之前的核心 bug 到底是什么（诚实定性）
+
+**E13 wechat FAIL 的核心 bug 是双层的**：
+1. **任务侧（无法靠 harness 修复的）**：wechat composer textarea 渲染在 CSS 视口下方（rect.y≈858，视口高 800），`scrollIntoView` 在这个 sim 布局里不生效。这是 MobileGym 微信 app 的 CSS 布局问题，不是 TaskVM harness 的问题——harness 再怎么修坐标，也点不到一个不在视口里的元素。旧硬编码 `_send_message` 之所以 work，是因为它用 `page.evaluate(el.focus())` 程序化 focus（绕过坐标点击），这是 E7 记录过的"grounding 读取而非状态篡改"的灰色折衷。
+2. **harness 侧（本轮修复的）**：坐标管线 `(400,800)` hardcode + `page.mouse.click` 绕过 MobileGym 校准，11% X 偏移。这个 bug 在 wechat 上被任务侧困难掩盖了（反正 textarea 也点不到），但在 X app 的 24px 小图标上就暴露成致命问题。
+
+**所以"核心 bug"不是一个，是两个叠加**：harness 坐标管线 bug（本轮修了）+ wechat textarea 布局 bug（本轮没修，也不该 harness 修——应该 sim 侧改 CSS 布局或 bridge 侧加 scroll+wait）。E13 把 wechat FAIL 笼统归因为"移动端 grounding 是模型能力真实边界"是不够精确的——坐标管线 bug 是 harness 的锅，textarea 视口外是 sim 的锅，模型能力是第三个独立的锅。E13 没有拆开这三层，这是 E13 叙事的一个精度缺陷，E14-core 在此补正。
+
+### 为什么这次纠错重要（方法论层面的教训）
+
+1. **"涌现"这个词不该被轻率使用**——E14 标题用了"VM Moment 涌现"，但严格说应该是"在换了一个更容易的任务 + 修了两个 harness bug 之后，成功率从 ~0% 提到 94.4%"。"涌现"暗示某种质变，但实际上是量变（任务难度下降 + harness 正确性提升）的组合。用"涌现"会让读者高估这个结果的可迁移性。
+2. **没有消融实验的"多修复打包验证"是叙事风险**——三个修复同时上、只报最终 94.4%，会让审稿人/mentor 追问"到底是哪个起作用"时无法回答。**正确做法应该是在每个修复上完后单独跑一次 killtest，记录中间数据点**（例如：只修坐标→X toggle 成功率 X%；再修 instruction→Y%；三个都修→94.4%）。本轮没做，是 E4/E8"验收标准要严谨"原则的一个新变种——**不只是统计口径要严谨，实验设计的消融控制也要严谨**。
+3. **任务选择本身就是一种"实验设计决策"，必须被显式记录和审视**——选 wechat（多步、textarea 视口外）还是选 X（单击、图标在视口内），这不是"哪个更容易出 demo"的工程选择，而是"我们在证明什么"的科学选择。如果只挑必成功的任务，那证明的不是"GUI Agent 能操作 MobileGym"，而是"GUI Agent 能操作 MobileGym 上那些恰好简单的任务"。**E14-honest 已经部分意识到了这点（"只测前 3 帖不代表全部"），但不够突出**——这里补正为元原则：**任务选择的边界条件必须和成功率一起报告**。
+
+### 给下一个 coding agent 的强制要求（写进交接 prompt）
+
+基于 E14-core 的教训，下一个 agent 在做任何"多修复打包"的验证时必须：
+1. **每个修复单独跑一次 killtest**，记录中间数据点，不允许"三个修复一起上只报最终数字"。
+2. **任务选择必须显式说明边界**："这个任务为什么能代表 MobileGym 的写能力？它有什么 simplifying assumption（不需要滚动、图标在视口内、单击而非多步）？"
+3. **如果 wechat textarea 视口外的问题要修，必须在 sim 侧改 CSS 布局或在 bridge 侧加 scroll+wait，不能靠 harness 硬编码 focus 绕过**（E7 non-invasive 原则的延伸）。
+
+---
+
+## E14 — MobileGym VM Moment：X app toggle 写路径从 0% 到 94.4% 的 harness 修复全过程
+
+**[session:2026-08-11 "让 mobilegym 里涌现 VM moment"]**
+
+### 背景
+
+E13 留下的诚实结论是"MobileGym 移动端 grounding 是当前模型能力的真实边界（诚实 FAIL）"——具体表现为 wechat 的 `gui_write_async` 在 20 步内无法完成 type+send 操作（textarea 在 CSS 视口下方，模型找不到也操作不了），round_trip score=0.3。用户在本轮明确要求"必须想办法让 mobilegym 里涌现 VM moment"。
+
+> **⚠️ 读取本条前必读 E14-core**：E14 的"94.4% 涌现"叙事在 E14-core 里被诚实拆解了——三个修复是耦合打包验证的，没有消融实验，"核心是哪个修复"无法严格回答。E14 本条保留原始记录，但读者必须带着 E14-core 的 caveat 理解。
+
+### 错在哪（三个层次的 harness 缺陷）
+
+**缺陷 1：坐标系管线用错了视口尺寸（11% 系统性 X 偏移）**
+
+`gui_executor_async.py` 的 `_norm_to_css` 函数用 `viewport=(400, 800)` 作为硬编码视口宽度，但 MobileGym 的真实 CSS 视口是 `(360, 800)`（`pool.py`/`factory.py` 的 `viewport_size=(360, 800)`）。400 vs 360 = 11% 的系统性 X 方向偏移——足以让模型点不到一个 ~24px 的心形图标。更根本的问题是：click/scroll 之前用的是 `page.mouse.click(css_x, css_y)`（绕过了 MobileGym 的校准管线），而 MobileGym 的 `ClickHandler` 内部走的是 `norm_0_1000 → physical → CSS` 的 `_parse_point`/`_p2c` 管线。harness 和 sim 各用一套坐标变换，必然漂移。
+
+**纠正**：click/scroll 全部改为 `env.step(Action.click([x_norm, y_norm]))`，让 MobileGym 自己的 `coord_space="norm_0_1000"` 管线处理坐标变换。`_norm_to_css` 只保留给 `_element_at_point` 诊断探针用（那个确实需要 page-space CSS px 来调 `elementFromPoint`）。
+
+**缺陷 2：posts.json 路径计算错误（content_hint 为空→模型靠视觉猜帖子）**
+
+`mutate_x` 用 `post_id`（如 `p_1879539450872778943`）从 `posts.json` 读取帖子内容作为 instruction 里的 `content_hint`（模型在截图里看不到 post id，只能靠文本内容定位帖子）。但路径计算用的是 `os.path.dirname(__file__)` 往上走三级到 `a2ui/`，然后拼 `mobilegym/apps/X/data/posts.json`——而 `mobilegym` 是 `a2ui` 的**同级目录**，不是子目录。结果文件读取静默失败（`except Exception` 吞掉了错误），`content_hint` 留空字符串，模型只能靠视觉猜测目标帖子，成功率极低。
+
+**纠正**：通过 `import bench_env; os.path.dirname(os.path.dirname(bench_env.__file__))` 推算 mobilegym repo 根目录——bench_env 安装在 `<mobilegym_repo>/bench_env`，所以往上两级就是 repo 根。这个方法不依赖 checkout 位置，比硬编码路径更健壮。
+
+**缺陷 3：instruction 缺少验证步骤（模型过早声称完成）**
+
+原始 instruction 只说"tap the heart icon, when it turns pink output done"。模型经常点了一下 svg 就输出 `done`，但实际没点中心形——因为 instruction 没有要求模型在点击后**重新检查**图标颜色变化。模型的 "done" 是基于"我点了"而不是"我看到了结果"。
+
+**纠正**：instruction 增加了三点：(1) 明确告诉模型心形是 action bar 第三个图标（comment→repost→like→views→bookmark），给定位提供锚点；(2) 要求模型点击后检查心形是否变成粉色填充状态，如果没变就重试；(3) 只有看到颜色变化才输出 done。
+
+### 验证证据
+
+killtest 脚本 `taskvm/evaluation/run_x_toggle_killtest.py`，3 个帖子 × 3 个操作 × 2 轮 = 18 次测试：
+
+| 操作 | 成功/总数 | 成功率 |
+|---|---|---|
+| toggle_like | 6/6 | 100% |
+| toggle_retweet | 6/6 | 100% |
+| toggle_bookmark | 5/6 | 83.3% |
+| **总计** | **17/18** | **94.4%** |
+
+- 产物：`eval_results/x_toggle_killtest_20260811_202455.json`
+- 唯一 1 次失败是 `ReadTimeout`（HTTP 客户端 180s 超时），不是逻辑错误
+- 所有成功 case 都通过 `get_state` 验证：post id 确实在 `likedPostIds`/`retweetedPostIds`/`bookmarkedPostIds` 里
+- 典型 trace：2-7 步完成（直接点心形→done），复杂 case 11 步（误点→自我纠正→找到心形→done）
+
+### 为什么这次是 VM Moment
+
+E13 的 MobileGym wechat 写路径失败了（round_trip=0.3），因为 wechat 的 type+send 是一个多步序列（open→deep-link→focus textarea→type→enter），任何一步失败就整体失败。X app 的 toggle 是**离散单次点击写**——一个 icon 一个 tap，这是验证 grounding loop 能力的最小单元。
+
+本轮证明：当 harness 坐标管线正确（env.step + norm_0_1000）、content_hint 正确（posts.json 路径修复）、instruction 包含验证步骤时，GPT-5.6-sol 能在 MobileGym 的移动端 UI 上完成 94.4% 的 toggle 写操作——这是**第一个在 MobileGym 上成功的非硬编码 GUI Agent 写路径**。
+
+### 已知局限
+
+1. **只测试了时间线前 3 个帖子**（不需要滚动）。需要滚动的帖子可能需要更多 max_steps（当前 25）。
+2. **DOM content reader 有 bug**：`_flatten_x_posts_async` 的 `closest` 选择器会匹配到页面顶部的导航栏文本，导致所有帖子的 content preview 相同。这不影响写路径（写路径用 posts.json），但影响 observation 给 compiler 的输入。
+3. **wechat 写路径仍然 FAIL**：textarea 在 CSS 视口下方的问题没有在本轮解决（这是一个布局问题，不是坐标管线问题——textarea 的 rect.y≈858 超出 800px 视口，`scrollIntoView` 不生效）。
+4. **1 次 timeout 失败**：toggle_bookmark 偶尔需要 11+ 步，可能超过 HTTP 客户端 180s 超时。
+
+### 这次纠错教会了什么
+
+1. **harness 和 sim 必须共用同一套坐标管线**——如果 harness 自己算坐标再喂给 `page.mouse.click`，而 sim 内部有另一套 `norm→physical→CSS` 变换，两者必然漂移。正确做法是让 harness 把归一化坐标直接交给 `env.step`，让 sim 自己变换。
+2. **静默的 `except Exception` 是 debugging 的死敌**——posts.json 路径错误被 `except Exception as e: logger.warning(...)` 吞掉了，日志里只有一行 warning，而 content_hint 静默变空。如果不是仔细对比日志里的 content_hint 和 posts.json 内容，这个 bug 可能永远发现不了。
+3. **instruction 必须包含验证步骤**——不能只告诉模型"做 X 然后输出 done"，要告诉模型"做 X，然后检查 X 是否真的生效了（颜色变化/状态变化），只有确认生效才输出 done，否则重试"。这是让模型从"声称完成"变成"真正完成"的关键。
+
+---
+
+## E14-honest — X toggle killtest 的诚实补充记录
+
+**[session:2026-08-11]**
+
+### 关于 94.4% 这个数字
+
+94.4% (17/18) 是真实的，但需要诚实标注：
+
+1. **1 次失败是 timeout 不是逻辑错误**——toggle_bookmark on p_1879539026291785845 sample=1，HTTP 180s 超时。如果提高超时到 300s，可能 18/18。但"可能"不是证据，17/18 是事实。
+2. **只测了前 3 个帖子**——这 3 个是时间线上立即可见的（不需要滚动）。15493 个帖子里的前 3 个不代表全部。需要滚动的帖子成功率可能更低。
+3. **toggle_bookmark 成功率 83.3%**——比 like/retweet 低。可能是因为收藏图标在 action bar 最右边，在某些帖子的布局里可能被截断或位置不稳定。
+4. **模型是 GPT-5.6-sol**——这是当前最强的模型之一。 weaker 模型可能成功率显著降低。
+
+### 这不是什么
+
+这不是"MobileGym 全面通过"——wechat 写路径仍然 FAIL（E13 的结论不变）。这只是"X app 的离散单次点击写路径可以通过"。从 wechat 的多步序列写（FAIL）到 X 的单次点击写（PASS），中间的差距是多步 grounding 的可靠性问题，本轮没有解决。
+
+这不是"VM 五性质全部证明"——这只是一个 write-path 的 existence proof。性质 1（reversibility）在 wechat 上是 honest-irreversibility（E9 的结论不变），在 X app 上 toggle 是天然可逆的（再点一次就取消），但本轮没有测试 X toggle 的 rollback。
+
+### 下一步
+
+1. 修复 `_flatten_x_posts_async` 的 DOM content reader（closest 选择器 bug）
+2. 解决 wechat textarea 在视口下方的问题（可能需要调整 sim 的 CSS 布局，或者在 bridge 里用 `scrollIntoView` + 等待）
+3. 测试需要滚动的帖子的 toggle 成功率
+4. 考虑把 X toggle rollback 也纳入 killtest（toggle 是可逆的，这是比 wechat 更好的 rollback 测试用例）

@@ -34,7 +34,7 @@ import asyncio
 import base64
 import logging
 import time
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from taskvm.benchmark import model_client
 from taskvm.benchmark.cost_model import CostModel
@@ -64,8 +64,30 @@ async def _element_at_point(page, x_px: float, y_px: float) -> dict | None:
         [x_px, y_px])
 
 
-def _norm_to_px(x_norm: float, y_norm: float, viewport: tuple[int, int]) -> tuple[float, float]:
-    return (x_norm / 1000.0 * viewport[0], y_norm / 1000.0 * viewport[1])
+def _norm_to_css(x_norm: float, y_norm: float, env) -> tuple[float, float]:
+    """Normalized-0-1000 coordinate -> CSS pixel coordinate, using MobileGym's
+    OWN calibration (``env.physical_width/height`` + ``env._viewport_size``),
+    NOT a hand-guessed viewport constant.
+
+    Bug this replaces (2026-08-11 debug, user-flagged 'harness may not match
+    GPT's coordinate convention'): the previous ``_norm_to_px(x, y, (400, 800))``
+    used a HARDCODED, WRONG viewport guess — MobileGym's real CSS viewport is
+    (360, 800) (``pool.py``/``factory.py`` default ``viewport_size=(360, 800)``,
+    ``physical_size=(1080, 2400)``, ``device_scale_factor=3``). 400 != 360 is an
+    11% systematic X error — enough to miss small tap targets (e.g. a ~24px
+    heart icon). This is the SAME transform MobileGym's own ``ClickHandler``
+    does internally (``_parse_point`` norm->physical, then ``_p2c``
+    physical->css) — mirrored here ONLY for the diagnostic
+    ``_element_at_point`` probe (which needs page-space CSS px for
+    ``elementFromPoint``); the ACTUAL click/scroll dispatch below goes through
+    ``env.step(Action.click(...))`` so it uses MobileGym's calibration
+    directly and can never drift from this mirror."""
+    phys_w = getattr(env, "physical_width", 1080)
+    phys_h = getattr(env, "physical_height", 2400)
+    css_w, css_h = getattr(env, "_viewport_size", (360, 800))
+    px = x_norm / 1000.0 * phys_w
+    py = y_norm / 1000.0 * phys_h
+    return (px / phys_w * css_w, py / phys_h * css_h)
 
 
 async def _predict_async(page, instruction: str, history: list[str],
@@ -101,29 +123,43 @@ async def _predict_async(page, instruction: str, history: list[str],
 
 async def _execute_action_async(page, action: dict, viewport: tuple[int, int],
                                 env=None) -> str:
-    """Translate one action dict into async Playwright calls on the bridge page.
-    Returns a short description for the history log.
+    """Translate one action dict into MobileGym ``env.step(Action(...))`` calls
+    (NOT raw Playwright mouse events). Returns a short description for the
+    history log.
 
-    ``env`` (MobileGymEnv): used for high-level gestures that the bridge's sim
-    expects via ``__SIM_INPUT__`` (type_text / ENTER) — these route through the
-    app's own keydown handlers (the non-invasive write path). Coordinate clicks
-    go directly via ``page.mouse.click`` (real mouse event)."""
+    ``env`` (MobileGymEnv): 2026-08-11 fix — click/scroll now dispatch via
+    ``env.step(Action.click/swipe(...))``, i.e. MobileGym's OWN
+    ``coord_space="norm_0_1000"`` -> physical -> CSS pipeline
+    (``_parse_point``/``_p2c`` in ``mobile_gym.py``), delivered through
+    ``__SIM_INPUT__.tap`` — the SAME dispatch path a real agent submission
+    uses. This replaces the old hand-rolled ``_norm_to_px(norm, (400,800))``
+    + ``page.mouse.click(css_x,css_y)``, which used a WRONG hardcoded viewport
+    (400 vs the real CSS width 360 — an 11% systematic X error) and bypassed
+    MobileGym's calibration entirely. type_text/ENTER already went through
+    ``env.step`` (unaffected by this bug) — only click/scroll needed the fix."""
     from bench_env.env.base import Action, ActionType
     act = (action.get("action") or "").strip().lower()
     if act == "click":
         c = action.get("coordinate") or action.get("start_box")
         if isinstance(c, list) and len(c) >= 2:
-            x, y = _norm_to_px(float(c[0]), float(c[1]), viewport)
+            x_norm, y_norm = float(c[0]), float(c[1])
             tgt = ""
-            try:
-                el = await _element_at_point(page, x, y)
-                if el:
-                    tgt = f" → {el.get('tag','?')}"
-                    if el.get("text"):
-                        tgt += f" '{el['text'][:30]}'"
-            except Exception:
-                pass
-            await page.mouse.click(x, y)
+            if env is not None:
+                try:
+                    css_x, css_y = _norm_to_css(x_norm, y_norm, env)
+                    el = await _element_at_point(page, css_x, css_y)
+                    if el:
+                        tgt = f" → {el.get('tag','?')}"
+                        if el.get("text"):
+                            tgt += f" '{el['text'][:30]}'"
+                except Exception:
+                    pass
+                await env.step(Action.click([x_norm, y_norm]))
+            else:
+                # no env (unit-test/standalone path) — fall back to a CSS-px
+                # guess using the passed-in viewport (legacy behavior).
+                x, y = (x_norm / 1000.0 * viewport[0], y_norm / 1000.0 * viewport[1])
+                await page.mouse.click(x, y)
             return f"click({c[0]:.0f},{c[1]:.0f}){tgt}"
         return f"click(bad coordinate: {c!r})"
     if act == "type":
@@ -153,10 +189,18 @@ async def _execute_action_async(page, action: dict, viewport: tuple[int, int],
         c = action.get("coordinate") or [500, 500]
         d = str(action.get("direction", "down"))
         if isinstance(c, list) and len(c) >= 2:
-            x, y = _norm_to_px(float(c[0]), float(c[1]), viewport)
-            dy = -400 if d.lower() == "up" else 400
-            await page.mouse.wheel(x, y)
-            await page.mouse.wheel(0, dy)
+            x_norm, y_norm = float(c[0]), float(c[1])
+            # scroll DOWN (see more content below) = swipe finger UP (content
+            # moves up), i.e. point2.y < point1.y in norm space, and vice versa.
+            dy_norm = -150 if d.lower() == "down" else 150
+            p1 = [x_norm, y_norm]
+            p2 = [x_norm, max(0.0, min(1000.0, y_norm + dy_norm))]
+            if env is not None:
+                await env.step(Action.swipe(p1, p2))
+            else:
+                x, y = (x_norm / 1000.0 * viewport[0], y_norm / 1000.0 * viewport[1])
+                await page.mouse.wheel(x, y)
+                await page.mouse.wheel(0, -400 if d.lower() == "up" else 400)
         return f"scroll({d})"
     if act == "wait":
         await asyncio.sleep(1.0)
@@ -169,43 +213,52 @@ async def _execute_action_async(page, action: dict, viewport: tuple[int, int],
     return f"unknown_action({act!r})"
 
 
-async def gui_write_async(*, env, page, sid: str, chat_id: str, text: str,
-                          undo: bool = False, model: str | None = None,
+async def gui_act_async(*, env, page, instruction: str,
+                          navigate: Callable[[], Awaitable[None]] | None = None,
+                          wait_ready: Callable[[], Awaitable[bool]] | None = None,
+                          model: str | None = None,
                           cost_model: CostModel | None = None,
                           max_steps: int = DEFAULT_MAX_STEPS,
                           screenshot_dir: str | None = None) -> dict:
-    """Drive the MobileGym wechat chat via a real grounding loop (Task3).
+    """Generic GUI Agent grounding loop on MobileGym (E14 — 2026-08-11 fix).
 
-    Replaces the hardcoded 7-step ``_send_message`` sequence with a
-    screenshot → model → gesture loop. The instruction is goal-level
-    ("send message X to this chat using the page's UI" / "find a way to
-    undo/delete the last message; if no such UI, output fail").
+    A screenshot -> model -> ``env.step(Action.click/type/swipe/...)`` loop,
+    with clicks/scrolls dispatched via MobileGym's OWN ``coord_space=norm_0_1000``
+    -> physical -> CSS calibration (``env.step(Action.click(...))``), NOT a
+    hand-rolled ``_norm_to_px`` + ``page.mouse.click`` (which used a wrong
+    hardcoded viewport — see the 2026-08-11 root-cause comment in
+    ``_execute_action_async``).
 
-    For rollback (undo=True): the model observes the chat + TRIES to find a
-    delete/recall UI. If it outputs ``fail``, the caller raises HTTP 409 —
-    but now the irreversibility is PROVEN by the model's real attempt, not
-    hardcoded (handoff Task3 requirement: "结论可能不变，但证明这个结论的
-    方法论要和主线一致").
+    ``navigate``: an optional coroutine that opens + deep-links to the target
+      page BEFORE the grounding loop starts (e.g. for wechat: ``open_app`` +
+      ``openApp('wechat','/chat/<id>')``; for X: ``open_app('x')`` to land on
+      the timeline). If None, the loop starts from whatever page is currently
+      live. This is OS navigation (NOT a write/rollback), so it's outside the
+      non-invasive-write boundary.
+    ``wait_ready``: optional coroutine returning True when the target page is
+      mounted (e.g. wechat waits for a ``textarea``; X may wait for a tweet
+      article). Defaults to a 4s poll for any visible interactive element.
 
-    Returns a trace dict {steps, actions, done, final_state}. Raises
-    ``GuiExecutorFailure`` if the model outputs ``fail`` (honest irreversibility
-    → caller raises 409)."""
-    viewport = (400, 800)   # MobileGym phone sim is portrait ~400x800
-    instruction = _build_instruction(
-        app="wechat", entity_kind="chat", entity_id=chat_id,
-        field="messages", value=text, operator="send_message", undo=undo)
-    # warm wechat + deep-link to the chat (the app's own OS navigation — NOT a
-    # state backdoor; same as the old _send_message steps 1-2, which are
-    # navigation not writes). The grounding loop then drives the actual write.
-    await env.open_app("wechat", wait_stable=True)
-    await page.evaluate(f"window.__OS__?.openApp?.('wechat', '/chat/{chat_id}')")
-    # wait for the chat to mount
-    for _ in range(8):
-        await asyncio.sleep(0.5)
-        if await page.evaluate("() => !!document.querySelector('textarea') || !!document.querySelector('[class*=\"message\"]')"):
-            break
+    Returns a trace dict {steps, actions, done}. Raises ``GuiExecutorFailure``
+    if the model outputs ``fail`` (caller decides what to do with that — e.g.
+    wechat rollback raises HTTP 409 honest-irreversibility)."""
+    # Ground-truth viewport from the env itself — NEVER a hardcoded guess.
+    # (``env._viewport_size`` is MobileGym's own (css_width, css_height), set
+    # from ``viewport_size=(360,800)`` default in pool/factory. Used only as
+    # a fallback in ``_execute_action_async`` when env is None — with env it's
+    # unused because clicks go through env.step directly.)
+    viewport = getattr(env, "_viewport_size", (360, 800))
+    if navigate is not None:
+        await navigate()
+    if wait_ready is not None:
+        for _ in range(8):
+            await asyncio.sleep(0.5)
+            if await wait_ready():
+                break
+    else:
+        await asyncio.sleep(1.0)
     history: list[str] = []
-    trace = {"steps": 0, "actions": [], "done": False, "undo": undo}
+    trace = {"steps": 0, "actions": [], "done": False}
     shot_counter = 0
     if screenshot_dir:
         import os
@@ -240,3 +293,37 @@ async def gui_write_async(*, env, page, sid: str, chat_id: str, text: str,
             await page.screenshot(path=f"{screenshot_dir}/step_{shot_counter:02d}_{desc[:30]}.png")
     trace["attempts"] = attempts
     return trace
+
+
+async def gui_write_async(*, env, page, sid: str, chat_id: str, text: str,
+                          undo: bool = False, model: str | None = None,
+                          cost_model: CostModel | None = None,
+                          max_steps: int = DEFAULT_MAX_STEPS,
+                          screenshot_dir: str | None = None) -> dict:
+    """Drive the MobileGym wechat chat via a real grounding loop (Task3).
+
+    Thin wechat-specific wrapper over the generic ``gui_act_async``: builds
+    the wechat send_message instruction + the navigate/wait_ready hooks,
+    then delegates to ``gui_act_async``. Kept for backward compatibility with
+    ``mobilegym_bridge.mutate_wechat`` (which still calls this signature)."""
+    instruction = _build_instruction(
+        app="wechat", entity_kind="chat", entity_id=chat_id,
+        field="messages", value=text, operator="send_message", undo=undo)
+
+    async def _navigate_wechat():
+        # warm wechat + deep-link to the chat (the app's own OS navigation —
+        # NOT a state backdoor). Same as the old _send_message steps 1-2.
+        await env.open_app("wechat", wait_stable=True)
+        await page.evaluate(
+            f"window.__OS__?.openApp?.('wechat', '/chat/{chat_id}')")
+
+    async def _wait_wechat_ready():
+        return await page.evaluate(
+            "() => !!document.querySelector('textarea') "
+            "|| !!document.querySelector('[class*=\"message\"]')")
+
+    return await gui_act_async(
+        env=env, page=page, instruction=instruction,
+        navigate=_navigate_wechat, wait_ready=_wait_wechat_ready,
+        model=model, cost_model=cost_model, max_steps=max_steps,
+        screenshot_dir=screenshot_dir)

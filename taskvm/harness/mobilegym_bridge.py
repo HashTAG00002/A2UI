@@ -63,7 +63,7 @@ logger = logging.getLogger(__name__)
 SITE = "mobilegym"
 DEFAULT_PORT = 3019
 # MobileGym apps this bridge exposes (demo scope: Top3 task = alipay→wechat).
-APPS = ["wechat", "alipay"]
+APPS = ["wechat", "alipay", "x"]
 # The Vite dev/preview server URL the env drives.
 DEFAULT_SIM_URL = "http://localhost:3000"
 
@@ -247,6 +247,14 @@ class MobileGymBridge:
         if resource == "alipay_transactions":
             rows = self._flatten_alipay_txs(apps.get("alipay", {}))
             return {"site": SITE, "sid": sid, "alipay_transactions": rows}
+        if resource == "x_posts":
+            # X posts live in the base dataset (not in the zustand store),
+            # so we must read them from the DOM. This requires the X app
+            # to be open — open it first, then read.
+            await self.env.open_app("x", wait_stable=True)
+            await asyncio.sleep(1.5)  # let timeline render
+            rows = await self._flatten_x_posts_async(apps.get("x", {}))
+            return {"site": SITE, "sid": sid, "x_posts": rows}
         raise web.HTTPNotFound(text=f"unknown resource {resource}")
 
     @staticmethod
@@ -273,6 +281,60 @@ class MobileGymBridge:
                 "n_messages": len(msgs),
                 "last_message": msgs[-1].get("content", "") if msgs else "",
                 "messages": joined,
+            })
+        return rows
+
+    async def _flatten_x_posts_async(self, x_state: dict) -> list[dict]:
+        """Read X posts from the LIVE DOM (not from state). X's post table
+        lives in a base dataset (posts.json, loaded via preload()) that is
+        NOT part of the zustand store — so state['apps']['x']['posts'] is
+        always an empty dict. The posts ARE rendered in the DOM as action
+        bar buttons carrying ``data-action-params='{"id":"p_..."}'``.
+
+        This reads those data attributes + the store's toggle lists
+        (``user.likedPostIds`` etc. — which ARE in the store) to produce the
+        same row schema as before: [{id, is_liked, is_retweeted,
+        is_bookmarked, content_preview}].
+
+        Requires the X app to be OPEN (timeline visible) — callers must
+        ``open_app('x')`` before invoking this."""
+        user = x_state.get("user", {}) or {}
+        liked = set(user.get("likedPostIds", []) or [])
+        retweeted = set(user.get("retweetedPostIds", []) or [])
+        bookmarked = set(user.get("bookmarkedPostIds", []) or [])
+        # Read post ids + content from the DOM's data-action-params.
+        # Each post has 4 action buttons (retweet/like/bookmark/share) all
+        # carrying the same {id: postId} params. We dedupe by post id.
+        dom_posts = await self.env.page.evaluate("""() => {
+            const btns = document.querySelectorAll('[data-action-params]');
+            const seen = new Set();
+            const posts = [];
+            for (const b of btns) {
+                const action = b.getAttribute('data-action') || '';
+                if (!action.includes('.post.')) continue;
+                try {
+                    const p = JSON.parse(b.getAttribute('data-action-params') || '{}');
+                    const pid = p.id;
+                    if (!pid || seen.has(pid)) continue;
+                    seen.add(pid);
+                    // Walk up to the post container to grab content preview.
+                    let card = b.closest('[class*="flex flex-col"]') ||
+                               b.parentElement?.parentElement?.parentElement;
+                    const content = card ? card.textContent?.substring(0, 100) : '';
+                    posts.push({id: pid, content: content || ''});
+                } catch(e) {}
+            }
+            return posts;
+        }""")
+        rows = []
+        for p in dom_posts or []:
+            pid = p.get("id")
+            rows.append({
+                "id": pid,
+                "content": str(p.get("content", ""))[:80],
+                "is_liked": pid in liked,
+                "is_retweeted": pid in retweeted,
+                "is_bookmarked": pid in bookmarked,
             })
         return rows
 
@@ -401,6 +463,135 @@ class MobileGymBridge:
                     "old": f"msg:{new_msg.get('id')}", "new": str(value),
                     "chat_id": eid, "n_messages": len(msgs),
                     "message_id": new_msg.get("id"), "trace": trace}
+
+    # ── write path: X toggle (toggleLike/toggleRetweet/toggleBookmark) ──────
+    # E14 (2026-08-11): the FIRST non-wechat MobileGym write path. X's
+    # ``XPostActionBar`` binds toggleLike / toggleRetweet / toggleBookmark to
+    # single tap targets — these are DISCRETE one-click writes (vs. wechat's
+    # type+send sequence), so they're the natural existence proof that the
+    # TaskVM grounding loop can drive MobileGym when the harness coordinate
+    # pipeline is correct (2026-08-11 fix: clicks now go through
+    # ``env.step(Action.click(...))`` + MobileGym's own norm_0_1000 -> CSS
+    # calibration, NOT the old wrong-viewport ``page.mouse.click``).
+    async def mutate_x(self, sid: str, eid: str, operator: str,
+                       value: Any) -> dict:
+        await self._activate(sid)
+        async with self._lock:
+            if operator not in ("toggle_like", "toggle_retweet",
+                                "toggle_bookmark"):
+                raise web.HTTPBadRequest(text=(
+                    f"x operator must be toggle_like / toggle_retweet / "
+                    f"toggle_bookmark, got {operator}"))
+            post_id = eid
+            # Open X app FIRST so we can read the target post's content from
+            # the DOM (needed to build a content-based instruction — the model
+            # can't see post ids in the screenshot).
+            await self.env.open_app("x", wait_stable=True)
+            # Wait for timeline to render post action buttons.
+            for _ in range(8):
+                await asyncio.sleep(0.5)
+                ready = await self.env.page.evaluate(
+                    "() => { const b = document.querySelectorAll("
+                    "'[data-action-params]'); for (const e of b) { "
+                    "if ((e.getAttribute('data-action')||'')"
+                    ".includes('.post.')) return true; } return false; }")
+                if ready:
+                    break
+
+            verb_map = {
+                "toggle_like": ("like", "heart icon", "pink/red"),
+                "toggle_retweet": ("retweet", "repost icon (green arrows)",
+                                    "green"),
+                "toggle_bookmark": ("bookmark", "bookmark icon", "blue"),
+            }
+            verb, icon_desc, done_color = verb_map[operator]
+
+            # Fetch the target post's content from the base dataset JSON
+            # (posts.json). We can't use the DOM textContent because the
+            # post card's closest selector picks up sibling posts' text,
+            # producing a wrong content hint. The base dataset is the
+            # authoritative source of post content.
+            #
+            # Path resolution: bench_env is installed at
+            # ``<mobilegym_repo>/bench_env`` (a sibling of ``a2ui/``). We
+            # import bench_env at runtime (it's on PYTHONPATH when the bridge
+            # runs) and walk up from its package dir to find
+            # ``<mobilegym_repo>/apps/X/data/posts.json``. This is robust to
+            # where the repo is checked out (no hardcoded absolute path).
+            import json as _json
+            content_hint = ""
+            try:
+                import bench_env as _be
+                _mobilegym_repo = os.path.dirname(
+                    os.path.dirname(os.path.abspath(_be.__file__)))
+                _posts_json_path = os.path.join(
+                    _mobilegym_repo, "apps", "X", "data", "posts.json")
+                with open(_posts_json_path) as f:
+                    _all_posts = _json.load(f)
+                for _p in _all_posts:
+                    if _p.get("id") == post_id:
+                        content_hint = str(_p.get("content", ""))[:100]
+                        break
+            except Exception as e:
+                logger.warning(f"[bridge] could not read posts.json: {e}")
+            logger.info(f"[bridge] mutate_x: post={post_id} "
+                        f"content_hint={content_hint[:60]!r}")
+            instruction = (
+                f"On this X (Twitter) app timeline, {verb} a specific post. "
+                f"The target post contains this text: \"{content_hint}\". "
+                f"Find that post on the timeline. Below the post text there is "
+                f"an action bar with a row of small icons. The icons from left "
+                f"to right are: comment (speech bubble), repost (green arrows), "
+                f"like (heart), views (chart), bookmark (ribbon). "
+                f"You need to tap the {icon_desc} — it is the THIRD icon from "
+                f"the left in that action bar row. Tap it once. "
+                f"IMPORTANT: after tapping, take a moment to look at the heart "
+                f"icon again — if the {verb} succeeded, the {icon_desc} should "
+                f"turn {done_color} and change from outline to FILLED. If it is "
+                f"still outline/uncolored, your tap may have missed — try tapping "
+                f"it again more precisely. Only output {{\"action\":\"done\"}} "
+                f"when you can see the {done_color} filled state. "
+                f"If the post is not visible, scroll to find it. "
+                f"If you cannot find the post after scrolling, output "
+                f"{{\"action\":\"fail\",\"reason\":\"...\"}}.")
+
+            from taskvm.execution.gui_executor_async import (
+                gui_act_async, GuiExecutorFailure)
+            # X app is already open + timeline is ready (we did it above to
+            # fetch post content), so navigate/wait_ready are None — the
+            # grounding loop starts immediately on the current view.
+            trace = await gui_act_async(
+                env=self.env, page=self.env.page, instruction=instruction,
+                navigate=None, wait_ready=None,
+                screenshot_dir=self.screenshot_dir, max_steps=25)
+            if not trace["done"]:
+                raise web.HTTPInternalServerError(text=(
+                    f"gui_executor could not complete {operator} via the UI "
+                    f"(model did not report done after {trace['steps']} steps); "
+                    f"no set_state backdoor. trace={trace['actions'][-3:]}"))
+            # verify the toggle landed (trusted read path)
+            state = await self.env.get_state(required_apps=APPS)
+            self._sid_live[sid] = state
+            x_state = state.get("apps", {}).get("x", {}) or {}
+            user = x_state.get("user", {}) or {}
+            field_map = {
+                "toggle_like": "likedPostIds",
+                "toggle_retweet": "retweetedPostIds",
+                "toggle_bookmark": "bookmarkedPostIds",
+            }
+            ids_list = user.get(field_map[operator], []) or []
+            now_liked = post_id in ids_list
+            logger.info(f"[bridge] {operator} via gui_act_async: "
+                        f"post={post_id} now_in_list={now_liked} "
+                        f"steps={trace['steps']}")
+            if not now_liked:
+                raise RuntimeError(
+                    f"{operator} on post {post_id} did not land — the post id "
+                    f"is not in {field_map[operator]} after the GUI gesture "
+                    f"loop. trace={trace['actions'][-3:]}")
+            return {"status": "ok", "operator": operator,
+                    "old": False, "new": True, "post_id": post_id,
+                    "trace": trace}
 
     async def _send_message(self, sid: str, chat_id: str, text: str) -> dict:
         """Send a message via the app's OWN write pipeline — NO set_state on
@@ -606,6 +797,13 @@ def build_app(bridge: MobileGymBridge) -> web.Application:
         return web.json_response(await bridge.mutate_wechat(
             sid, eid, data.get("operator"), data.get("value")))
 
+    async def api_x_mutate(request):
+        sid = request.match_info["sid"]
+        eid = request.match_info["eid"]
+        data = await request.json()
+        return web.json_response(await bridge.mutate_x(
+            sid, eid, data.get("operator"), data.get("value")))
+
     app.router.add_get("/health", health)
     app.router.add_get("/{sid}", view_sid)
     app.router.add_post("/api/reset/{sid}", api_reset)
@@ -613,6 +811,7 @@ def build_app(bridge: MobileGymBridge) -> web.Application:
     app.router.add_get("/api/session_state/{sid}", api_session_state)
     app.router.add_get("/api/{resource}/{sid}", api_resource)
     app.router.add_post("/api/wechat/{sid}/{eid}", api_wechat_mutate)
+    app.router.add_post("/api/x/{sid}/{eid}", api_x_mutate)
     return app
 
 

@@ -1,0 +1,36 @@
+A2UI protocol v0.9 — official source files, fetched verbatim (no paraphrase) for
+cross-verification. Fetched via https://raw.githubusercontent.com (proxy: see
+~/.bashrc `proxy` alias) on 2026-08-11.
+
+Repo:   https://github.com/a2ui-project/a2ui  (branch: main)
+Site:   https://a2ui.org/specification/v0.9-a2ui/  (renders the same source via
+        mkdocs snippet include from specification/v0_9/docs/a2ui_protocol.md)
+
+Version status on a2ui.org (as of fetch date):
+  v0.8       — Legacy
+  v0.9       — Stable
+  v0.9.1     — Current (production-recommended; diffed against v0.9 below)
+  v1.0       — Candidate (not yet stable; not fetched)
+
+File mapping (repo path -> local path):
+  specification/v0_9/docs/a2ui_protocol.md                    -> v0_9/docs/a2ui_protocol.md
+  specification/v0_9/docs/evolution_guide.md                  -> v0_9/docs/evolution_guide.md   (v0.8.1 -> v0.9 diff)
+  specification/v0_9/docs/a2ui_extension_specification.md     -> v0_9/docs/a2ui_extension_specification.md
+  specification/v0_9/docs/basic_catalog_implementation_guide.md -> v0_9/docs/basic_catalog_implementation_guide.md
+  specification/v0_9/docs/a2ui_custom_functions.md            -> v0_9/docs/a2ui_custom_functions.md
+  specification/v0_9/README.md                                 -> v0_9/README.md
+  specification/v0_9/json/*.json                                -> v0_9/json/*.json   (formal JSON Schema, draft 2020-12)
+  specification/v0_9/catalogs/basic/catalog.json                -> v0_9/catalogs_basic/catalog.json  (component + function catalog)
+  specification/v0_9/catalogs/basic/rules.txt                    -> v0_9/catalogs_basic/rules.txt     (plain-text LLM prompt rules)
+
+Verified: diffed v0_9/docs/a2ui_protocol.md against v0_9_1/docs/a2ui_protocol.md
+(same repo) — v0.9 -> v0.9.1 changes are wording clarifications + version-string
+bumps only; NO breaking schema/message changes. Confirms it is safe to use v0.9
+as "the" A2UI spec without also needing v0.9.1.
+
+Key diff vs the OLD v0.8-era spec previously hand-transcribed in this repo from
+the Macaron-A2UI paper appendix (docs/references/Macaron-A2UI-paper/Appendix/prompts.tex):
+message names beginRendering/surfaceUpdate/dataModelUpdate -> createSurface/
+updateComponents/updateDataModel; component wrapper {"Text":{...}} -> flat
+{"component":"Text",...}; dataModelUpdate array-of-pairs -> plain JSON object;
+full property rename table in v0_9/docs/evolution_guide.md §8.
