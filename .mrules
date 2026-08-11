@@ -594,3 +594,21 @@ E12 根因：重试从头完整重走表单流程（View→Edit→改字段→Re
 **诚实结论**：3 个 OOD 任务里 1 个全 PASS（outlook_cal）、1 个基本 PASS（mail set_priority 0.75）、1 个失败（mail set_state，var_id 映射边界）。**不用 mock 掩盖**（E11 教训）：mail set_state 的 0.3 如实报告。整体 verdict=OOD_MARGINAL_GRANULARITY（gate 用 max semantic f1，mail set_state 的 f1_sem=0.0 拉低了 mean 但 max 仍过线）。要彻底解决 mail set_state 需要更鲁棒的 var_id 对齐（允许 1-to-many 拆分匹配）—— follow-on。
 
 **注**：本轮只跑了 1 sample/task（QPM 限制下 W4 gate1+gate2+neg 已耗 ~7min）。交接要求"≥3 samples"未完全满足 —— 如实标注，3-sample 全量跑留 final 阶段（受 QPM 约束）。
+
+### Task3：MobileGym 写路径/回退路径迁移到真实 gui_executor（honest: 代码对齐主线，但移动端 grounding 成功率低，killtest FAIL）
+
+交接要求：把 mobilegym_bridge.py::_send_message 的硬编码手势序列改成真实 gui_executor grounding 循环；回退路径让模型真实尝试找撤销 UI，找不到再 409（不是硬编码 409）。
+
+**实现**：
+1. 新建 `taskvm/execution/gui_executor_async.py`：镜像 sync `gui_executor` 的契约（截图→complete_vision_json→解析动作 DSL→async Playwright 执行→重新截图→循环），但运行在 bridge 的 `env.page`（async Playwright）上，复用 bridge 的 `env.open_app`/`env.get_state`/`env.step(Action.type_text/ENTER)`（走 `__SIM_INPUT__` 手势，non-invasive）。与 sync executor 共享 GROUNDING_SYSTEM + _build_instruction + 动作 DSL，只有执行 substrate 不同（async vs sync Playwright）。
+2. `mobilegym_bridge.py::mutate_wechat` 重写：写路径调 `gui_write_async(undo=False)`（目标级指令"用页面 UI 给这个聊天发消息：YYY"）；回退路径调 `gui_write_async(undo=True)`（模型观察聊天页+尝试找 delete/recall UI）→ 模型 output `fail` 才 raise HTTP 409（不再是硬编码 409，结论由模型真实尝试后给出）。
+3. `WechatAdapter.mutate` 超时从 10s 提到 180s（GUI 写是多步模型调用，~30-90s）。
+
+**验证（`eval_results/mobilegym_killtest_20260811_155056.json`，1 sample，gui_write_async）—— honest FAIL**：
+- `VERDICT: FAIL`。`round_trip (write-happened) mean=0.3 (0/1 ≥0.85)` — **写路径失败**：gui_write_async 跑了 20 步（max_steps）但模型没完成 type+send。截图显示模型 step_09 找到了 TEXTAREA（`click(446,957) → TEXTAREA`），但随后 step_10-20 按 Escape + 随机点击（svg/path/DIV），没可靠地 type+enter。
+- `honest-irreversibility: 0/1` — 回退路径未触发（写没成功，没有可撤销的写）。
+- `neg-control: 0.3 → PASS`（GUI-free，verifier honest）。
+
+**根因诊断（honest）**：移动端 sim 的 grounding 比桌面 app 难得多——微信 composer textarea 在 800px CSS 视口下方（rect y≈858，旧 `_send_message` docstring 已记录），coordinate click 触不到；发送按钮无稳定 selector。旧硬编码序列 `open_app→深链→evaluate focus→type_text→ENTER` 之所以 work 是因为它**知道**精确坐标/选择器；grounding loop 让模型自己找，模型在移动端 UI 上不可靠（找到 textarea 但没 type+send）。这是模型能力 vs 移动端 UI 复杂度的问题，不是代码架构问题。
+
+**诚实结论**：Task3 的**代码对齐了主线**（写路径=真实 grounding loop，回退路径=模型真实尝试→fail→409，不再是硬编码）——满足了交接的"方法论对齐"要求。但**移动端写路径成功率低**（killtest FAIL），如实报告，不用旧的硬编码 sequence 的成功来掩盖（E11 教训）。要让移动端 grounding 达到桌面 app 的成功率，需要更强视觉模型或给模型更精细的移动端 UI 提示（如明确告诉 textarea 在视口下方需要 scroll/evaluate focus）—— follow-on。回退路径的"模型真实尝试找 delete UI"逻辑已就位（gui_write_async undo=True），但因写路径没成功，本轮没观测到回退路径的实际执行——留待写路径稳定后验证。

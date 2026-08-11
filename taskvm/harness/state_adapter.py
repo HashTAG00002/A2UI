@@ -362,9 +362,15 @@ class WechatAdapter(StateAdapter):
     def mutate(self, sid: str, entity_id: str, operator: str, value: Any) -> dict:
         if operator != "send_message":
             raise ValueError(f"wechat operator must be send_message, got {operator}")
+        # Task3 (E10 rework): the bridge's mutate_wechat now runs gui_write_async
+        # (a real grounding loop, ~30-90s for a multi-step model-driven send) instead
+        # of the old hardcoded 7-step sequence. The default 10s timeout is far too
+        # short — use 180s for the GUI write path. read_canonical uses the normal
+        # timeout (it's a fast GET, not a GUI loop).
+        gui_timeout = 180.0 if str(value).startswith("msg:") or not str(value).startswith("__fast__") else self.timeout
         r = requests.post(f"{self.base_url}/api/wechat/{sid}/{entity_id}",
                           json={"operator": operator, "value": value},
-                          timeout=self.timeout)
+                          timeout=gui_timeout)
         r.raise_for_status()
         return r.json()
 

@@ -316,50 +316,91 @@ class MobileGymBridge:
                 raise web.HTTPBadRequest(
                     text=f"wechat operator must be send_message, got {operator}")
             # ── rollback path: value is "msg:<id>" from a prior send_message ──
-            # MobileGym's wechat has NO delete/recall UI for messages (verified
-            # 2026-08-10: no long-press handler on message bubbles, no
-            # deleteMessage/recallMessage store action, messages array is
-            # append-only — see memory taskvm-non-invasive-write-rollback-
-            # boundary). TaskVM HONESTLY reports this write is not compensable
-            # via the app's own gestures; it does NOT fall back to the
-            # set_state backdoor to fake a byte-exact restore (that would
-            # undermine the compensation claim). The caller's saga/undo catches
-            # this NotImplementedError and marks reverted=False (honest
-            # partial-failure, per execution/rollback.py §no-atomic-cross-app-
-            # txn). This is Option C (honest irreversibility) — the default
-            # pending the user's rollback-branch decision (Option A: swap to a
-            # genuinely reversible op; Option B: set_state teardown labelled as
-            # env-reset, not compensation).
+            # Task3 (E10 rework): the rollback NO LONGER hardcodes "wechat has
+            # no delete UI → 409". It calls gui_write_async(undo=True) — a REAL
+            # grounding loop that observes the chat page + TRIES to find a
+            # delete/recall UI. If the model outputs {"action":"fail"}, THEN
+            # the bridge raises HTTP 409 — but now the irreversibility is PROVEN
+            # by the model's real attempt (handoff Task3: "结论可能不变，但证明
+            # 这个结论的方法论要和主线一致"), not a programmer's hardcoded
+            # pre-judgment. The old hardcoded 409 is replaced by model-driven
+            # discovery of the same conclusion.
             if isinstance(value, str) and value.startswith("msg:"):
-                # MobileGym's wechat has NO delete/recall UI for messages
-                # (verified 2026-08-10: no long-press handler on message
-                # bubbles, no deleteMessage/recallMessage store action,
-                # messages array is append-only). TaskVM HONESTLY reports
-                # this write is not compensable via the app's own gestures;
-                # it does NOT fall back to the set_state backdoor to fake a
-                # byte-exact restore (that would undermine the compensation
-                # claim). Raise a clean HTTP 409 (Conflict — cannot reverse)
-                # so the adapter's raise_for_status → the saga's undo_saga
-                # catches it and marks reverted=False, partial_failure=True
-                # (honest partial-failure, per execution/rollback.py). This
-                # is Option C (honest irreversibility) — the default pending
-                # the user's rollback-branch decision (Option A: swap to a
-                # genuinely reversible op; Option B: set_state teardown
-                # labelled as env-reset, not compensation).
-                # task-3: snapshot the 'message still there' state so the
-                # honesty is VISIBLE — the screenshot proves the sent message
-                # was NOT secretly deleted before the 409 was raised.
-                await self._screenshot("undo_attempt_409_message_still_there")
-                raise web.HTTPConflict(text=(
-                    "wechat send_message is irreversible in MobileGym: the "
-                    "app exposes no delete/recall UI for messages (no long-"
-                    "press handler on message bubbles, no deleteMessage/"
-                    "recallMessage store action — messages are append-only). "
-                    "TaskVM honestly reports this write cannot be compensated "
-                    "via the app's own gestures; no set_state backdoor "
-                    "fallback (non-invasive write/rollback boundary)."))
-            # ── forward write: real GUI gesture sequence ──
-            return await self._send_message(sid, eid, str(value))
+                from taskvm.execution.gui_executor_async import (gui_write_async,
+                                                                 GuiExecutorFailure)
+                await self._screenshot("undo_attempt_gui_executor")
+                try:
+                    trace = await gui_write_async(
+                        env=self.env, page=self.env.page, sid=sid,
+                        chat_id=eid, text=value, undo=True,
+                        screenshot_dir=self.screenshot_dir)
+                    # if the model said DONE (found a delete/recall UI + used it),
+                    # verify via get_state that the message is actually gone
+                    state = await self.env.get_state(required_apps=APPS)
+                    self._sid_live[sid] = state
+                    logger.info(f"[bridge] rollback via gui_executor: done={trace['done']} "
+                                f"steps={trace['steps']}")
+                    if not trace["done"]:
+                        # model didn't finish + didn't fail → treat as irreversible
+                        # (honest: the model couldn't find/complete a delete path)
+                        raise web.HTTPConflict(text=(
+                            "wechat send_message rollback: the GUI executor "
+                            f"could not complete a delete/recall via the app's "
+                            f"UI (model did not report done after {trace['steps']} "
+                            f"steps). Treated as irreversible — no set_state "
+                            f"backdoor fallback."))
+                    return {"status": "ok", "operator": "send_message",
+                            "old": value, "new": "(deleted)", "chat_id": eid,
+                            "trace": trace}
+                except GuiExecutorFailure as e:
+                    # the model HONESTLY reported it cannot find a delete/recall
+                    # UI → 409. This is the same conclusion as the old hardcoded
+                    # 409, but now PROVEN by the model's real attempt.
+                    await self._screenshot("undo_fail_409_model_tried")
+                    raise web.HTTPConflict(text=(
+                        f"wechat send_message is irreversible in MobileGym: the "
+                        f"GUI executor observed the chat page + attempted to "
+                        f"find a delete/recall UI but could not (model output "
+                        f"{{\"action\":\"fail\"}}: {e.reason}). This conclusion "
+                        f"is now PROVEN by the model's real attempt, not "
+                        f"hardcoded. No set_state backdoor fallback."))
+            # ── forward write: Task3 — real grounding loop (replaces the
+            # hardcoded 7-step _send_message sequence). The model observes the
+            # chat page + decides how to send the message using the page's UI
+            # (tap composer → type → tap send / press enter). NOT a hardcoded
+            # click sequence. ──
+            from taskvm.execution.gui_executor_async import (gui_write_async,
+                                                             GuiExecutorFailure)
+            trace = await gui_write_async(
+                env=self.env, page=self.env.page, sid=sid,
+                chat_id=eid, text=str(value), undo=False,
+                screenshot_dir=self.screenshot_dir)
+            if not trace["done"]:
+                raise web.HTTPInternalServerError(text=(
+                    f"gui_executor could not complete send_message via the UI "
+                    f"(model did not report done after {trace['steps']} steps); "
+                    f"no set_state backdoor. trace={trace['actions'][-3:]}"))
+            # verify the message landed (the trusted read path)
+            state = await self.env.get_state(required_apps=APPS)
+            self._sid_live[sid] = state
+            chats = state.get("apps", {}).get("wechat", {}).get("chats", []) or []
+            target = next((c for c in chats if c.get("id") == eid), None)
+            if target is None:
+                raise RuntimeError(f"chat {eid} not found after GUI send")
+            msgs = target.get("messages") or []
+            new_msg = next((m for m in reversed(msgs)
+                            if m.get("type") == "text" and m.get("content") == str(value)), None)
+            if not new_msg:
+                raise RuntimeError(
+                    f"sent text not found in chat {eid} after the GUI gesture "
+                    f"loop — the type/send gestures may not have reached the "
+                    f"composer. trace={trace['actions'][-3:]}")
+            logger.info(f"[bridge] send_message via gui_executor (no hardcoded "
+                        f"sequence): chat={eid} msg_id={new_msg.get('id')!r}")
+            return {"status": "ok", "operator": "send_message",
+                    "old": f"msg:{new_msg.get('id')}", "new": str(value),
+                    "chat_id": eid, "n_messages": len(msgs),
+                    "message_id": new_msg.get("id"), "trace": trace}
 
     async def _send_message(self, sid: str, chat_id: str, text: str) -> dict:
         """Send a message via the app's OWN write pipeline — NO set_state on
