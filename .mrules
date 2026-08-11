@@ -612,3 +612,25 @@ E12 根因：重试从头完整重走表单流程（View→Edit→改字段→Re
 **根因诊断（honest）**：移动端 sim 的 grounding 比桌面 app 难得多——微信 composer textarea 在 800px CSS 视口下方（rect y≈858，旧 `_send_message` docstring 已记录），coordinate click 触不到；发送按钮无稳定 selector。旧硬编码序列 `open_app→深链→evaluate focus→type_text→ENTER` 之所以 work 是因为它**知道**精确坐标/选择器；grounding loop 让模型自己找，模型在移动端 UI 上不可靠（找到 textarea 但没 type+send）。这是模型能力 vs 移动端 UI 复杂度的问题，不是代码架构问题。
 
 **诚实结论**：Task3 的**代码对齐了主线**（写路径=真实 grounding loop，回退路径=模型真实尝试→fail→409，不再是硬编码）——满足了交接的"方法论对齐"要求。但**移动端写路径成功率低**（killtest FAIL），如实报告，不用旧的硬编码 sequence 的成功来掩盖（E11 教训）。要让移动端 grounding 达到桌面 app 的成功率，需要更强视觉模型或给模型更精细的移动端 UI 提示（如明确告诉 textarea 在视口下方需要 scroll/evaluate focus）—— follow-on。回退路径的"模型真实尝试找 delete UI"逻辑已就位（gui_write_async undo=True），但因写路径没成功，本轮没观测到回退路径的实际执行——留待写路径稳定后验证。
+
+### Final：主线 P5 全量重跑（3 core tasks × 2 samples，gui_agent）—— verdict PASS
+
+`eval_results/p5_full_killtest_20260811_160302.json`：
+- **VERDICT: PASS**。
+- release_reschedule: PASS=True mean=1.0 n_pass=2/2 binding_f1=1.0 neg=0.3 ✓
+- design_review_delay: PASS=True mean=1.0 n_pass=2/2 binding_f1=1.0 neg=0.3 ✓
+- **doc_handoff: PASS=True mean=1.0 n_pass=2/2 binding_f1=0.0 neg=0.3** ✓ — **Task1 修复的最终确认**：真实 GUI 模式下从 0.3（E11 时的失败）提升到 1.0，var_id 映射（document_folder↔launch_doc_location）工作正常。binding_f1=0.0 是 byte-exact var_id 诊断值（语义 f1_varid_semantic=1.0），如实保留不掩盖。
+
+### 本轮 7 任务诚实汇总（E11 教训：不挑数字讲故事）
+
+| 任务 | 状态 | 证据 | 诚实标注 |
+|---|---|---|---|
+| Task1 (var_id 修复) | ✅ VERIFIED PASS | doc_handoff 0.3→1.0, n_ops 0→1, p5_full_killtest_20260811_160302.json | binding_f1=0.0 (byte-exact) 如实保留；语义 1.0 |
+| Task2 (重试优化) | ⚠️ 代码就位，效率未达标 | 20.7 calls/op (目标 8-10)，success 100% 未降 | resume_url 方向 b 生效；prev_screenshot 方向 a 不足；模型 form-confirm 不可靠是根因 |
+| Task3 (MobileGym 迁移) | ❌ 代码对齐主线，移动端 grounding FAIL | mobilegym_killtest_20260811_155056.json verdict=FAIL round_trip=0.3 | 写路径 gui_write_async 20 步未完成；移动端 textarea 在视口下方，模型找不到/操作不了；硬编码 sequence work 是因为它知道坐标。回退路径逻辑就位但未观测 |
+| Task4 (mail/outlook_cal P5) | ⚠️ 部分 PASS | w4_gui_20260811_152838.json PASS=True verdict=OOD_MARGINAL_GRANULARITY | outlook PASS(1.0), mail set_priority 0.75, **mail set_state 0.3 (var_id 映射边界，compiler 拆分 vs GT 合并)**；1 sample only |
+| Task5 (GenUI 接入 server) | ✅ VERIFIED | live --genui 页面渲染 genui-card 5×，decode_genui 3 messages | 控件类型直接驱动 form input 是 follow-on |
+| Task6 (A2UI SDK 优化) | ✅ 代码就位，校验生效 | a2ui_schema_manager.py，validate 捕获 2 个真实 schema 违规 | repair retry 未成功（catalog allOf 严格度）；校验是 diagnostic 不是 hard gate |
+| Task7 (MobileGym binding f1=0 诊断) | ✅ 诊断完成，无需修复 | f1_varid_semantic=1.0 f1_triples=1.0 | var_id 标签差异（同 Task1 类），不是 prompt/观测问题 |
+
+**主线核心结论（honest）**：E10 点破的两个空白（GUI 执行器 + GenUI 解码器）现在都是真实模型调用。主线 5 app 的 GUI 执行器在真实 GUI 模式下 3/3 core tasks PASS（verdict PASS，neg=0.3）。mail/outlook_cal 部分 PASS。MobileGym 移动端 grounding 是当前模型能力的真实边界（诚实 FAIL，不用硬编码 sequence 掩盖）。GenUI 解码器接入 live server + formal schema 校验生效。
