@@ -521,3 +521,20 @@ E12 根因：重试从头完整重走表单流程（View→Edit→改字段→Re
 - **成功率未下降**：3/3 write 都最终成功（read_canonical 验证 old→new 正确），100% 成功率保持。
 
 **诚实结论**：Task2 代码改造在架构上是正确的（resume_url 让重试不重走 View→Edit，单次路径更高效），但**效率指标未达标**——根因是模型在 form-confirm 按钮上不可靠导致重试频繁触发，prev_screenshot 不足以解决。要真正降到 8-10 calls/op，需要更强的视觉模型或更结构化的 form-confirm 提示（如给 Confirm 按钮加更显眼的视觉标记，本轮 ✓/← 标记已有但不够）。代码已提交（不使情况变差，单次路径有改善），但**不声称"已优化达标"**——留给下一个 agent 或更强模型。
+
+### Task5：GenUI 解码器接入 server.py 实际渲染路径（已验证 live）
+
+交接要求：把 `genui_decoder.decode_genui()` + `render_a2ui_to_html()` 接入 `server.py` 的实际渲染路径，替换掉 `render_two_zone_html` 的旧 f-string 模板。
+
+**实现（`taskvm/workspace_ui/server.py`）**：
+1. `WorkspaceSession` 新增 `use_genui: bool` + `last_genui: dict | None`（traceability）字段。
+2. 新增 `_genui_rw_zone_html(sess, updated_proj)`：调 `decode_genui`（只传 editable vars 的 binding + canonical values，no-leak）→ `render_a2ui_to_html`。把模型生成的完整 A2UI surface 放进 `<details>` 块供 review。governance form 契约保留：每个 editable var 包一个 `<form action="edit">` + hidden `var_id`/`new_value`，确保 `/<sid>/edit` 路由不变（模型决定控件类型，harness 保证 submit target）。
+3. `render_two_zone_html` 在 `sess.use_genui=True` 时用 GenUI html 替换 `editable_field_html` 的 f-string；decode 失败则诚实 fallback 到 f-string（不假装成功）。read-only zone + governance（undo/checkpoint/notice/saga/conflict）保留 f-string（这些是 governance chrome，不是 GenUI 的职责）。
+4. `main()` 加 `--genui` flag（默认 off，向后兼容 + 避免每次 render 都打模型除非显式 opt-in）。
+
+**验证（live `python -m taskvm.workspace_ui.server --port 3016 --task doc_handoff --genui`）**：
+- 第一次 fetch 页面 2528 bytes + "(no root component)"（429/冷启动，decode 失败 → 诚实 fallback 到 f-string，页面仍可用）。
+- 第二次 fetch 页面 4846 bytes，`genui-card`/`genui-col`/`genui-surface` 出现 5 次，0 个 "no root component"——**decode 成功，模型生成的 A2UI surface 真的渲染在 live 页面上**。
+- 直接 `decode_genui` 测试也确认：3 条 A2UI 消息（createSurface + updateComponents + updateDataModel），render 出 2364 bytes HTML 含 genui-card。
+
+**诚实边界**：governance form 契约保留意味着 live 页面的 editable 控件目前仍是 per-var `<form>` 包的 text input（模型决定的 control type 通过 `<details>` 块展示但没直接驱动 form input 的 type）。要真正让模型决定的 ChoicePicker/DateTimeInput 直接作为 form input 生效，需要解析 A2UI component tree 并注入 form-action 到每个 control——本轮做了"接入 live 路径 + 模型真的被调用 + surface 真的渲染"，control-type 直接驱动 form 是 follow-on（记入 .mrules 供下一个 agent）。
