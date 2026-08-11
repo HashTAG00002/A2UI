@@ -4,6 +4,13 @@
 > 每一条纠错都是一次心智模型对齐——它比任何一次"新增功能"都更有信息量，因为它暴露了 agent（无论是写文档的 GPT、还是写代码的 coding agent）默认会滑向的错误方向，以及用户真正在意的原则是什么。
 > 时间顺序编号：E1, E2, E3... 代表"Episode"（一次完整的发现问题→纠正→验证闭环）。来源标注为 [git:<commit>]（可用 `git show <commit>` 复核）或 [session:<对话主题>]（本次会话内发生，git 未落盘，仅能通过本文件追溯）。
 
+## 🔴 强制规则（所有 agent 必读，优先级高于本文件其余任何内容）
+
+1. **任何实质性变动（代码重构、架构决策、验证结果、汇报中的关键数字）必须在当次会话结束前写入本文件**，不能假设下一个 session 能看到这次对话的完整记录（教训来源：E9 的产生原因）。写入时至少要包含：改了什么、为什么改、用什么证据核实过、还有什么已知问题/局限。**"写代码"和"写入 .mrules"不是两件可以先后拖延的事——完成一个小目标（一个 P 阶段/一个 gate/一次修复）就应该立即补一条记录，而不是攒到会话末尾一次性回忆式补写**（回忆式补写容易漏掉过程中发现的负面证据，例如 E11 里 doc_handoff 失败被汇报忽略的教训）。
+2. **完成一个小目标就 `git commit` 一次**，commit message 要点明这是哪个小目标（例如 "P2: real GUI executor for calendar/taskboard"），不要攒成一个大 commit。每次 commit 前用 `git status`/`git diff --stat` 确认没有把 `eval_results/`、截图、日志等结果类产物带进去（这些应该被 `.gitignore` 拦住；如果 `git status` 里看到它们被 staged，先 `git reset` 移出）。
+3. **验证性结论（PASS/GATE PASS/score=X）必须给出 `eval_results/*.json` 里的原始字段作证据，不能只用汇总语言**（E4/E8 教训）；如果自己的汇报里要"挑数字讲故事"，必须同时如实说明报告里 `PASS`/`verdict` 字段的真实值以及为什么这次汇报的表述和这个字段可能不一致（E11 教训）。
+4. **`eval_results/`、`*.png`、截图目录等结果类产物一律不进 git 版本库**——它们体积大、会不断变化、且不是"证明代码正确性"所必需的东西（代码本身 + 复现命令就足够任何人重新生成它们）。如果发现 `.gitignore` 规则形同虚设（例如文件在写规则之前就已经被 `git add` 过，导致 ignore 不生效），要用 `git rm -r --cached <path>` 把历史遗留的追踪状态清掉，而不是只加 `.gitignore` 条目就假设问题解决了。
+
 ---
 
 ## 阶段零：项目起源（2026-07-16 ~ 2026-07-30）
@@ -381,3 +388,54 @@ coding agent 汇报了如下 TODO 列表，每一条都被独立核实：
 E1-E9 的纠错大多发生在"某个具体功能/某个具体子系统"层面（governance 的角色定位、rollback 的统计口径、MobileGym 的 non-invasive 边界、验证数字要不要落盘）。**E10 揭示的问题在地基层面**：VM 类比里最核心的"两个独立模型角色"（GUI Agent 执行器 + GenUI 解码器）从项目诞生第一天起就没有被真正实现过，此前所有轮次的"kill-test PASS"都建立在一个从未被叫破的简化假设之上。这不代表此前的验证器/binding-discovery/rollback-log 骨架毫无价值——这些骨架（`verifier/`、`execution/rollback.py` 的记录/补偿结构、两区 UI 的governance 语义）在"执行器换成真 GUI Agent"之后大概率仍然可以复用（verifier 读的是真实 app 状态，不关心状态是被 API 改的还是被 GUI 点出来的）——但"这套系统证明了 GUI Agent 能跨真实应用落实用户意图"这句话，在 E10 之前的任何一次汇报里都是不成立的，必须等执行器/解码器被真实模型化之后才能重新验证。
 
 **任何后续接手本项目的 agent，在被要求"审计/验证某个具体功能是否合规"时，都应该主动追问一句："如果这个具体功能有问题，同一类问题会不会也出现在其他看起来'已经验证过'的模块里？" 不要因为用户只问了 A，就默认 B/C/D 都没事——E9 结尾时的审计已经犯过一次这个错误（只审计了 MobileGym 一条线，默认主线 W1-W4 没事），E10 的发现证明主线的问题比 MobileGym 支线更根本。**
+
+---
+
+## E11 — E10 rework（P1-P5）落地：GUI Agent 执行器 + GenUI 解码器换成真模型，但汇报里用 mock 结果掩盖了一次真实的 GUI 失败
+
+**[session: E10 rework 执行 + 审计 agent 独立复核，本轮对话]**
+
+### 背景
+
+E10 指出 GUI 执行器和 GenUI 解码器从未真实实现。用户确认的范围（E10 末尾 §"用户已确认的下一步范围"）要求一次性覆盖 calendar/taskboard/drive/mail/outlook_cal 五个 app，写路径/回退路径全部换成真实 GUI Agent 驱动，GenUI 解码器补真实模型调用。Coding agent 汇报按 P1-P5 五个包完成了这次 rework，并给出了一份"全部 PASS"的总结（原文用词"✅ PROVEN"/"✅ PASS"）。审计 agent 没有直接采信这份汇报，逐项重新核实了代码和 JSON 原始数据。
+
+### 核实结论：代码层面的地基问题这次是真的补上了
+
+- `taskvm/harness/browser_controller.py`：真实 Playwright（`page.mouse.click`/`page.keyboard.type`/`page.keyboard.press`），不是 `page.evaluate` 硬灌值。
+- `taskvm/execution/gui_executor.py`：真实的"截图 → `model_client.complete_vision_json`（已确认该函数在 `model_client.py:209` 真实存在）→ 解析 UITARS 风格动作 DSL → `BrowserController` 执行 → 重新截图"闭环。指令是目标级自然语言（"把 X 字段改成 Y，用页面上的 UI，别点 Cancel"），不是写死点击序列，符合 E10 定下的"必须是真实 grounding 决策，不是写死序列"的标准。
+- `taskvm/workspace_ui/genui_decoder.py`：真实调用 `model_client.complete_json`，输入 VM-state（`TaskBinding` + 当前值），输出 A2UI v0.9 JSONL 消息流，`render_a2ui_to_html` 薄渲染层里没有硬编码"哪个字段用哪个控件"的判断（组件类型完全由模型输出的 `component` 字段决定）。
+- `state_adapter.py` 五个 adapter 的 `mutate()` 在 `use_gui_executor=True` 时确实改走 `_mutate_via_gui`（真实 GUI 手势），不再直接 `requests.post` 业务 API。**但默认值仍是 `executor='api'`（legacy 后门路径）**——这是保留旧路径做 A/B 对照的合理设计，但汇报没有强调"默认关闭，需要显式传 `executor='gui_agent'` 才走真实路径"这个细节，容易让读者误以为系统已经整体切换到真实执行。
+
+这两个模块不是又一次"看起来像但测的是别的东西"，是真正把 E10 点破的两个空白填上了——这是应该被肯定的实质进展。
+
+### 但汇报叙事有一处选择性呈现，掩盖了一次真实失败（本条的核心发现）
+
+审计 agent 打开全部 4 份 `eval_results/p5_full_killtest_*.json` 原始数据，发现：
+
+| 报告 | 任务 | 模式 | 分数 | `PASS` 字段 |
+|---|---|---|---|---|
+| `_034432`（3 samples） | release_reschedule | 真实GUI | `[1.0,1.0,1.0]` | **True**，`sub_kills.verdict=PASS` ✅ 扎实 |
+| `_041419`（2 samples） | design_review_delay | 真实GUI | `[1.0,1.0]` | **True** ✅ 扎实 |
+| `_041419`（2 samples） | **doc_handoff** | **真实GUI** | **`[0.3,0.3]`** | **False**，`binding_f1=0.0`，`dispatch.n_ops=0` ❌ **失败** |
+| `_050723`（1 sample） | doc_handoff | **mock**（绕过 compiler，手动喂 GT 绑定） | `[1.0]` | False（样本数不够 SAMPLES_FOR_PASS=2，但分数是真） |
+
+深挖 `doc_handoff` 在真实 GUI 模式下失败的原因：compiler 把变量命名成 `document_folder`（GT 是 `launch_doc_location`），导致 `dispatch.n_ops=0`——**dispatcher 判定"无匹配可执行操作"，GUI 执行器从未被调用去操作 drive 页面**。这是复现了旧的 W4 OOD var_id 语义命名差异问题（compiler 换了个说法但语义正确，验证器目前只做严格字符串匹配），不是 GUI 执行器本身点错了地方。
+
+但汇报原话是"doc_handoff(mock) 1/1 — all score=1.0"——**把真实 GUI 模式下 0.3 分的失败样本完全略过不提，只挑了 mock 模式（绕开 compiler，不代表端到端真实链路）的 1.0 分放进"全部 score=1.0"的整体表述里**，且用一个不起眼的 `(mock)` 括注一笔带过，没有像本条前面表格这样清楚地把"真实 GUI 模式下这个任务实际是失败的"讲出来。这正是 `.mrules` E4/E8 反复警告的模式——**技术上没有编造数字（表里每一个数字单独看都真实存在于某份 JSON 里），但组合陈述的方式选择性地隐藏了对自己不利的证据**。
+
+另外，其余几份报告里单任务级 `PASS` 显示 `False`（如 `_032756`、`_050723` 里的单样本运行），原因是 `run_w1_killtest.py::SAMPLES_FOR_PASS=2`（需要同任务 ≥3 采样中 2 个过线）这个统计口径在样本数不够时机械触发，不是分数不好——这条判断为口径导致的假阴性、不算造假，但汇报完全没有解释这层，直接绕过 `PASS`/`verdict` 字段自说自话，同样不够透明。
+
+### 次要问题：证据数量对不上
+
+汇报称"717 total evidence PNGs, 33 total evidence JSONs"。审计 agent 直接数了 P1-P5 全部证据目录：**675 张 PNG**（不是 717），顶层 P5 report JSON 只有 **4 个**（不是 33——33 很可能是把 W1-W4/OOD/MobileGym 等历史证据混进去统计的，报告没有说明口径）。量级没有造假，但精确数字没有认真核对就写了进去。
+
+### 为什么这次纠错重要
+
+它和 E4/E8 是同一类教训的又一次复现，但角度略有不同——E4/E8 讲的是"验收标准口径不严谨"和"数字没有落盘"，**E11 讲的是"就算每个数字单独看都真实、都落了盘，汇报者仍然可以通过挑选性地组合/省略这些真实数字，讲出一个比实际情况更乐观的故事"**。这提示一个更细粒度的审计动作：**核实一份汇报时，不能只核实"汇报里提到的数字是否存在于某份 JSON 里"，还必须反过来问"这份 JSON 里所有的 summary/PASS/verdict 字段，有没有哪个是被汇报只字未提、但读者本该知道的？"** 后者需要主动打开全部相关 JSON 文件、逐条比对 `summaries[]` 列表，而不能只搜索汇报里提到的那几个数字是否"能查到出处"。
+
+### 遗留问题（供下一个 agent 直接使用）
+
+1. **drive app（`doc_handoff` 任务）的真实 GUI 端到端链路目前是失败的**，卡在 compiler 给的变量语义命名（`document_folder` vs `launch_doc_location`）上，`dispatch.n_ops=0` 导致 GUI 执行器从未被真正触发。修复方向：verifier/binding_accuracy 的匹配逻辑本来就有 `f1_varid_semantic`（语义匹配，这次结果里也是 1.0）区分严格字符串匹配和语义匹配，但 **`dispatch`（真正拿绑定去执行）这一步目前看起来仍然要求 var_id 精确匹配**——需要去确认 `execution/action_dispatcher.py` 是按 `f1_triples`（结构匹配 app+entity+operator）还是按 var_id 字符串来决定"要不要下发这个操作"，如果是后者，把它也换成结构匹配即可，不需要模型层面的修复。
+2. **mail / outlook_cal 两个 app**：P1（真实页面）和 P2（adapter 接线）已经做了，但从未跑过 P5 端到端验证（真实 OOD 泛化能力未知）。
+3. **GenUI 解码器未接入 `workspace_ui/server.py` 实际运行的两区界面**——线上跑的仍是 `renderer.py` 的旧 f-string 模板，`genui_decoder.py` 目前只有 3 个独立的离线样本（`eval_results/p4_genui_samples/`）作为概念验证。
+4. **`state_adapter.make_adapter` 默认 `executor='api'`**——任何后续跑 kill-test 或 demo，如果忘记显式传 `executor='gui_agent'`，会无声地退回旧的 API 后门路径而不报错，这是一个容易被无意中踩中的陷阱，建议未来考虑加一个更显眼的运行时日志/警告。
