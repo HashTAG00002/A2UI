@@ -41,7 +41,8 @@ from taskvm.task_state.compiler import compile_binding
 from taskvm.evaluation.render_check import (parse_compiler_output,
                                             validate_binding, validate_a2ui_surface)
 from taskvm.verifier import canonical_state as cs
-from taskvm.verifier.round_trip_checks import check_round_trip, binding_accuracy
+from taskvm.verifier.round_trip_checks import (check_round_trip, binding_accuracy,
+                                                map_gt_var_id_to_compiler)
 from taskvm.workspace_ui.renderer import render
 
 logger = logging.getLogger(__name__)
@@ -106,9 +107,34 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
     pre = cs.snapshot(adapters, sid)
 
     # patch + dispatch (write-path-API)
+    # E11/E12 fix (direction a): in REAL compiler mode the compiler may name the
+    # edited variable differently than the GT fixture (e.g. 'document_folder' vs
+    # 'launch_doc_location') — a free-form label, semantically equivalent. Driving
+    # compile_patch with the GT var_id string did a byte-exact lookup in the
+    # compiler's binding, found nothing → dispatch.n_ops=0 → the GUI executor was
+    # never triggered (the doc_handoff 0.3 failure). Fix: translate the GT var_id
+    # into the compiler's var_id via binding-set alignment BEFORE patching, so the
+    # patch stage no longer depends on the GT var_id string (compiler-independent).
+    # mock mode uses _gt_task_binding (GT var_id == compiler var_id), no mapping.
+    var_id_mapping = None   # transparency: record what translation happened
     dispatch_report = None
     if tb is not None:
-        ops = compile_patch(fixture.user_edit, tb)
+        gt_var_id = fixture.user_edit.get("var_id")
+        if mock:
+            edit = dict(fixture.user_edit)   # GT var_id matches GT binding
+        else:
+            compiler_var_id = map_gt_var_id_to_compiler(gt_var_id, fixture, binding)
+            var_id_mapping = {"gt_var_id": gt_var_id,
+                              "compiler_var_id": compiler_var_id,
+                              "mapped": compiler_var_id is not None}
+            edit = {"var_id": compiler_var_id or gt_var_id,
+                    "old": fixture.user_edit.get("old"),
+                    "new": fixture.user_edit.get("new")}
+            if compiler_var_id is None:
+                logger.warning(f"[killtest] GT var_id {gt_var_id!r} has no "
+                               f"compiler match (binding miss, not naming); "
+                               f"patch will produce 0 ops — a real binding failure")
+        ops = compile_patch(edit, tb)
         dispatch_report = dispatch(ops, adapters, sid, broken=None)
 
     # verify (canonical state)
@@ -135,6 +161,7 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
         "a2ui_valid": a2ui_ok,
         "a2ui_errors": a2ui_errs,
         "binding_accuracy": bacc,
+        "var_id_mapping": var_id_mapping,   # E11/E12 fix: GT var_id → compiler var_id
         "dispatch": dispatch_report.to_dict() if dispatch_report else None,
         "round_trip": {
             "score": res.score,

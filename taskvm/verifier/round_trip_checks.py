@@ -156,6 +156,48 @@ def check_round_trip(sid: str, fixture: CanonicalTaskGraph,
               "weights": {"changed": 0.5, "untouched": 0.3, "resynced": 0.2}})
 
 
+def map_gt_var_id_to_compiler(gt_var_id: str, fixture: CanonicalTaskGraph,
+                              compiler_binding: dict | None) -> str | None:
+    """Map a GT ``var_id`` to the semantically-equivalent var_id the compiler
+    chose, by aligning on **binding set** (not byte-exact string).
+
+    Why this exists (E11/E12): the compiler is free to name a variable
+    ``document_folder`` where the GT fixture says ``launch_doc_location`` — both
+    bind the same ``(app, entity_id, operator)`` triples, so they are the same
+    quantity under different labels. The W1 kill-test drove ``compile_patch``
+    with the GT var_id string, which then did a byte-exact lookup in the
+    compiler's binding and found nothing → ``dispatch.n_ops=0`` → the GUI
+    executor was never triggered (the "0.3 doc_handoff failure"). This helper
+    lets the orchestrator translate the GT var_id into the compiler's var_id
+    BEFORE driving the patch, so the patch stage no longer depends on the GT
+    var_id string (compiler-independent discovery, per E12 direction a).
+
+    Alignment rule (mirrors ``binding_accuracy``'s ``f1_varid_semantic``): a
+    GT var_id matches a compiler var_id iff their triple-sets
+    ``{(app, entity_id, operator)}`` are EQUAL. Returns the compiler var_id, or
+    None if no compiler var_id binds the same triples as the GT var_id (i.e. the
+    compiler genuinely missed that variable — a real binding failure, not a
+    naming mismatch).
+    """
+    # GT var_id → its triple set
+    gt_triples = frozenset(
+        (b.app, b.entity_id, b.operator)
+        for b in fixture.bindings if b.var_id == gt_var_id)
+    if not gt_triples:
+        return None
+    # find a compiler var_id whose triple set equals the GT one
+    if compiler_binding is None:
+        return None
+    for v in (compiler_binding.get("variables") or []):
+        cv = v.get("var_id")
+        c_triples = frozenset(
+            (b.get("app"), b.get("entity_id"), b.get("operator"))
+            for b in (v.get("bindings") or []))
+        if c_triples == gt_triples:
+            return cv
+    return None
+
+
 def binding_accuracy(compiler_binding, fixture: CanonicalTaskGraph) -> dict:
     """Compare the compiler's discovered binding against the GT bindings (for the
     binding-accuracy metric — NOT a gate, a diagnostic). Counts how many GT

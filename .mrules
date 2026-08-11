@@ -7,7 +7,7 @@
 ## 🔴 强制规则（所有 agent 必读，优先级高于本文件其余任何内容）
 
 1. **任何实质性变动（代码重构、架构决策、验证结果、汇报中的关键数字）必须在当次会话结束前写入本文件**，不能假设下一个 session 能看到这次对话的完整记录（教训来源：E9 的产生原因）。写入时至少要包含：改了什么、为什么改、用什么证据核实过、还有什么已知问题/局限。**"写代码"和"写入 .mrules"不是两件可以先后拖延的事——完成一个小目标（一个 P 阶段/一个 gate/一次修复）就应该立即补一条记录，而不是攒到会话末尾一次性回忆式补写**（回忆式补写容易漏掉过程中发现的负面证据，例如 E11 里 doc_handoff 失败被汇报忽略的教训）。
-2. **完成一个小目标就 `git commit` 一次**，commit message 要点明这是哪个小目标（例如 "P2: real GUI executor for calendar/taskboard"），不要攒成一个大 commit。每次 commit 前用 `git status`/`git diff --stat` 确认没有把 `eval_results/`、截图、日志等结果类产物带进去（这些应该被 `.gitignore` 拦住；如果 `git status` 里看到它们被 staged，先 `git reset` 移出）。
+2. **完成一个小目标就 `git commit` 一次**，commit message 要点明这是哪个小目标（例如 "E10, P2: real GUI executor for calendar/taskboard"），不要攒成一个大 commit。每次 commit 前用 `git status`/`git diff --stat` 确认没有把 `eval_results/`、截图、日志等结果类产物带进去（这些应该被 `.gitignore` 拦住；如果 `git status` 里看到它们被 staged，先 `git reset` 移出）。
 3. **验证性结论（PASS/GATE PASS/score=X）必须给出 `eval_results/*.json` 里的原始字段作证据，不能只用汇总语言**（E4/E8 教训）；如果自己的汇报里要"挑数字讲故事"，必须同时如实说明报告里 `PASS`/`verdict` 字段的真实值以及为什么这次汇报的表述和这个字段可能不一致（E11 教训）。
 4. **`eval_results/`、`*.png`、截图目录等结果类产物一律不进 git 版本库**——它们体积大、会不断变化、且不是"证明代码正确性"所必需的东西（代码本身 + 复现命令就足够任何人重新生成它们）。如果发现 `.gitignore` 规则形同虚设（例如文件在写规则之前就已经被 `git add` 过，导致 ignore 不生效），要用 `git rm -r --cached <path>` 把历史遗留的追踪状态清掉，而不是只加 `.gitignore` 条目就假设问题解决了。
 
@@ -473,3 +473,40 @@ E10 指出 GUI 执行器和 GenUI 解码器从未真实实现。用户确认的�
 **4. TaskVM 现在的 A2UI 集成方式 vs 官方标准实现方式的差距（已调研，未修复）**：`taskvm/benchmark/a2ui_spec.py::A2UI_V09_SPEC` 是从官方文档手工转录成一段自然语言 system prompt，语义遵循协议但**不是官方 SDK 集成**。已下载官方 `agent_sdks/python/a2ui_agent/agent_development.md`（存档于 `docs/references/A2UI-protocol-spec/v0_9/agent_sdk_reference/`），确认官方标准做法（也是纯 in-context prompt engineering，没有专门训练/微调模型，这一点上 TaskVM 的路线是对的）比 TaskVM 现在的实现多出三样东西：a) `A2uiSchemaManager.generate_system_prompt()` 自动注入**正式 JSON Schema**（TaskVM 现在是手写文字描述 schema，不是真 schema）；b) 自动注入 **few-shot examples**（TaskVM 现在的 system prompt 里只有1个示例硬编码在文本里，官方是从 `catalogs/basic/examples/` 目录动态装载）；c) `A2uiCatalog.validator.validate()` 做**运行时 schema 校验 + 自动修复简单错误**（TaskVM 现在完全没有对 `genui_decoder.py`/`compiler.py` 吐出的 A2UI 消息做 schema 校验，只有 `validate_binding` 校验 `task_binding` 部分，A2UI 部分校验薄弱）。这三点是 harness/prompt 层面性价比最高的优化点，不需要碰模型能力就能提升生成质量和可调试性。
 
 **5. MobileGym 迁移范围确认（用户已拍板，要求"完全对齐主线solid程度，不计工作量"）**：现状 `taskvm/harness/mobilegym_bridge.py::_send_message` 是硬编码固定手势序列（`open_app→深链→focus→type_text→ENTER`），**不经过** `taskvm/execution/gui_executor.py` 的真实grounding循环；回退路径是诚实返回 HTTP 409（因为微信没有撤回UI），这个"诚实"结论本身是对的，但达成这个结论的路径应该是"让 gui_executor 真的去尝试找撤销手势、真的找不到再output fail"，而不是"程序员自己判断没有UI于是直接硬编码409"——这两者在**结论**上一样，但在**证明这个结论的方法论严谨度**上不同，后者更符合 E7 定的"诚实地展示一个局限，优于用捷径掩盖过程"的标准。binding discovery 这次已经补了一次真实调用（`run_mobilegym_killtest.py` 的 `binding_discovery_samples`），但目前 `f1=0`（未命中 alipay→wechat 绑定），尚未诊断具体是 prompt 问题还是这个substrate的渲染观测本身对模型不友好。
+
+---
+
+## E13 — Task1 修复 var_id 匹配根因 + Task2 重试效率优化代码就位（本轮 coding agent 执行）
+
+**[session: 本轮 coding agent 执行交接任务清单，2026-08-11]**
+
+### Task1：var_id 匹配根因修复（E11/E12 遗留问题1，已修复 + 验证 PASS）
+
+**根因确认（读完 `taskvm/task_state/dependency_graph.py`，E12 说本轮未读，已补读）**：`propagate(edit, binding)` 第30行调 `binding.bindings_for(edit['var_id'])`，而 `bindings_for`（`entity_binding.py`）按 `v.get("var_id") == var_id` **精确字符串匹配**。`run_w1_killtest.py:111` 用 GT `fixture.user_edit.var_id`（=`launch_doc_location`）去 compiler 输出的 binding（变量名 `document_folder`）里找，找不到 → `propagate` 返回空 → `compile_patch` 产 0 ops → `dispatch.n_ops=0` → GUI 执行器从未触发。E12 诊断完全正确，根因在 `patch_compiler.py::compile_patch` + `dependency_graph.py::propagate` 的精确字符串匹配 + 更上游 `run_w1_killtest.py` "永远拿 GT var_id 驱动 patch"的设计。
+
+**修复方案（E12 推荐方向 a，更符合"compiler 独立发现、不依赖GT"的设计哲学）**：
+1. 新增 `taskvm/verifier/round_trip_checks.py::map_gt_var_id_to_compiler(gt_var_id, fixture, compiler_binding)` —— 复用 `binding_accuracy` 里 `f1_varid_semantic` 的 binding-set 对齐逻辑（两 var_id 绑定相同的 `(app,entity,operator)` 三元组集合 → 匹配）。单元测试通过：GT `launch_doc_location` → compiler `document_folder`；compiler 真没找到 → None。
+2. `run_w1_killtest.py::run_one_sample` 真实 compiler 模式（非 mock）下，先映射 GT var_id → compiler var_id，用 compiler var_id 驱动 `compile_patch`。mock/neg-control 路径不变（GT var_id == GT binding var_id）。
+3. 映射结果透明记录到 sample record 的 `var_id_mapping` 字段（`{gt_var_id, compiler_var_id, mapped}`）—— 不隐藏任何细节，E11 教训。
+
+**验证（`eval_results/p5_full_killtest_20260811_143425.json`，真实 GUI 模式，2 samples）**：
+- `dispatch.n_ops=1`（修复前 0）✓ GUI 执行器真的被触发去操作 drive 页面
+- `score=1.0`（修复前 0.3），`PASS=True`，`verdict=PASS`，`neg=0.3`（GUI-free，verifier honest）✓
+- `var_id_mapping={gt: launch_doc_location, compiler: document_folder, mapped: True}` ✓ 透明记录
+- `f1_varid_semantic=1.0`（语义正确）✓
+- **诚实标注**：`binding_f1=0.0`（byte-exact var_id 仍不同）—— 这是对的诊断值不是失败，语义匹配+round-trip 都过了；如实报告，不用 mock 的 1.0 掩盖（E11 教训）。
+
+### Task2：gui_executor 重试效率优化（E12 遗留问题2，代码已就位，待效率验证）
+
+E12 根因：重试从头完整重走表单流程（View→Edit→改字段→Review→Confirm），不是从失败点续跑，导致 9 写操作 144 次调用（平均 16 次/操作）。代码改造（已就位，语法/接线检查通过，**效率验证待下一轮跑 P5 对比调用次数**）：
+1. `gui_executor.py::_predict` 新增 `prev_screenshot` 参数（方向 a）：重试时把上次失败时刻的截图作为第二张图带入 prompt，让模型看到"上次卡在哪"，不必从文字 history 重新推断。双图调用走 `complete_vision` 手动拼 content blocks（`complete_vision_json` 只支持单图）。
+2. `gui_executor.py::execute`/`gui_write` 新增 `prev_screenshot` + `resume_url` 参数（方向 b）：重试时 `goto(resume_url)` 直接进编辑表单页（而非列表页），跳过"点 View/进入 Edit"这两步。trace 新增 `last_screenshot` 字段供下一次重试取用。
+3. `state_adapter.py::_mutate_via_gui` 重试循环：每次失败后取 `trace["last_screenshot"]` + 算 `_edit_form_url(sid, eid)`（per-app kind: calendar→event, taskboard→task, drive→file, mail→message, outlook_cal→appointment），传给下一次 `gui_write`。
+4. instruction 重试提示（已有，`_build_instruction(attempt>1)`）：明确告诉模型"上次没完成，确保点 CONFIRM 不是 Cancel"。
+
+**待验证**：重跑 P5 对比平均调用次数（目标 16→8-10），成功率不下降。下一轮 commit Task2 的验证结果。
+
+### 诚实状态（E11 教训：不挑数字讲故事）
+- Task1 真实 GUI 模式 doc_handoff **真的 PASS 了**（2/2 score=1.0，n_ops=1，var_id 映射透明）。
+- Task2 代码就位但**效率验证还没做**——不声称"已优化"，只声称"代码已改造，待对比验证"。
+- binding_f1=0.0 是 byte-exact 诊断值（语义匹配 1.0），如实报告不掩盖。
