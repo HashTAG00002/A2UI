@@ -558,3 +558,23 @@ E12 根因：重试从头完整重走表单流程（View→Edit→改字段→Re
 - repair retry 目前**未能成功修复**（模型在 catalog allOf 严格度下难以一次修对）——如实报告，不假装 repair 成功。
 
 **遗留**：要达到 validation.valid=True，需要更精细的 prompt（注入完整 catalog $defs 而非摘要）或更宽松的校验（只校验 message 结构不校验组件 allOf）。本轮交付了"formal schema + catalog + 校验 + repair 全部接入"，校验真实生效并捕获了真实问题——这是 Task6 的核心；让模型输出完全合规 catalog 是 follow-on（记入 .mrules）。
+
+### Task7：MobileGym binding f1=0 诊断结论（不是 binding 发现失败，是 var_id 标签差异 —— 与 Task1 同类）
+
+交接要求：诊断 `eval_results/mobilegym_killtest_20260810_231247.json` 里 binding_discovery f1=0 的具体原因（prompt 问题 vs 观测格式问题）。
+
+**诊断结论：既不是 prompt 问题也不是观测格式问题 —— 是 var_id 标签差异（与 Task1/doc_handoff 完全同类），模型其实正确发现了绑定。**
+
+证据（`binding_discovery_samples` 两个样本）：
+- sample 1: `got=['message_text','wechat','wxid_huangyong_demo','send_message']`，GT=`['expense_summary','wechat','wxid_huangyong_demo','send_message']`。app=wechat、entity=wxid_huangyong_demo、operator=send_message **三个三元组全对**，只 var_id 标签不同（`message_text` vs `expense_summary`）。
+- sample 2: `got=['message_to_huang_yong',...]`（同上，三元组全对，var_id 标签不同）。
+- `f1=0.0`（byte-exact var_id），但 `f1_varid_semantic=1.0`、`f1_triples=1.0`、`semantic_alignment.gt_vars_matched=['expense_summary']` —— **语义匹配满分**。
+- `compile_ok=True`、`binding_errors=[]` —— compiler 正常解析、binding 结构合法。
+
+**含义**：
+1. mobilegym_bridge.py 的 html_view 观测格式**对模型是友好的**（模型从渲染 DOM 正确发现了 wechat 聊天 + send_message operator + 正确 entity_id）——不需要改观测格式。
+2. compiler system prompt 对这个 substrate **够友好**（模型理解了"发消息"这个操作对应 send_message）——不需要改 prompt。
+3. f1=0 是 byte-exact var_id 指标的过度严格（var_id 是 free-form model-chosen label，spec 不规定具体字符串），和 Task1 的 doc_handoff（`document_folder` vs `launch_doc_location`）是同一类问题。`f1_varid_semantic=1.0` 是正确的 primary signal。
+4. **不需要任何代码修复** —— Task1 的 `map_gt_var_id_to_compiler` 已经解决了"patch 阶段因 var_id 字符串不匹配而 0 ops"的问题（如果 mobilegym killtest 走 patch 路径的话）；binding_discovery 的 f1=0 只是一个诊断值，不影响实际链路（mobilegym 的 round_trip_and_rollback 用 GT binding 驱动，不走 compiler）。
+
+**诚实标注**：本轮没改任何代码（诊断结论是"无需修复"），但这个诊断本身有价值——避免下一个 agent 误以为是 prompt/观测问题去改 mobilegym_bridge.py 或 compiler prompt，浪费工作量。真正的 f1=0 根因是指标口径，已在 E11/E13(Task1) 记录。
