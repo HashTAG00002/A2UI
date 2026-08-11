@@ -1,0 +1,264 @@
+{
+  "ts": "20260810_230950",
+  "task_id": "top3_expense_to_wechat",
+  "model": "gpt-5.6-sol",
+  "n_samples": 3,
+  "cost": {
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "total_reasoning_tokens": 0,
+    "total_cached_tokens": 0,
+    "total_tokens": 0,
+    "n_llm_calls": 0,
+    "calls": []
+  },
+  "summary": {
+    "n_samples": 3,
+    "round_trip_scores": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "round_trip_mean": 1.0,
+    "round_trip_pass_count": 3,
+    "round_trip_pass_threshold": 0.85,
+    "honest_irreversibility_pass_count": 3,
+    "honest_irreversibility_mean_fidelity": 0.0,
+    "neg_control_score": 0.3,
+    "neg_control_passed": true,
+    "neg_control_max": 0.3,
+    "PASS": true
+  },
+  "verdict": "PASS — write-happened (round_trip mean 1.0, ≥2/3 samples ≥0.85) AND rollback honestly-failed+verified (fidelity 0.0, partial_failure on 3/3, message-still-there confirmed) AND neg≤0.3. This proves HONEST IRREVERSIBILITY, NOT reversible compensation.",
+  "round_trip_and_rollback_samples": [
+    {
+      "task_id": "top3_expense_to_wechat",
+      "sample": 0,
+      "sid": "top3_expense_to_wechat_mg_s0_90284",
+      "round_trip": {
+        "score": 1.0,
+        "changed_fraction": 1.0,
+        "untouched_fraction": 1.0,
+        "resynced_fraction": 1.0,
+        "non_interference_passed": true,
+        "hard_fail": false
+      },
+      "dispatch": {
+        "n_ops": 1,
+        "n_applied": 1,
+        "all_applied": true,
+        "ops": [
+          {
+            "app": "wechat",
+            "entity_id": "wxid_huangyong_demo",
+            "operator": "send_message",
+            "value": "本月top3支出: 520, 168, 42。省着点。",
+            "applied": true,
+            "error": null
+          }
+        ]
+      },
+      "honest_irreversibility": {
+        "saga_id": "saga_1",
+        "n_targets": 1,
+        "n_reverted": 0,
+        "fully_reverted": false,
+        "partial_failure": true,
+        "saga_errors": [
+          "wechat.wxid_huangyong_demo: 409 Client Error: Conflict for url: http://localhost:3019/api/wechat/top3_expense_to_wechat_mg_s0_90284/wxid_huangyong_demo"
+        ],
+        "rollback_fidelity_score": 0.3,
+        "fidelity": 0.0,
+        "non_interference_on_rollback": true,
+        "message_still_there_post_undo": true,
+        "n_restored": 0,
+        "not_restored": [
+          {
+            "app": "wechat",
+            "entity_id": "wxid_huangyong_demo",
+            "field": "last_message",
+            "pre": {
+              "id": "wxid_huangyong_demo",
+              "peer_name": "黄勇",
+              "peer_wxid": "wxid_huangyong_demo",
+              "n_messages": 0,
+              "last_message": "",
+              "messages": ""
+            },
+            "post_undo": {
+              "id": "wxid_huangyong_demo",
+              "peer_name": "黄勇",
+              "peer_wxid": "wxid_huangyong_demo",
+              "n_messages": 2,
+              "last_message": "本月top3支出: 520, 168, 42。省着点。",
+              "messages": "本月top3支出: 520, 168, 42。省着点。"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "task_id": "top3_expense_to_wechat",
+      "sample": 1,
+      "sid": "top3_expense_to_wechat_mg_s1_9865",
+      "round_trip": {
+        "score": 1.0,
+        "changed_fraction": 1.0,
+        "untouched_fraction": 1.0,
+        "resynced_fraction": 1.0,
+        "non_interference_passed": true,
+        "hard_fail": false
+      },
+      "dispatch": {
+        "n_ops": 1,
+        "n_applied": 1,
+        "all_applied": true,
+        "ops": [
+          {
+            "app": "wechat",
+            "entity_id": "wxid_huangyong_demo",
+            "operator": "send_message",
+            "value": "本月top3支出: 520, 168, 42。省着点。",
+            "applied": true,
+            "error": null
+          }
+        ]
+      },
+      "honest_irreversibility": {
+        "saga_id": "saga_1",
+        "n_targets": 1,
+        "n_reverted": 0,
+        "fully_reverted": false,
+        "partial_failure": true,
+        "saga_errors": [
+          "wechat.wxid_huangyong_demo: 409 Client Error: Conflict for url: http://localhost:3019/api/wechat/top3_expense_to_wechat_mg_s1_9865/wxid_huangyong_demo"
+        ],
+        "rollback_fidelity_score": 0.3,
+        "fidelity": 0.0,
+        "non_interference_on_rollback": true,
+        "message_still_there_post_undo": true,
+        "n_restored": 0,
+        "not_restored": [
+          {
+            "app": "wechat",
+            "entity_id": "wxid_huangyong_demo",
+            "field": "last_message",
+            "pre": {
+              "id": "wxid_huangyong_demo",
+              "peer_name": "黄勇",
+              "peer_wxid": "wxid_huangyong_demo",
+              "n_messages": 0,
+              "last_message": "",
+              "messages": ""
+            },
+            "post_undo": {
+              "id": "wxid_huangyong_demo",
+              "peer_name": "黄勇",
+              "peer_wxid": "wxid_huangyong_demo",
+              "n_messages": 2,
+              "last_message": "本月top3支出: 520, 168, 42。省着点。",
+              "messages": "本月top3支出: 520, 168, 42。省着点。"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "task_id": "top3_expense_to_wechat",
+      "sample": 2,
+      "sid": "top3_expense_to_wechat_mg_s2_29261",
+      "round_trip": {
+        "score": 1.0,
+        "changed_fraction": 1.0,
+        "untouched_fraction": 1.0,
+        "resynced_fraction": 1.0,
+        "non_interference_passed": true,
+        "hard_fail": false
+      },
+      "dispatch": {
+        "n_ops": 1,
+        "n_applied": 1,
+        "all_applied": true,
+        "ops": [
+          {
+            "app": "wechat",
+            "entity_id": "wxid_huangyong_demo",
+            "operator": "send_message",
+            "value": "本月top3支出: 520, 168, 42。省着点。",
+            "applied": true,
+            "error": null
+          }
+        ]
+      },
+      "honest_irreversibility": {
+        "saga_id": "saga_1",
+        "n_targets": 1,
+        "n_reverted": 0,
+        "fully_reverted": false,
+        "partial_failure": true,
+        "saga_errors": [
+          "wechat.wxid_huangyong_demo: 409 Client Error: Conflict for url: http://localhost:3019/api/wechat/top3_expense_to_wechat_mg_s2_29261/wxid_huangyong_demo"
+        ],
+        "rollback_fidelity_score": 0.3,
+        "fidelity": 0.0,
+        "non_interference_on_rollback": true,
+        "message_still_there_post_undo": true,
+        "n_restored": 0,
+        "not_restored": [
+          {
+            "app": "wechat",
+            "entity_id": "wxid_huangyong_demo",
+            "field": "last_message",
+            "pre": {
+              "id": "wxid_huangyong_demo",
+              "peer_name": "黄勇",
+              "peer_wxid": "wxid_huangyong_demo",
+              "n_messages": 0,
+              "last_message": "",
+              "messages": ""
+            },
+            "post_undo": {
+              "id": "wxid_huangyong_demo",
+              "peer_name": "黄勇",
+              "peer_wxid": "wxid_huangyong_demo",
+              "n_messages": 2,
+              "last_message": "本月top3支出: 520, 168, 42。省着点。",
+              "messages": "本月top3支出: 520, 168, 42。省着点。"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "binding_discovery_samples": [],
+  "neg_control": {
+    "task_id": "top3_expense_to_wechat",
+    "neg_control": true,
+    "broken": "noop",
+    "sid": "top3_expense_to_wechat_mg_neg_47732",
+    "score": 0.3,
+    "changed_fraction": 0.0,
+    "untouched_fraction": 1.0,
+    "resynced_fraction": 0.0,
+    "passed": true,
+    "dispatch": {
+      "n_ops": 1,
+      "n_applied": 0,
+      "all_applied": false,
+      "ops": [
+        {
+          "app": "wechat",
+          "entity_id": "wxid_huangyong_demo",
+          "operator": "send_message",
+          "value": "本月top3支出: 520, 168, 42。省着点。",
+          "applied": false,
+          "error": "neg-control: noop"
+        }
+      ]
+    }
+  },
+  "honest_framing": {
+    "what_PASS_means": "write-happened (round_trip≥0.85) AND rollback honestly-failed+verified (partial_failure ∧ fidelity==0.0 ∧ message_still_there ∧ non_interference_on_rollback) AND neg≤0.3. This is HONEST IRREVERSIBILITY, NOT reversible compensation.",
+    "mobilegym_line_is": "a stress test of the abstraction's generality on a new write-restricted substrate — NOT a positive proof of any VM property 1-5 (see .mrules E9.3)."
+  }
+}

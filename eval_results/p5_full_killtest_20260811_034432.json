@@ -1,0 +1,1901 @@
+{
+  "ts": "20260811_034432",
+  "model": "gpt-5.6-sol",
+  "mock": false,
+  "n_samples_per_task": 3,
+  "execution_mode": "gui_agent",
+  "cost": {
+    "total_input_tokens": 258510,
+    "total_output_tokens": 9644,
+    "total_reasoning_tokens": 6320,
+    "total_cached_tokens": 0,
+    "total_tokens": 268154,
+    "n_llm_calls": 147,
+    "calls": [
+      {
+        "prompt_tokens": 9438,
+        "completion_tokens": 350,
+        "reasoning_tokens": 130,
+        "cached_tokens": 0,
+        "tool": "compile_binding",
+        "model": "gpt-5.6-sol",
+        "role": "compiler"
+      },
+      {
+        "prompt_tokens": 1445,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1476,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1496,
+        "completion_tokens": 26,
+        "reasoning_tokens": 5,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1516,
+        "completion_tokens": 31,
+        "reasoning_tokens": 10,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1536,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1556,
+        "completion_tokens": 30,
+        "reasoning_tokens": 9,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1582,
+        "completion_tokens": 87,
+        "reasoning_tokens": 67,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1596,
+        "completion_tokens": 212,
+        "reasoning_tokens": 191,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1622,
+        "completion_tokens": 57,
+        "reasoning_tokens": 37,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1636,
+        "completion_tokens": 40,
+        "reasoning_tokens": 16,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1654,
+        "completion_tokens": 270,
+        "reasoning_tokens": 249,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1672,
+        "completion_tokens": 61,
+        "reasoning_tokens": 40,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1692,
+        "completion_tokens": 114,
+        "reasoning_tokens": 93,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1718,
+        "completion_tokens": 141,
+        "reasoning_tokens": 120,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1744,
+        "completion_tokens": 124,
+        "reasoning_tokens": 103,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1770,
+        "completion_tokens": 113,
+        "reasoning_tokens": 92,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1796,
+        "completion_tokens": 96,
+        "reasoning_tokens": 75,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1814,
+        "completion_tokens": 86,
+        "reasoning_tokens": 65,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1493,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1524,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1544,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1564,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1584,
+        "completion_tokens": 32,
+        "reasoning_tokens": 11,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1604,
+        "completion_tokens": 45,
+        "reasoning_tokens": 24,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1624,
+        "completion_tokens": 41,
+        "reasoning_tokens": 20,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1642,
+        "completion_tokens": 241,
+        "reasoning_tokens": 221,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1656,
+        "completion_tokens": 63,
+        "reasoning_tokens": 44,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1669,
+        "completion_tokens": 42,
+        "reasoning_tokens": 21,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1690,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1712,
+        "completion_tokens": 9,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1447,
+        "completion_tokens": 53,
+        "reasoning_tokens": 32,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1495,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1515,
+        "completion_tokens": 38,
+        "reasoning_tokens": 17,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1533,
+        "completion_tokens": 166,
+        "reasoning_tokens": 146,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1547,
+        "completion_tokens": 56,
+        "reasoning_tokens": 37,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1560,
+        "completion_tokens": 37,
+        "reasoning_tokens": 16,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1581,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1603,
+        "completion_tokens": 9,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1447,
+        "completion_tokens": 56,
+        "reasoning_tokens": 35,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1477,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1497,
+        "completion_tokens": 38,
+        "reasoning_tokens": 17,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1515,
+        "completion_tokens": 103,
+        "reasoning_tokens": 83,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1529,
+        "completion_tokens": 18,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1547,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1568,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1590,
+        "completion_tokens": 9,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 9438,
+        "completion_tokens": 375,
+        "reasoning_tokens": 151,
+        "cached_tokens": 0,
+        "tool": "compile_binding",
+        "model": "gpt-5.6-sol",
+        "role": "compiler"
+      },
+      {
+        "prompt_tokens": 1445,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1476,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1496,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1516,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1536,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1556,
+        "completion_tokens": 30,
+        "reasoning_tokens": 9,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1574,
+        "completion_tokens": 203,
+        "reasoning_tokens": 183,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1588,
+        "completion_tokens": 52,
+        "reasoning_tokens": 33,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1619,
+        "completion_tokens": 36,
+        "reasoning_tokens": 15,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1640,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1669,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1691,
+        "completion_tokens": 9,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1447,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1477,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1497,
+        "completion_tokens": 55,
+        "reasoning_tokens": 34,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1523,
+        "completion_tokens": 79,
+        "reasoning_tokens": 59,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1537,
+        "completion_tokens": 18,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1555,
+        "completion_tokens": 59,
+        "reasoning_tokens": 38,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1576,
+        "completion_tokens": 135,
+        "reasoning_tokens": 114,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1598,
+        "completion_tokens": 101,
+        "reasoning_tokens": 82,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1611,
+        "completion_tokens": 126,
+        "reasoning_tokens": 105,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1637,
+        "completion_tokens": 90,
+        "reasoning_tokens": 70,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1651,
+        "completion_tokens": 95,
+        "reasoning_tokens": 71,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1669,
+        "completion_tokens": 26,
+        "reasoning_tokens": 5,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1690,
+        "completion_tokens": 77,
+        "reasoning_tokens": 56,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1711,
+        "completion_tokens": 47,
+        "reasoning_tokens": 26,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1737,
+        "completion_tokens": 101,
+        "reasoning_tokens": 81,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1751,
+        "completion_tokens": 47,
+        "reasoning_tokens": 23,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1769,
+        "completion_tokens": 27,
+        "reasoning_tokens": 6,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1790,
+        "completion_tokens": 226,
+        "reasoning_tokens": 207,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1495,
+        "completion_tokens": 64,
+        "reasoning_tokens": 43,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1525,
+        "completion_tokens": 26,
+        "reasoning_tokens": 5,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1545,
+        "completion_tokens": 29,
+        "reasoning_tokens": 8,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1571,
+        "completion_tokens": 69,
+        "reasoning_tokens": 49,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1585,
+        "completion_tokens": 18,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1603,
+        "completion_tokens": 28,
+        "reasoning_tokens": 7,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1624,
+        "completion_tokens": 73,
+        "reasoning_tokens": 52,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1645,
+        "completion_tokens": 39,
+        "reasoning_tokens": 18,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1671,
+        "completion_tokens": 61,
+        "reasoning_tokens": 40,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1697,
+        "completion_tokens": 66,
+        "reasoning_tokens": 45,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1723,
+        "completion_tokens": 45,
+        "reasoning_tokens": 24,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1749,
+        "completion_tokens": 52,
+        "reasoning_tokens": 31,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1775,
+        "completion_tokens": 80,
+        "reasoning_tokens": 59,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1793,
+        "completion_tokens": 229,
+        "reasoning_tokens": 208,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1811,
+        "completion_tokens": 50,
+        "reasoning_tokens": 31,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1824,
+        "completion_tokens": 39,
+        "reasoning_tokens": 18,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1845,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1867,
+        "completion_tokens": 9,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1447,
+        "completion_tokens": 32,
+        "reasoning_tokens": 11,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1477,
+        "completion_tokens": 26,
+        "reasoning_tokens": 5,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1498,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1518,
+        "completion_tokens": 32,
+        "reasoning_tokens": 11,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1536,
+        "completion_tokens": 68,
+        "reasoning_tokens": 48,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1550,
+        "completion_tokens": 18,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1568,
+        "completion_tokens": 27,
+        "reasoning_tokens": 6,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1589,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1611,
+        "completion_tokens": 9,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 9438,
+        "completion_tokens": 388,
+        "reasoning_tokens": 175,
+        "cached_tokens": 0,
+        "tool": "compile_binding",
+        "model": "gpt-5.6-sol",
+        "role": "compiler"
+      },
+      {
+        "prompt_tokens": 1445,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1476,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1496,
+        "completion_tokens": 51,
+        "reasoning_tokens": 30,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1522,
+        "completion_tokens": 63,
+        "reasoning_tokens": 43,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1536,
+        "completion_tokens": 18,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1554,
+        "completion_tokens": 191,
+        "reasoning_tokens": 170,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1569,
+        "completion_tokens": 193,
+        "reasoning_tokens": 173,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1583,
+        "completion_tokens": 162,
+        "reasoning_tokens": 141,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1609,
+        "completion_tokens": 120,
+        "reasoning_tokens": 99,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1635,
+        "completion_tokens": 134,
+        "reasoning_tokens": 115,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1648,
+        "completion_tokens": 188,
+        "reasoning_tokens": 167,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1666,
+        "completion_tokens": 60,
+        "reasoning_tokens": 41,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1679,
+        "completion_tokens": 38,
+        "reasoning_tokens": 17,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1700,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1722,
+        "completion_tokens": 9,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1447,
+        "completion_tokens": 28,
+        "reasoning_tokens": 7,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1477,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1497,
+        "completion_tokens": 38,
+        "reasoning_tokens": 17,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1523,
+        "completion_tokens": 66,
+        "reasoning_tokens": 46,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1537,
+        "completion_tokens": 18,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1555,
+        "completion_tokens": 33,
+        "reasoning_tokens": 12,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1576,
+        "completion_tokens": 145,
+        "reasoning_tokens": 126,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1589,
+        "completion_tokens": 29,
+        "reasoning_tokens": 8,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1610,
+        "completion_tokens": 167,
+        "reasoning_tokens": 148,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1623,
+        "completion_tokens": 244,
+        "reasoning_tokens": 223,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1641,
+        "completion_tokens": 74,
+        "reasoning_tokens": 53,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1667,
+        "completion_tokens": 81,
+        "reasoning_tokens": 60,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1685,
+        "completion_tokens": 163,
+        "reasoning_tokens": 144,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1698,
+        "completion_tokens": 49,
+        "reasoning_tokens": 30,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1711,
+        "completion_tokens": 40,
+        "reasoning_tokens": 19,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1732,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1754,
+        "completion_tokens": 9,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1447,
+        "completion_tokens": 54,
+        "reasoning_tokens": 33,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1477,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1497,
+        "completion_tokens": 28,
+        "reasoning_tokens": 7,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1515,
+        "completion_tokens": 117,
+        "reasoning_tokens": 97,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1529,
+        "completion_tokens": 18,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1547,
+        "completion_tokens": 27,
+        "reasoning_tokens": 6,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1568,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1590,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1612,
+        "completion_tokens": 9,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      }
+    ]
+  },
+  "summaries": [
+    {
+      "task_id": "release_reschedule",
+      "n_samples": 3,
+      "scores": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "mean_score": 1.0,
+      "n_pass_score": 3,
+      "pass_threshold": 0.85,
+      "binding_f1_mean": 1.0,
+      "non_interference_ok_on_passing": true,
+      "neg_control_score": 0.3,
+      "neg_control_passed": true,
+      "neg_control_max": 0.3,
+      "no_handwritten_binding": true,
+      "PASS": true,
+      "which_link_broke_counts": {
+        "ok": 3
+      }
+    }
+  ],
+  "samples": [
+    {
+      "task_id": "release_reschedule",
+      "sample": 0,
+      "model": "gpt-5.6-sol",
+      "mock": false,
+      "compile_ok": true,
+      "compile_error": null,
+      "binding_valid": true,
+      "binding_errors": [],
+      "a2ui_valid": true,
+      "a2ui_errors": [],
+      "binding_accuracy": {
+        "n_gt": 3,
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "f1_varid_semantic": 1.0,
+        "f1_triples": 1.0,
+        "semantic_alignment": {
+          "gt_vars_matched": [
+            "release_date"
+          ],
+          "gt_vars_unmatched": [],
+          "model_vars_matched": [
+            "release_date"
+          ],
+          "model_vars_unmatched": []
+        },
+        "gt": [
+          [
+            "release_date",
+            "calendar",
+            "E1",
+            "move_event"
+          ],
+          [
+            "release_date",
+            "taskboard",
+            "T1",
+            "set_deadline"
+          ],
+          [
+            "release_date",
+            "taskboard",
+            "T2",
+            "set_deadline"
+          ]
+        ],
+        "got": [
+          [
+            "release_date",
+            "calendar",
+            "E1",
+            "move_event"
+          ],
+          [
+            "release_date",
+            "taskboard",
+            "T1",
+            "set_deadline"
+          ],
+          [
+            "release_date",
+            "taskboard",
+            "T2",
+            "set_deadline"
+          ]
+        ]
+      },
+      "dispatch": {
+        "n_ops": 3,
+        "n_applied": 3,
+        "all_applied": true,
+        "ops": [
+          {
+            "app": "calendar",
+            "entity_id": "E1",
+            "operator": "move_event",
+            "value": "2026-08-18",
+            "applied": true,
+            "error": null
+          },
+          {
+            "app": "taskboard",
+            "entity_id": "T1",
+            "operator": "set_deadline",
+            "value": "2026-08-18",
+            "applied": true,
+            "error": null
+          },
+          {
+            "app": "taskboard",
+            "entity_id": "T2",
+            "operator": "set_deadline",
+            "value": "2026-08-18",
+            "applied": true,
+            "error": null
+          }
+        ]
+      },
+      "round_trip": {
+        "score": 1.0,
+        "changed_fraction": 1.0,
+        "untouched_fraction": 1.0,
+        "resynced_fraction": 1.0,
+        "non_interference_passed": true,
+        "hard_fail": false,
+        "info": {
+          "task_id": "release_reschedule",
+          "changed": {
+            "n_bindings": 3,
+            "n_met": 3,
+            "met": [
+              {
+                "var_id": "release_date",
+                "app": "calendar",
+                "entity_id": "E1",
+                "field": "date",
+                "operator": "move_event",
+                "expected": "2026-08-18",
+                "actual": "2026-08-18",
+                "met": true
+              },
+              {
+                "var_id": "release_date",
+                "app": "taskboard",
+                "entity_id": "T1",
+                "field": "deadline",
+                "operator": "set_deadline",
+                "expected": "2026-08-18",
+                "actual": "2026-08-18",
+                "met": true
+              },
+              {
+                "var_id": "release_date",
+                "app": "taskboard",
+                "entity_id": "T2",
+                "field": "deadline",
+                "operator": "set_deadline",
+                "expected": "2026-08-18",
+                "actual": "2026-08-18",
+                "met": true
+              }
+            ],
+            "missed": []
+          },
+          "untouched": {
+            "n_protected": 3,
+            "n_violated": 0,
+            "violated": []
+          },
+          "resynced": {
+            "var_id": "release_date",
+            "expected_new": "2026-08-18",
+            "real_post_value": "2026-08-18",
+            "rendered_line": "release_date [release_date] = 2026-08-18",
+            "met": true
+          },
+          "hard_fail": false,
+          "weights": {
+            "changed": 0.5,
+            "untouched": 0.3,
+            "resynced": 0.2
+          }
+        }
+      },
+      "which_link_broke": null,
+      "rendered_surface": "# Task: release_reschedule\n\n✎ 发布日期  [release_date] = 2026-08-14\n    → calendar.E1.date  (operator: move_event)\n    → taskboard.T1.deadline  (operator: set_deadline)\n    → taskboard.T2.deadline  (operator: set_deadline)\n",
+      "raw_compiler_output": "{\"text_response\":\"已将当前发布日期及其同步依赖编译为共享变量：发布会议 E1 与任务 T1、T2 当前均为 2026-08-14。\",\"a2ui\":[],\"task_binding\":{\"task_id\":\"release_reschedule\",\"variables\":[{\"var_id\":\"release_date\",\"label\":\"发布日期\",\"value\":\"2026-08-14\",\"editable\":true,\"bindings\":[{\"app\":\"calendar\",\"entity_id\":\"E1\",\"field\":\"date\",\"operator\":\"move_event\"},{\"app\":\"taskboard\",\"entity_id\":\"T1\",\"field\":\"deadline\",\"operator\":\"set_deadline\"},{\"app\":\"taskboard\",\"entity_id\":\"T2\",\"field\":\"deadline\",\"operator\":\"set_deadline\"}]}],\"dependencies\":[{\"from_var\":\"release_date\",\"to_entity\":{\"app\":\"taskboard\",\"entity_id\":\"T1\"},\"relation\":\"deadline_tracks_release_date\"},{\"from_var\":\"release_date\",\"to_entity\":{\"app\":\"taskboard\",\"entity_id\":\"T2\"},\"relation\":\"deadline_tracks_release_date\"}]}}"
+    },
+    {
+      "task_id": "release_reschedule",
+      "sample": 1,
+      "model": "gpt-5.6-sol",
+      "mock": false,
+      "compile_ok": true,
+      "compile_error": null,
+      "binding_valid": true,
+      "binding_errors": [],
+      "a2ui_valid": true,
+      "a2ui_errors": [],
+      "binding_accuracy": {
+        "n_gt": 3,
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "f1_varid_semantic": 1.0,
+        "f1_triples": 1.0,
+        "semantic_alignment": {
+          "gt_vars_matched": [
+            "release_date"
+          ],
+          "gt_vars_unmatched": [],
+          "model_vars_matched": [
+            "release_date"
+          ],
+          "model_vars_unmatched": []
+        },
+        "gt": [
+          [
+            "release_date",
+            "calendar",
+            "E1",
+            "move_event"
+          ],
+          [
+            "release_date",
+            "taskboard",
+            "T1",
+            "set_deadline"
+          ],
+          [
+            "release_date",
+            "taskboard",
+            "T2",
+            "set_deadline"
+          ]
+        ],
+        "got": [
+          [
+            "release_date",
+            "calendar",
+            "E1",
+            "move_event"
+          ],
+          [
+            "release_date",
+            "taskboard",
+            "T1",
+            "set_deadline"
+          ],
+          [
+            "release_date",
+            "taskboard",
+            "T2",
+            "set_deadline"
+          ]
+        ]
+      },
+      "dispatch": {
+        "n_ops": 3,
+        "n_applied": 3,
+        "all_applied": true,
+        "ops": [
+          {
+            "app": "calendar",
+            "entity_id": "E1",
+            "operator": "move_event",
+            "value": "2026-08-18",
+            "applied": true,
+            "error": null
+          },
+          {
+            "app": "taskboard",
+            "entity_id": "T1",
+            "operator": "set_deadline",
+            "value": "2026-08-18",
+            "applied": true,
+            "error": null
+          },
+          {
+            "app": "taskboard",
+            "entity_id": "T2",
+            "operator": "set_deadline",
+            "value": "2026-08-18",
+            "applied": true,
+            "error": null
+          }
+        ]
+      },
+      "round_trip": {
+        "score": 1.0,
+        "changed_fraction": 1.0,
+        "untouched_fraction": 1.0,
+        "resynced_fraction": 1.0,
+        "non_interference_passed": true,
+        "hard_fail": false,
+        "info": {
+          "task_id": "release_reschedule",
+          "changed": {
+            "n_bindings": 3,
+            "n_met": 3,
+            "met": [
+              {
+                "var_id": "release_date",
+                "app": "calendar",
+                "entity_id": "E1",
+                "field": "date",
+                "operator": "move_event",
+                "expected": "2026-08-18",
+                "actual": "2026-08-18",
+                "met": true
+              },
+              {
+                "var_id": "release_date",
+                "app": "taskboard",
+                "entity_id": "T1",
+                "field": "deadline",
+                "operator": "set_deadline",
+                "expected": "2026-08-18",
+                "actual": "2026-08-18",
+                "met": true
+              },
+              {
+                "var_id": "release_date",
+                "app": "taskboard",
+                "entity_id": "T2",
+                "field": "deadline",
+                "operator": "set_deadline",
+                "expected": "2026-08-18",
+                "actual": "2026-08-18",
+                "met": true
+              }
+            ],
+            "missed": []
+          },
+          "untouched": {
+            "n_protected": 3,
+            "n_violated": 0,
+            "violated": []
+          },
+          "resynced": {
+            "var_id": "release_date",
+            "expected_new": "2026-08-18",
+            "real_post_value": "2026-08-18",
+            "rendered_line": "release_date [release_date] = 2026-08-18",
+            "met": true
+          },
+          "hard_fail": false,
+          "weights": {
+            "changed": 0.5,
+            "untouched": 0.3,
+            "resynced": 0.2
+          }
+        }
+      },
+      "which_link_broke": null,
+      "rendered_surface": "# Task: release_reschedule\n\n✎ 项目发布日期  [release_date] = 2026-08-14\n    → calendar.E1.date  (operator: move_event)\n    → taskboard.T1.deadline  (operator: set_deadline)\n    → taskboard.T2.deadline  (operator: set_deadline)\n",
+      "raw_compiler_output": "{\"task_binding\":{\"task_id\":\"release_reschedule\",\"variables\":[{\"var_id\":\"release_date\",\"label\":\"项目发布日期\",\"value\":\"2026-08-14\",\"editable\":true,\"bindings\":[{\"app\":\"calendar\",\"entity_id\":\"E1\",\"field\":\"date\",\"operator\":\"move_event\"},{\"app\":\"taskboard\",\"entity_id\":\"T1\",\"field\":\"deadline\",\"operator\":\"set_deadline\"},{\"app\":\"taskboard\",\"entity_id\":\"T2\",\"field\":\"deadline\",\"operator\":\"set_deadline\"}]}],\"dependencies\":[{\"from_var\":\"release_date\",\"to_entity\":{\"app\":\"taskboard\",\"entity_id\":\"T1\"},\"relation\":\"deadline_tracks_release_date\"},{\"from_var\":\"release_date\",\"to_entity\":{\"app\":\"taskboard\",\"entity_id\":\"T2\"},\"relation\":\"deadline_tracks_release_date\"}]},\"text_response\":\"已绑定 2026-08-14 的项目发布日期、发布会议及两项依赖任务的截止日期；未观察到可绑定的发布材料文件或可创建的新实体。\",\"a2ui\":[]}"
+    },
+    {
+      "task_id": "release_reschedule",
+      "sample": 2,
+      "model": "gpt-5.6-sol",
+      "mock": false,
+      "compile_ok": true,
+      "compile_error": null,
+      "binding_valid": true,
+      "binding_errors": [],
+      "a2ui_valid": true,
+      "a2ui_errors": [],
+      "binding_accuracy": {
+        "n_gt": 3,
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "f1_varid_semantic": 1.0,
+        "f1_triples": 1.0,
+        "semantic_alignment": {
+          "gt_vars_matched": [
+            "release_date"
+          ],
+          "gt_vars_unmatched": [],
+          "model_vars_matched": [
+            "release_date"
+          ],
+          "model_vars_unmatched": []
+        },
+        "gt": [
+          [
+            "release_date",
+            "calendar",
+            "E1",
+            "move_event"
+          ],
+          [
+            "release_date",
+            "taskboard",
+            "T1",
+            "set_deadline"
+          ],
+          [
+            "release_date",
+            "taskboard",
+            "T2",
+            "set_deadline"
+          ]
+        ],
+        "got": [
+          [
+            "release_date",
+            "calendar",
+            "E1",
+            "move_event"
+          ],
+          [
+            "release_date",
+            "taskboard",
+            "T1",
+            "set_deadline"
+          ],
+          [
+            "release_date",
+            "taskboard",
+            "T2",
+            "set_deadline"
+          ]
+        ]
+      },
+      "dispatch": {
+        "n_ops": 3,
+        "n_applied": 3,
+        "all_applied": true,
+        "ops": [
+          {
+            "app": "calendar",
+            "entity_id": "E1",
+            "operator": "move_event",
+            "value": "2026-08-18",
+            "applied": true,
+            "error": null
+          },
+          {
+            "app": "taskboard",
+            "entity_id": "T1",
+            "operator": "set_deadline",
+            "value": "2026-08-18",
+            "applied": true,
+            "error": null
+          },
+          {
+            "app": "taskboard",
+            "entity_id": "T2",
+            "operator": "set_deadline",
+            "value": "2026-08-18",
+            "applied": true,
+            "error": null
+          }
+        ]
+      },
+      "round_trip": {
+        "score": 1.0,
+        "changed_fraction": 1.0,
+        "untouched_fraction": 1.0,
+        "resynced_fraction": 1.0,
+        "non_interference_passed": true,
+        "hard_fail": false,
+        "info": {
+          "task_id": "release_reschedule",
+          "changed": {
+            "n_bindings": 3,
+            "n_met": 3,
+            "met": [
+              {
+                "var_id": "release_date",
+                "app": "calendar",
+                "entity_id": "E1",
+                "field": "date",
+                "operator": "move_event",
+                "expected": "2026-08-18",
+                "actual": "2026-08-18",
+                "met": true
+              },
+              {
+                "var_id": "release_date",
+                "app": "taskboard",
+                "entity_id": "T1",
+                "field": "deadline",
+                "operator": "set_deadline",
+                "expected": "2026-08-18",
+                "actual": "2026-08-18",
+                "met": true
+              },
+              {
+                "var_id": "release_date",
+                "app": "taskboard",
+                "entity_id": "T2",
+                "field": "deadline",
+                "operator": "set_deadline",
+                "expected": "2026-08-18",
+                "actual": "2026-08-18",
+                "met": true
+              }
+            ],
+            "missed": []
+          },
+          "untouched": {
+            "n_protected": 3,
+            "n_violated": 0,
+            "violated": []
+          },
+          "resynced": {
+            "var_id": "release_date",
+            "expected_new": "2026-08-18",
+            "real_post_value": "2026-08-18",
+            "rendered_line": "release_date [release_date] = 2026-08-18",
+            "met": true
+          },
+          "hard_fail": false,
+          "weights": {
+            "changed": 0.5,
+            "untouched": 0.3,
+            "resynced": 0.2
+          }
+        }
+      },
+      "which_link_broke": null,
+      "rendered_surface": "# Task: release_reschedule\n\n✎ 项目发布日期  [release_date] = 2026-08-14\n    → calendar.E1.date  (operator: move_event)\n    → taskboard.T1.deadline  (operator: set_deadline)\n    → taskboard.T2.deadline  (operator: set_deadline)\n",
+      "raw_compiler_output": "{\"task_binding\":{\"task_id\":\"release_reschedule\",\"variables\":[{\"var_id\":\"release_date\",\"label\":\"项目发布日期\",\"value\":\"2026-08-14\",\"editable\":true,\"bindings\":[{\"app\":\"calendar\",\"entity_id\":\"E1\",\"field\":\"date\",\"operator\":\"move_event\"},{\"app\":\"taskboard\",\"entity_id\":\"T1\",\"field\":\"deadline\",\"operator\":\"set_deadline\"},{\"app\":\"taskboard\",\"entity_id\":\"T2\",\"field\":\"deadline\",\"operator\":\"set_deadline\"}]}],\"dependencies\":[{\"from_var\":\"release_date\",\"to_entity\":{\"app\":\"taskboard\",\"entity_id\":\"T1\"},\"relation\":\"deadline_tracks_release_date\"},{\"from_var\":\"release_date\",\"to_entity\":{\"app\":\"taskboard\",\"entity_id\":\"T2\"},\"relation\":\"deadline_tracks_release_date\"}]},\"text_response\":\"已将项目发布会议及两个依赖任务的截止日期绑定为同一发布日期；当前为 2026-08-14。\",\"a2ui\":[]}"
+    }
+  ],
+  "sub_kills": {
+    "sub_kill_1": false,
+    "sub_kill_3": false,
+    "neg_control_honest": true,
+    "verdict": "PASS",
+    "max_score": 1.0,
+    "any_round_trip_pass": true,
+    "any_task_pass": true,
+    "n_samples": 3
+  },
+  "executor": {
+    "driver": "playwright",
+    "grounding_model": "gpt-5.6-sol",
+    "coordinate_format": "normalized_0_1000",
+    "gui_screenshot_dir": "eval_results/p5_gui_visual_3sample"
+  }
+}

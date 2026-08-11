@@ -21,9 +21,9 @@ class EntityBinding:
     Emitted by the compiler (discovered from observations); mirrored in shape by
     the verifier-only ``CanonicalBinding`` (GT)."""
     var_id: str
-    app: str           # "calendar" | "taskboard"
-    entity_id: str     # "E1" | "T1"  (must appear in the DOM)
-    field: str         # "date" | "deadline" | "status" | "assignee"
+    app: str           # "calendar" | "taskboard" | "drive"
+    entity_id: str     # "E1" | "T1" | "F1"  (must appear in the DOM)
+    field: str         # "date" | "deadline" | "status" | "assignee" | "parent" | ...
     operator: str      # one of OPERATOR_REGISTRY keys
 
     def to_dict(self) -> dict:
@@ -99,13 +99,45 @@ OPERATOR_REGISTRY: dict[str, dict[str, str]] = {
                      "signature": "set_status(tid, new_status) — set a task's status (todo/doing/done)"},
     "set_assignee": {"app": "taskboard", "field": "assignee",
                      "signature": "set_assignee(tid, new_assignee) — reassign a task"},
+    # W2 — Drive app (file/document store). move_file is the single-app
+    # single-step operator the W2 rollback gate undoes (parent: personal→shared).
+    "move_file":    {"app": "drive", "field": "parent",
+                     "signature": "move_file(fid, new_parent) — move a file to a new folder"},
+    "rename":       {"app": "drive", "field": "name",
+                     "signature": "rename(fid, new_name) — rename a file"},
+    "set_owner":    {"app": "drive", "field": "owner",
+                     "signature": "set_owner(fid, new_owner) — reassign file ownership"},
+    # W4 held-out — Mail (truly-unseen app). A message lifecycle: set_state
+    # mutates a finite-state field (draft/sent/scheduled), not a scalar. This is
+    # the operator the W4 OOD mail task edits (scheduled → sent).
+    "set_state":    {"app": "mail", "field": "state",
+                     "signature": "set_state(mid, new_state) — set a message's lifecycle state (draft/sent/scheduled)"},
+    "set_priority": {"app": "mail", "field": "priority",
+                     "signature": "set_priority(mid, new_priority) — set a message's priority (high/normal/low)"},
+    "set_to":       {"app": "mail", "field": "to_addr",
+                     "signature": "set_to(mid, new_to_addr) — change a message's recipient"},
+    # W4 held-out — Outlook_Cal (calendar reskin). Same semantics as move_event
+    # (move a meeting to a new date) but renamed substrate: the field is
+    # ``scheduled_for`` (not ``date``), the kind is ``appointment`` (not
+    # ``event``). Tests substrate-independence: same conceptual op, new skin.
+    "reschedule_appointment": {"app": "outlook_cal", "field": "scheduled_for",
+                     "signature": "reschedule_appointment(aid, new_scheduled_for) — move an appointment to a new date"},
+    # MobileGym demo — Wechat (Playwright-driven React sim via the bridge).
+    # send_message is APPEND-style (not a scalar field-setter): it appends a
+    # text message to a chat thread. Rollback is snapshot-based (the bridge
+    # captures a pre-state snapshot and set_state-restores it on undo), NOT a
+    # field-setter inverse — the operator's semantics differ from the W1/W2
+    # field-setters, which is the point of exercising a new substrate.
+    "send_message":  {"app": "wechat", "field": "messages",
+                     "signature": "send_message(chat_id, text) — append a new text message to a wechat chat thread"},
 }
 
 
 def build_tool_schema(apps: list[str] | None = None) -> str:
     """The operator catalog passed to the compiler's system prompt / input.
     Lists ONLY operator signatures (no var_ids, no GT)."""
-    apps = apps or ["calendar", "taskboard"]
+    apps = apps or list(dict.fromkeys(meta["app"]
+                                      for meta in OPERATOR_REGISTRY.values()))
     lines = ["# Tool schema — executable operators each app exposes (use these as `operator`):"]
     for op, meta in OPERATOR_REGISTRY.items():
         if meta["app"] in apps:

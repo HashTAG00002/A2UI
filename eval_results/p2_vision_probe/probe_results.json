@@ -1,0 +1,28 @@
+{
+  "glm-5v-turbo": {
+    "parsed": null,
+    "raw": ""
+  },
+  "gpt-5.6-sol": {
+    "parsed": {
+      "action": "click",
+      "coordinate": [
+        837,
+        237
+      ]
+    },
+    "raw": "{\"action\":\"click\",\"coordinate\":[837,237]}",
+    "verdict": "PASS",
+    "clicked_px": [
+      921,
+      180
+    ],
+    "element": {
+      "tag": "A",
+      "text": "View",
+      "cls": "btn view",
+      "row": "E1",
+      "is_view_link": true
+    }
+  }
+}

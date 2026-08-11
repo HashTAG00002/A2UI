@@ -101,12 +101,14 @@ def api_tasks(sid: str):
 
 @app.route("/api/task/<sid>/<tid>", methods=["POST"])
 def api_task_mutate(sid: str, tid: str):
-    """Executable operators on the write path:
+    """Executable operators on the write path (JSON API — the app's backend):
       {operator: "set_deadline",  value: "2026-08-18"}
       {operator: "set_status",    value: "done"}
       {operator: "set_assignee",  value: "Alex"}
     Mutates the task in the real session state; the verifier reads the real
-    post-state via ``state_adapter.read_canonical`` for round-trip GT."""
+    post-state via ``state_adapter.read_canonical`` for round-trip GT. The P1
+    edit form posts here via its PRG sibling route; the GUI agent (P2) drives
+    the browser through the form, NOT through this route directly."""
     sess = user_sessions.get(sid)
     if sess is None:
         return jsonify({"error": "session not found", "sid": sid}), 404
@@ -117,17 +119,89 @@ def api_task_mutate(sid: str, tid: str):
         return jsonify({"error": f"operator must be one of {APP_OPERATORS}"}), 400
     if value is None:
         return jsonify({"error": "value required"}), 400
-    field_map = {"set_deadline": "deadline", "set_status": "status",
-                 "set_assignee": "assignee"}
-    field = field_map[op]
+    res = _mutate_task(sess, tid, op, value)
+    if res is None:
+        return jsonify({"error": f"task {tid} not found"}), 404
+    old, t = res
+    return jsonify({"status": "ok", "tid": tid, "operator": op,
+                    "old": old, "new": value, "task": t})
+
+
+_FIELD_MAP = {"set_deadline": "deadline", "set_status": "status",
+              "set_assignee": "assignee"}
+
+
+def _mutate_task(sess: dict, tid: str, op: str, value) -> tuple | None:
+    """Shared mutation logic (the app's own business operation). Called by BOTH
+    the JSON API route and the PRG form route. Returns (old_value, task) or
+    None if the task wasn't found."""
+    if op not in APP_OPERATORS:
+        return None
+    field = _FIELD_MAP[op]
     with _sessions_lock:
         t = _find_task(sess, tid)
         if t is None:
-            return jsonify({"error": f"task {tid} not found"}), 404
+            return None
         old = t[field]
         t[field] = value
-    return jsonify({"status": "ok", "tid": tid, "operator": op,
-                    "old": old, "new": value, "task": t})
+        return old, t
+
+
+# ── P1 (E10 rework): real interactive GUI for set_deadline/set_status/set_assignee ──
+@app.route("/<sid>/task/<tid>")
+def task_detail(sid: str, tid: str):
+    sess = user_sessions.get(sid)
+    if sess is None:
+        return ("session not found", 404)
+    t = _find_task(sess, tid)
+    if t is None:
+        return (f"task {tid} not found", 404)
+    moved = request.args.get("moved")
+    return render_template("task_detail.html", site=SITE, sid=sid, task=t,
+                           task_id=sess.get("task_id"), goal=sess.get("goal") or "",
+                           moved=moved, moved_tid=tid if moved else None,
+                           moved_op=request.args.get("moved_op", ""),
+                           moved_value=request.args.get("moved_value", ""))
+
+
+@app.route("/<sid>/task/<tid>/edit")
+def task_edit(sid: str, tid: str):
+    sess = user_sessions.get(sid)
+    if sess is None:
+        return ("session not found", 404)
+    t = _find_task(sess, tid)
+    if t is None:
+        return (f"task {tid} not found", 404)
+    return render_template("task_edit.html", site=SITE, sid=sid, task=t,
+                           task_id=sess.get("task_id"), goal=sess.get("goal") or "")
+
+
+@app.route("/<sid>/task/<tid>/mutate", methods=["POST"])
+def task_mutate_prg(sid: str, tid: str):
+    """PRG handler for the edit form's submit. The form posts all three operator
+    fields (set_deadline / set_status / set_assignee); the server applies only
+    the CHANGED ones via the shared ``_mutate_task`` helper, then redirects to
+    the detail page with a toast. The GUI agent clicks '✓ Confirm edit' in the
+    <dialog>, the browser POSTs here, the server mutates state + redirects."""
+    sess = user_sessions.get(sid)
+    if sess is None:
+        return ("session not found", 404)
+    t = _find_task(sess, tid)
+    if t is None:
+        return (f"task {tid} not found", 404)
+    applied = []
+    for op, field in _FIELD_MAP.items():
+        new_val = request.form.get(op)
+        if new_val is None or str(new_val) == str(t[field]):
+            continue   # unchanged field — skip
+        res = _mutate_task(sess, tid, op, new_val)
+        if res is not None:
+            applied.append((op, new_val))
+    if not applied:
+        return redirect(f"/{sid}/task/{tid}?moved=0")
+    last_op, last_val = applied[-1]
+    logger.info(f"[taskboard] PRG mutate {tid}: applied {applied}")
+    return redirect(f"/{sid}/task/{tid}?moved=1&moved_op={last_op}&moved_value={last_val}")
 
 
 @app.route("/api/inject_task/<sid>", methods=["POST"])

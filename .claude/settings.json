@@ -14,10 +14,18 @@
       "Bash(python3 -m json.tool)",
       "Bash(python3 -c ' *)",
       "Bash(cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui/docs/references/AOHP-paper/ && echo \"=== title/abstract region ===\"; grep -n -i \"\\\\\\\\\\\\\\\\title\\\\|\\\\\\\\\\\\\\\\begin{abstract}\\\\|\\\\\\\\\\\\\\\\end{abstract}\\\\|AOHP\\\\|Agentic\\\\|human.*plan\\\\|outline\" main.tex | head -30; echo \"=== abstract content ===\"; sed -n '/\\\\\\\\begin{abstract}/,/\\\\\\\\end{abstract}/p' main.tex | head -50)",
-      "Bash(sed -n '/\\\\\\\\begin{abstract}/,/\\\\\\\\end{abstract}/p' main.tex)"
+      "Bash(sed -n '/\\\\\\\\begin{abstract}/,/\\\\\\\\end{abstract}/p' main.tex)",
+      "Bash(awk '/^## *10\\\\b|^## *14\\\\b|^### *10\\\\b|^### *14\\\\b|^# *10\\\\b|^# *14\\\\b/{p=1} /^## *1[0-9]\\\\b/{if\\(p && $0 !~ /^## *10\\\\b/\\)p=0} p' \"/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui/docs/HANDOFF_TaskVM.md\")",
+      "Bash(sudo -n true)",
+      "Bash(unzip -l /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/mobilegym/chrome-linux64.zip)",
+      "Bash(timeout 20 /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/conda/envs/senseact/bin/pip download --no-deps --dest /tmp/piptest noop)",
+      "Bash(curl -s --max-time 8 http://localhost:3019/health)",
+      "Bash(grep -n \"def seed_apps\\\\|def capture_obs\\\\|def assert_obs_matches_state\\\\|ad\\\\.seed\\\\|ad\\\\.reset\\\\|read_canonical\" /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui/taskvm/harness/replay_engine.py | head -20 *)",
+      "Bash(curl -s --max-time 15 http://localhost:3016/top3_expense_to_wechat_ui_35183)"
     ],
     "additionalDirectories": [
-      "/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui"
+      "/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui",
+      "/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui/taskvm/harness"
     ]
   }
 }

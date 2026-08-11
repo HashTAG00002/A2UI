@@ -24,7 +24,33 @@
     form.inline { display: inline; }
     input[type=date], input[type=text] { padding: 4px 6px; border: 1px solid #d2d2d7; border-radius: 6px; }
     button { padding: 4px 10px; border: 0; border-radius: 6px; background: #1a73e8; color: #fff; cursor: pointer; }
+    button.secondary { background: #e8f0fe; color: #1a73e8; }
+    a.btn { display: inline-block; padding: 4px 10px; border-radius: 6px; background: #e8f0fe;
+            color: #1a73e8; text-decoration: none; font-size: 14px; }
+    a.btn.view { background: #1a73e8; color: #fff; }
     .meta { font-size: 12px; color: #6e6e73; margin-bottom: 12px; }
+    .back-link { display: inline-block; margin-bottom: 14px; font-size: 13px; color: #1a73e8; text-decoration: none; }
+    .back-link:hover { text-decoration: underline; }
+    .detail { border: 1px solid #e5e5e7; border-radius: 10px; padding: 16px 20px; margin-top: 8px; }
+    .detail h2 { margin: 0 0 12px; font-size: 20px; }
+    .detail dl { display: grid; grid-template-columns: 130px 1fr; gap: 6px 12px; margin: 0; }
+    .detail dt { color: #6e6e73; font-size: 13px; }
+    .detail dd { margin: 0; font-size: 14px; }
+    .detail .actions { margin-top: 16px; display: flex; gap: 8px; }
+    .edit-form { border: 1px solid #e5e5e7; border-radius: 10px; padding: 16px 20px; margin-top: 8px; }
+    .edit-form .field { margin-bottom: 14px; }
+    .edit-form label { display: block; font-size: 13px; color: #6e6e73; margin-bottom: 4px; }
+    .edit-form input[type=date], .edit-form input[type=text], .edit-form select { padding: 6px 8px; font-size: 14px; min-width: 220px; }
+    .edit-form .readonly-val { font-size: 14px; padding: 6px 0; }
+    .edit-form .actions { margin-top: 18px; display: flex; gap: 8px; }
+    dialog { border: 0; border-radius: 12px; padding: 0; max-width: 420px; box-shadow: 0 8px 30px rgba(0,0,0,.18); }
+    dialog .dlg-head { padding: 16px 20px 8px; font-size: 16px; font-weight: 600; }
+    dialog .dlg-body { padding: 0 20px 16px; font-size: 14px; color: #1d1d1f; }
+    dialog .dlg-body .diff { background: #f5f5f7; border-radius: 8px; padding: 10px 12px; margin-top: 8px; }
+    dialog .dlg-body .diff .row { display: flex; justify-content: space-between; padding: 2px 0; }
+    dialog .dlg-body .diff .row .v { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    dialog .dlg-actions { padding: 0 20px 16px; display: flex; justify-content: flex-end; gap: 8px; }
+    .toast { background: #e6f4ea; border: 1px solid #34a853; color: #1e6b37; padding: 8px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 14px; }
   </style>
 </head>
 <body>

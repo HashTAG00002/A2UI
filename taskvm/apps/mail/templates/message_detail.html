@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ message.subject }} · {{ sid }}{% endblock %}
+{% block content %}
+<a class="back-link" href="/{{ sid }}">← back to mail</a>
+{% if moved %}<div class="toast" data-toast="moved">✓ message <code>{{ moved_mid }}</code> {{ moved_op }} → <code>{{ moved_value }}</code>.</div>{% endif %}
+<div class="meta">session: <code>{{ sid }}</code>{% if task_id %} · task: <code>{{ task_id }}</code>{% endif %}</div>
+
+<div class="detail" data-mail-id="{{ message.mid }}">
+  <h2>{{ message.subject }} <code>{{ message.mid }}</code></h2>
+  <dl>
+    <dt>MID</dt><dd data-field="mid"><code>{{ message.mid }}</code></dd>
+    <dt>Subject</dt><dd data-field="subject">{{ message.subject }}</dd>
+    <dt>From</dt><dd data-field="from_addr">{{ message.from_addr }}</dd>
+    <dt>To</dt><dd data-field="to_addr">{{ message.to_addr }}</dd>
+    <dt>State</dt><dd data-field="state" class="mail-state">{{ message.state }}</dd>
+    <dt>Received</dt><dd data-field="received">{{ message.received }}</dd>
+    <dt>Priority</dt><dd data-field="priority"><span class="pill {{ message.priority }}">{{ message.priority }}</span></dd>
+  </dl>
+  <div class="actions">
+    <a class="btn" href="/{{ sid }}/message/{{ message.mid }}/edit">Edit</a>
+    <a class="btn secondary" href="/{{ sid }}">Done</a>
+  </div>
+</div>
+{% endblock %}

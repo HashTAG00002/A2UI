@@ -1,0 +1,228 @@
+{
+  "raw": "{\"version\":\"v0.9\",\"createSurface\":{\"surfaceId\":\"taskvm\",\"catalogId\":\"basic\"}}\n{\"version\":\"v0.9\",\"updateComponents\":{\"surfaceId\":\"taskvm\",\"components\":[{\"id\":\"root\",\"component\":\"Column\",\"children\":[\"ro_zone\",\"zone_divider\",\"rw_zone\"]},{\"id\":\"ro_zone\",\"component\":\"Column\",\"children\":[\"ro_heading\",\"calendar_card\",\"taskboard_card\"],\"editable\":false},{\"id\":\"ro_heading\",\"component\":\"Text\",\"text\":\"Projected app state\",\"editable\":false},{\"id\":\"calendar_card\",\"component\":\"Card\",\"child\":\"calendar_content\",\"editable\":false},{\"id\":\"calendar_content\",\"component\":\"Column\",\"children\":[\"calendar_title\",\"calendar_e1_date\"],\"editable\":false},{\"id\":\"calendar_title\",\"component\":\"Text\",\"text\":\"Calendar\",\"editable\":false},{\"id\":\"calendar_e1_date\",\"component\":\"Text\",\"text\":{\"call\":\"formatProjectedField\",\"args\":{\"entity\":\"E1\",\"field\":\"date\",\"value\":{\"path\":\"/release_date\"}},\"returnType\":\"string\"},\"editable\":false},{\"id\":\"taskboard_card\",\"component\":\"Card\",\"child\":\"taskboard_content\",\"editable\":false},{\"id\":\"taskboard_content\",\"component\":\"Column\",\"children\":[\"taskboard_title\",\"taskboard_t1_deadline\",\"taskboard_t2_deadline\"],\"editable\":false},{\"id\":\"taskboard_title\",\"component\":\"Text\",\"text\":\"Taskboard\",\"editable\":false},{\"id\":\"taskboard_t1_deadline\",\"component\":\"Text\",\"text\":{\"call\":\"formatProjectedField\",\"args\":{\"entity\":\"T1\",\"field\":\"deadline\",\"value\":{\"path\":\"/release_date\"}},\"returnType\":\"string\"},\"editable\":false},{\"id\":\"taskboard_t2_deadline\",\"component\":\"Text\",\"text\":{\"call\":\"formatProjectedField\",\"args\":{\"entity\":\"T2\",\"field\":\"deadline\",\"value\":{\"path\":\"/release_date\"}},\"returnType\":\"string\"},\"editable\":false},{\"id\":\"zone_divider\",\"component\":\"Divider\"},{\"id\":\"rw_zone\",\"component\":\"Column\",\"children\":[\"rw_heading\",\"release_date_input\",\"governance_actions\"]},{\"id\":\"rw_heading\",\"component\":\"Text\",\"text\":\"Governance\"},{\"id\":\"release_date_input\",\"component\":\"DateTimeInput\",\"label\":\"Release date\",\"value\":{\"path\":\"/release_date\"},\"dataBinding\":\"release_date\",\"editable\":true},{\"id\":\"governance_actions\",\"component\":\"Row\",\"children\":[\"undo_button\",\"checkpoint_button\"],\"justify\":\"start\",\"align\":\"center\"},{\"id\":\"undo_button\",\"component\":\"Button\",\"child\":\"undo_label\",\"variant\":\"secondary\",\"editable\":true,\"action\":{\"event\":{\"name\":\"undo\",\"context\":{\"task_id\":\"release_reschedule\"}}}},{\"id\":\"undo_label\",\"component\":\"Text\",\"text\":\"↶ undo\"},{\"id\":\"checkpoint_button\",\"component\":\"Button\",\"child\":\"checkpoint_label\",\"variant\":\"primary\",\"editable\":true,\"action\":{\"event\":{\"name\":\"checkpoint\",\"context\":{\"task_id\":\"release_reschedule\",\"release_date\":{\"path\":\"/release_date\"}}}}},{\"id\":\"checkpoint_label\",\"component\":\"Text\",\"text\":\"⚑ checkpoint\"}]}}\n{\"version\":\"v0.9\",\"updateDataModel\":{\"surfaceId\":\"taskvm\",\"path\":\"/\",\"value\":{\"release_date\":\"2026-08-14\"}}}",
+  "messages": [
+    {
+      "version": "v0.9",
+      "createSurface": {
+        "surfaceId": "taskvm",
+        "catalogId": "basic"
+      }
+    },
+    {
+      "version": "v0.9",
+      "updateComponents": {
+        "surfaceId": "taskvm",
+        "components": [
+          {
+            "id": "root",
+            "component": "Column",
+            "children": [
+              "ro_zone",
+              "zone_divider",
+              "rw_zone"
+            ]
+          },
+          {
+            "id": "ro_zone",
+            "component": "Column",
+            "children": [
+              "ro_heading",
+              "calendar_card",
+              "taskboard_card"
+            ],
+            "editable": false
+          },
+          {
+            "id": "ro_heading",
+            "component": "Text",
+            "text": "Projected app state",
+            "editable": false
+          },
+          {
+            "id": "calendar_card",
+            "component": "Card",
+            "child": "calendar_content",
+            "editable": false
+          },
+          {
+            "id": "calendar_content",
+            "component": "Column",
+            "children": [
+              "calendar_title",
+              "calendar_e1_date"
+            ],
+            "editable": false
+          },
+          {
+            "id": "calendar_title",
+            "component": "Text",
+            "text": "Calendar",
+            "editable": false
+          },
+          {
+            "id": "calendar_e1_date",
+            "component": "Text",
+            "text": {
+              "call": "formatProjectedField",
+              "args": {
+                "entity": "E1",
+                "field": "date",
+                "value": {
+                  "path": "/release_date"
+                }
+              },
+              "returnType": "string"
+            },
+            "editable": false
+          },
+          {
+            "id": "taskboard_card",
+            "component": "Card",
+            "child": "taskboard_content",
+            "editable": false
+          },
+          {
+            "id": "taskboard_content",
+            "component": "Column",
+            "children": [
+              "taskboard_title",
+              "taskboard_t1_deadline",
+              "taskboard_t2_deadline"
+            ],
+            "editable": false
+          },
+          {
+            "id": "taskboard_title",
+            "component": "Text",
+            "text": "Taskboard",
+            "editable": false
+          },
+          {
+            "id": "taskboard_t1_deadline",
+            "component": "Text",
+            "text": {
+              "call": "formatProjectedField",
+              "args": {
+                "entity": "T1",
+                "field": "deadline",
+                "value": {
+                  "path": "/release_date"
+                }
+              },
+              "returnType": "string"
+            },
+            "editable": false
+          },
+          {
+            "id": "taskboard_t2_deadline",
+            "component": "Text",
+            "text": {
+              "call": "formatProjectedField",
+              "args": {
+                "entity": "T2",
+                "field": "deadline",
+                "value": {
+                  "path": "/release_date"
+                }
+              },
+              "returnType": "string"
+            },
+            "editable": false
+          },
+          {
+            "id": "zone_divider",
+            "component": "Divider"
+          },
+          {
+            "id": "rw_zone",
+            "component": "Column",
+            "children": [
+              "rw_heading",
+              "release_date_input",
+              "governance_actions"
+            ]
+          },
+          {
+            "id": "rw_heading",
+            "component": "Text",
+            "text": "Governance"
+          },
+          {
+            "id": "release_date_input",
+            "component": "DateTimeInput",
+            "label": "Release date",
+            "value": {
+              "path": "/release_date"
+            },
+            "dataBinding": "release_date",
+            "editable": true
+          },
+          {
+            "id": "governance_actions",
+            "component": "Row",
+            "children": [
+              "undo_button",
+              "checkpoint_button"
+            ],
+            "justify": "start",
+            "align": "center"
+          },
+          {
+            "id": "undo_button",
+            "component": "Button",
+            "child": "undo_label",
+            "variant": "secondary",
+            "editable": true,
+            "action": {
+              "event": {
+                "name": "undo",
+                "context": {
+                  "task_id": "release_reschedule"
+                }
+              }
+            }
+          },
+          {
+            "id": "undo_label",
+            "component": "Text",
+            "text": "↶ undo"
+          },
+          {
+            "id": "checkpoint_button",
+            "component": "Button",
+            "child": "checkpoint_label",
+            "variant": "primary",
+            "editable": true,
+            "action": {
+              "event": {
+                "name": "checkpoint",
+                "context": {
+                  "task_id": "release_reschedule",
+                  "release_date": {
+                    "path": "/release_date"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "checkpoint_label",
+            "component": "Text",
+            "text": "⚑ checkpoint"
+          }
+        ]
+      }
+    },
+    {
+      "version": "v0.9",
+      "updateDataModel": {
+        "surfaceId": "taskvm",
+        "path": "/",
+        "value": {
+          "release_date": "2026-08-14"
+        }
+      }
+    }
+  ],
+  "model": "gpt-5.6-sol"
+}

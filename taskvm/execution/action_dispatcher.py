@@ -21,6 +21,7 @@ import logging
 from dataclasses import dataclass, field
 
 from taskvm.execution.patch_compiler import PatchOp
+from taskvm.execution.rollback import RollbackLog, record_from_response
 from taskvm.harness.state_adapter import StateAdapter
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,9 @@ class DispatchReport:
 
 
 def dispatch(ops: list[PatchOp], adapters: dict[str, StateAdapter], sid: str,
-             *, broken: str | None = None) -> DispatchReport:
+             *, broken: str | None = None,
+             rollback_log: RollbackLog | None = None,
+             saga_id: str | None = None) -> DispatchReport:
     """Apply each PatchOp to its app via the adapter's ``mutate``.
 
     ``broken``:
@@ -67,8 +70,26 @@ def dispatch(ops: list[PatchOp], adapters: dict[str, StateAdapter], sid: str,
       - "wrong_target": apply each op to a *different* entity in the same app
         (changed-happened fails AND non-interference likely fails — a stronger
         negative control that checks the verifier catches wrong-target writes).
+
+    ``rollback_log``: optional. When given AND ``broken is None``, each
+    successful normal-path write is recorded as a CompensationRecord (so
+    ``undo_last`` / ``undo_saga`` can later revert it). Recording is SKIPPED on
+    the noop / wrong_target neg-control branches — a neg-control run must
+    produce no compensation records (else undo would "restore" a value that was
+    never the user's edit, corrupting the ≤0.3 honesty bound).
+
+    ``saga_id`` (W3): optional. When given AND ``broken is None``, all
+    compensation records from THIS dispatch are tagged with ``saga_id`` so
+    ``undo_saga(saga_id)`` can revert the whole user action cross-app. If
+    omitted, the log auto-allocates a saga_id for any records this dispatch
+    creates (so every record is saga-tagged for W3 even when the caller doesn't
+    pass one — ``undo_last`` still works on untagged-era W2 logs).
     """
     report = DispatchReport()
+    # allocate a saga_id up-front for normal-path records (one user action → one saga)
+    active_saga = saga_id
+    if rollback_log is not None and active_saga is None and broken is None:
+        active_saga = rollback_log.new_saga_id()
     for op in ops:
         ad = adapters.get(op.app)
         if ad is None:
@@ -93,6 +114,7 @@ def dispatch(ops: list[PatchOp], adapters: dict[str, StateAdapter], sid: str,
                         f"→ {wrong}")
             try:
                 resp = ad.mutate(sid, wrong, op.operator, op.value)
+                # NOT recorded: neg-control write, never the user's edit
                 report.ops.append(DispatchResult(op, applied=True, response=resp))
             except Exception as e:
                 report.ops.append(DispatchResult(op, applied=False, error=str(e)))
@@ -101,8 +123,13 @@ def dispatch(ops: list[PatchOp], adapters: dict[str, StateAdapter], sid: str,
         try:
             resp = ad.mutate(sid, op.entity_id, op.operator, op.value)
             report.ops.append(DispatchResult(op, applied=True, response=resp))
+            if rollback_log is not None:
+                rec = record_from_response(op, resp)
+                if rec is not None:
+                    rec.saga_id = active_saga     # tag for undo_saga
+                    rollback_log.record(rec)
         except Exception as e:
             report.ops.append(DispatchResult(op, applied=False, error=str(e)))
     logger.info(f"[dispatch] {report.n_applied}/{len(ops)} ops applied "
-                f"(broken={broken})")
+                f"(broken={broken}, saga={active_saga})")
     return report

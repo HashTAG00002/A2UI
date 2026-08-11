@@ -3,6 +3,7 @@
 {% block content %}
 <div class="meta">session: <code>{{ sid }}</code>{% if task_id %} · task: <code>{{ task_id }}</code>{% endif %}</div>
 {% if goal %}<div class="meta">goal: {{ goal }}</div>{% endif %}
+{% if moved %}<div class="toast" data-toast="moved">✓ event <code>{{ moved_eid }}</code> moved to <code>{{ moved_date }}</code>.</div>{% endif %}
 
 <table id="event-list">
   <thead>
@@ -17,14 +18,7 @@
       <td data-field="time">{{ e.time }}</td>
       <td data-field="calendar"><span class="pill {{ e.calendar }}">{{ e.calendar }}</span></td>
       <td data-field="rsvp">{{ e.rsvp }}</td>
-      <td>
-        <form class="inline" method="post" action="/api/event/{{ sid }}/move" onsubmit="return false;">
-          <input type="hidden" name="eid" value="{{ e.eid }}">
-          <input type="date" name="new_date" value="{{ e.date }}">
-          <button type="button"
-            onclick="moveEvent('{{ sid }}','{{ e.eid }}', this.previousElementSibling.value)">move</button>
-        </form>
-      </td>
+      <td><a class="btn view" href="{{ sid }}/event/{{ e.eid }}">View</a></td>
     </tr>
   {% else %}
     <tr><td colspan="7" class="muted">no events</td></tr>
@@ -32,14 +26,12 @@
   </tbody>
 </table>
 
-<script>
-  // move via the app-API (the executable operator on the write path)
-  function moveEvent(sid, eid, newDate) {
-    fetch(`/api/event/${sid}/move`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({eid: eid, new_date: newDate})
-    }).then(r => r.json()).then(d => { if (d.status === 'ok') location.reload();
-      else alert(JSON.stringify(d)); });
-  }
-</script>
+{# P1 (E10 rework): the inline-JS fetch→/api/event/<sid>/move debug button is
+   REMOVED. Writes now go through a real interaction hierarchy: list → detail
+   page (/<sid>/event/<eid>) → edit form → confirm <dialog> → PRG POST
+   (/<sid>/event/<eid>/move) → redirect back with a toast. The GUI agent (P2)
+   drives this real UI; the /api/event/<sid>/move JSON route stays as the app's
+   own backend (like Google Calendar's UI posting to Google's API), but the
+   adapter.mutate() no longer calls it directly — it drives the browser through
+   the form instead. #}
 {% endblock %}

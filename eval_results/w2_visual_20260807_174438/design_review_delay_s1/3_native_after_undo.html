@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>Calendar · design_review_delay_vis_79696</title>
+  <style>
+    body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+           margin: 0; background: #f5f5f7; color: #1d1d1f; }
+    header { background: #1d1d1f; color: #fff; padding: 10px 18px; }
+    header .brand { font-weight: 600; }
+    header .sub { opacity: .7; font-size: 13px; margin-left: 8px; }
+    main { max-width: 900px; margin: 18px auto; background: #fff;
+           border-radius: 10px; padding: 18px 22px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e5e5e7; font-size: 14px; }
+    th { color: #6e6e73; font-weight: 600; font-size: 12px; text-transform: uppercase; }
+    tr.event-row[data-event-id] { cursor: pointer; }
+    tr.event-row[data-event-id]:hover { background: #f5f5f7; }
+    .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; }
+    .pill.work { background: #e8f0fe; color: #1a73e8; }
+    .pill.personal { background: #fce8e6; color: #d93025; }
+    .muted { color: #6e6e73; }
+    form.inline { display: inline; }
+    input[type=date], input[type=text] { padding: 4px 6px; border: 1px solid #d2d2d7; border-radius: 6px; }
+    button { padding: 4px 10px; border: 0; border-radius: 6px; background: #1a73e8; color: #fff; cursor: pointer; }
+    .meta { font-size: 12px; color: #6e6e73; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <header><span class="brand">TaskVM</span><span class="sub">Calendar</span></header>
+  <main>
+    
+<div class="meta">session: <code>design_review_delay_vis_79696</code> · task: <code>design_review_delay</code></div>
+<div class="meta">goal: 设计评审推迟两天（8/20 → 8/22），同步相关会议和依赖该日期的任务截止日期。</div>
+
+<table id="event-list">
+  <thead>
+    <tr><th>EID</th><th>Title</th><th>Date</th><th>Time</th><th>Calendar</th><th>RSVP</th><th></th></tr>
+  </thead>
+  <tbody>
+  
+    <tr class="event-row" data-event-id="E3" data-date="2026-08-20">
+      <td data-field="eid"><code>E3</code></td>
+      <td data-field="title">设计评审</td>
+      <td data-field="date" class="event-date">2026-08-20</td>
+      <td data-field="time">15:00-16:30</td>
+      <td data-field="calendar"><span class="pill work">work</span></td>
+      <td data-field="rsvp">accepted</td>
+      <td>
+        <form class="inline" method="post" action="/api/event/design_review_delay_vis_79696/move" onsubmit="return false;">
+          <input type="hidden" name="eid" value="E3">
+          <input type="date" name="new_date" value="2026-08-20">
+          <button type="button"
+            onclick="moveEvent('design_review_delay_vis_79696','E3', this.previousElementSibling.value)">move</button>
+        </form>
+      </td>
+    </tr>
+  
+    <tr class="event-row" data-event-id="E1" data-date="2026-08-14">
+      <td data-field="eid"><code>E1</code></td>
+      <td data-field="title">项目发布会议</td>
+      <td data-field="date" class="event-date">2026-08-14</td>
+      <td data-field="time">14:00-15:00</td>
+      <td data-field="calendar"><span class="pill work">work</span></td>
+      <td data-field="rsvp">accepted</td>
+      <td>
+        <form class="inline" method="post" action="/api/event/design_review_delay_vis_79696/move" onsubmit="return false;">
+          <input type="hidden" name="eid" value="E1">
+          <input type="date" name="new_date" value="2026-08-14">
+          <button type="button"
+            onclick="moveEvent('design_review_delay_vis_79696','E1', this.previousElementSibling.value)">move</button>
+        </form>
+      </td>
+    </tr>
+  
+    <tr class="event-row" data-event-id="E7" data-date="2026-08-13">
+      <td data-field="eid"><code>E7</code></td>
+      <td data-field="title">牙医</td>
+      <td data-field="date" class="event-date">2026-08-13</td>
+      <td data-field="time">09:00-09:30</td>
+      <td data-field="calendar"><span class="pill personal">personal</span></td>
+      <td data-field="rsvp">accepted</td>
+      <td>
+        <form class="inline" method="post" action="/api/event/design_review_delay_vis_79696/move" onsubmit="return false;">
+          <input type="hidden" name="eid" value="E7">
+          <input type="date" name="new_date" value="2026-08-13">
+          <button type="button"
+            onclick="moveEvent('design_review_delay_vis_79696','E7', this.previousElementSibling.value)">move</button>
+        </form>
+      </td>
+    </tr>
+  
+  </tbody>
+</table>
+
+<script>
+  // move via the app-API (the executable operator on the write path)
+  function moveEvent(sid, eid, newDate) {
+    fetch(`/api/event/${sid}/move`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({eid: eid, new_date: newDate})
+    }).then(r => r.json()).then(d => { if (d.status === 'ok') location.reload();
+      else alert(JSON.stringify(d)); });
+  }
+</script>
+
+  </main>
+</body>
+</html>

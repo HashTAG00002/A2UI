@@ -57,9 +57,12 @@ def render_variable_value(binding: TaskBinding, var_id: str,
 def edited_variable_shows_value(rendered: str, var_id: str, expected: Any) -> bool:
     """Structural re-sync check: does the rendered surface show ``expected`` for
     ``var_id``? Used by the verifier's ``check_interface_resynced``."""
-    # match  "[var_id] = <value>"  or  "var_id] = <value>"
+    # match "[var_id] = <value>" capturing the FULL value (rest of line), so
+    # multi-word values (e.g. a wechat message text with spaces) match too.
+    # Scalar values (dates, statuses) are unaffected — full-line == single
+    # token when there are no spaces.
     import re
-    pat = re.compile(rf"\[{re.escape(var_id)}\]\s*=\s*(\S+)")
+    pat = re.compile(rf"\[{re.escape(var_id)}\]\s*=\s*(.+)$")
     m = pat.search(rendered)
     if not m:
         return False

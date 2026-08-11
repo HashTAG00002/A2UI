@@ -100,11 +100,29 @@ def api_events(sid: str):
                     "events": sess.get("events") or []})
 
 
+def _move_event(sess: dict, eid: str, new_date: str) -> tuple[str, dict] | None:
+    """The shared move_event logic (the app's own business operation). Called by
+    BOTH the JSON API route (``/api/event/<sid>/move``) AND the PRG form route
+    (``/<sid>/event/<eid>/move``) so the GUI form and the adapter hit the same
+    backend mutation. Returns ``(old_date, event)`` or None if the event wasn't
+    found. Holds ``_sessions_lock`` for the dict mutation."""
+    with _sessions_lock:
+        ev = _find_event(sess, eid)
+        if ev is None:
+            return None
+        old_date = ev["date"]
+        ev["date"] = new_date
+        return old_date, ev
+
+
 @app.route("/api/event/<sid>/move", methods=["POST"])
 def api_event_move(sid: str):
-    """move_event(eid, new_date): the executable operator on the write path.
-    Mutates the event date in the real session state; the verifier reads the
-    real post-state via ``state_adapter.read_canonical`` for round-trip GT."""
+    """move_event(eid, new_date): the executable operator on the write path
+    (JSON API — the app's own backend). The P1 edit form posts here via its PRG
+    sibling route; the GUI agent (P2) drives the browser through the form, NOT
+    through this route directly. Mutates the event date in the real session
+    state; the verifier reads the real post-state via
+    ``state_adapter.read_canonical`` for round-trip GT."""
     sess = user_sessions.get(sid)
     if sess is None:
         return jsonify({"error": "session not found", "sid": sid}), 404
@@ -113,14 +131,76 @@ def api_event_move(sid: str):
     new_date = data.get("new_date")
     if not eid or not new_date:
         return jsonify({"error": "eid and new_date required"}), 400
-    with _sessions_lock:
-        ev = _find_event(sess, eid)
-        if ev is None:
-            return jsonify({"error": f"event {eid} not found"}), 404
-        old_date = ev["date"]
-        ev["date"] = new_date
+    res = _move_event(sess, eid, new_date)
+    if res is None:
+        return jsonify({"error": f"event {eid} not found"}), 404
+    old_date, ev = res
     return jsonify({"status": "ok", "eid": eid, "old_date": old_date,
                     "new_date": new_date, "event": ev})
+
+
+# ── P1 (E10 rework): real interactive GUI for move_event ──────────────────────
+# List (/<sid>) → detail (/<sid>/event/<eid>) → edit form (/<sid>/event/<eid>/edit)
+# → confirm <dialog> → PRG POST (/<sid>/event/<eid>/move) → redirect to detail
+# with a toast. The inline-JS-fetch debug button is gone; the GUI agent (P2)
+# drives this real interaction hierarchy through the browser.
+
+
+@app.route("/<sid>/event/<eid>")
+def event_detail(sid: str, eid: str):
+    """Detail view for one event — all fields shown, with an Edit affordance
+    (link to the edit form). The list row's "View" link lands here."""
+    sess = user_sessions.get(sid)
+    if sess is None:
+        return ("session not found", 404)
+    ev = _find_event(sess, eid)
+    if ev is None:
+        return (f"event {eid} not found", 404)
+    moved = request.args.get("moved")
+    moved_date = request.args.get("moved_date", "")
+    return render_template("event_detail.html", site=SITE, sid=sid,
+                           event=ev, task_id=sess.get("task_id"),
+                           goal=sess.get("goal") or "",
+                           moved=moved, moved_eid=eid if moved else None,
+                           moved_date=moved_date)
+
+
+@app.route("/<sid>/event/<eid>/edit")
+def event_edit(sid: str, eid: str):
+    """The edit form — a real <form> with <input type="date"> for the date (the
+    only operator-writable field; move_event maps to field 'date'). Other fields
+    are read-only context. A "Review changes" button opens a native <dialog>
+    confirm modal; "Confirm move" submits the form via the PRG route below."""
+    sess = user_sessions.get(sid)
+    if sess is None:
+        return ("session not found", 404)
+    ev = _find_event(sess, eid)
+    if ev is None:
+        return (f"event {eid} not found", 404)
+    return render_template("event_edit.html", site=SITE, sid=sid, event=ev,
+                           task_id=sess.get("task_id"),
+                           goal=sess.get("goal") or "")
+
+
+@app.route("/<sid>/event/<eid>/move", methods=["POST"])
+def event_move_prg(sid: str, eid: str):
+    """PRG (Post-Redirect-Get) handler for the edit form's submit. Processes the
+    move via the shared ``_move_event`` helper (same backend mutation as the
+    JSON API), then redirects to the detail page with a toast query-param. This
+    is the form's action target — a real form submission, not a JS fetch. The
+    GUI agent clicks "Confirm move" in the <dialog>, the browser POSTs here, the
+    server mutates state + redirects to the detail view."""
+    sess = user_sessions.get(sid)
+    if sess is None:
+        return ("session not found", 404)
+    new_date = request.form.get("new_date")
+    if not new_date:
+        return ("new_date required", 400)
+    res = _move_event(sess, eid, new_date)
+    if res is None:
+        return (f"event {eid} not found", 404)
+    logger.info(f"[calendar] PRG move {eid}: → {new_date} (sid={sid})")
+    return redirect(f"/{sid}/event/{eid}?moved=1&moved_date={new_date}")
 
 
 @app.route("/api/inject_task/<sid>", methods=["POST"])

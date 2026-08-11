@@ -1,0 +1,224 @@
+{
+  "ts": "20260811_050723",
+  "model": "gpt-5.6-sol",
+  "mock": true,
+  "n_samples_per_task": 1,
+  "execution_mode": "gui_agent",
+  "cost": {
+    "total_input_tokens": 9002,
+    "total_output_tokens": 230,
+    "total_reasoning_tokens": 122,
+    "total_cached_tokens": 0,
+    "total_tokens": 9232,
+    "n_llm_calls": 6,
+    "calls": [
+      {
+        "prompt_tokens": 1440,
+        "completion_tokens": 15,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1471,
+        "completion_tokens": 26,
+        "reasoning_tokens": 5,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1491,
+        "completion_tokens": 32,
+        "reasoning_tokens": 11,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1512,
+        "completion_tokens": 98,
+        "reasoning_tokens": 77,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1533,
+        "completion_tokens": 50,
+        "reasoning_tokens": 29,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      },
+      {
+        "prompt_tokens": 1555,
+        "completion_tokens": 9,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "gui_executor",
+        "model": "gpt-5.6-sol",
+        "role": "compute_use"
+      }
+    ]
+  },
+  "summaries": [
+    {
+      "task_id": "doc_handoff",
+      "n_samples": 1,
+      "scores": [
+        1.0
+      ],
+      "mean_score": 1.0,
+      "n_pass_score": 1,
+      "pass_threshold": 0.85,
+      "binding_f1_mean": 1.0,
+      "non_interference_ok_on_passing": true,
+      "neg_control_score": 0.3,
+      "neg_control_passed": true,
+      "neg_control_max": 0.3,
+      "no_handwritten_binding": true,
+      "PASS": false,
+      "which_link_broke_counts": {
+        "ok": 1
+      }
+    }
+  ],
+  "samples": [
+    {
+      "task_id": "doc_handoff",
+      "sample": 0,
+      "model": "gpt-5.6-sol",
+      "mock": true,
+      "compile_ok": true,
+      "compile_error": null,
+      "binding_valid": true,
+      "binding_errors": [],
+      "a2ui_valid": true,
+      "a2ui_errors": [],
+      "binding_accuracy": {
+        "n_gt": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "f1_varid_semantic": 1.0,
+        "f1_triples": 1.0,
+        "semantic_alignment": {
+          "gt_vars_matched": [
+            "launch_doc_location"
+          ],
+          "gt_vars_unmatched": [],
+          "model_vars_matched": [
+            "launch_doc_location"
+          ],
+          "model_vars_unmatched": []
+        },
+        "gt": [
+          [
+            "launch_doc_location",
+            "drive",
+            "F1",
+            "move_file"
+          ]
+        ],
+        "got": [
+          [
+            "launch_doc_location",
+            "drive",
+            "F1",
+            "move_file"
+          ]
+        ]
+      },
+      "dispatch": {
+        "n_ops": 1,
+        "n_applied": 1,
+        "all_applied": true,
+        "ops": [
+          {
+            "app": "drive",
+            "entity_id": "F1",
+            "operator": "move_file",
+            "value": "shared",
+            "applied": true,
+            "error": null
+          }
+        ]
+      },
+      "round_trip": {
+        "score": 1.0,
+        "changed_fraction": 1.0,
+        "untouched_fraction": 1.0,
+        "resynced_fraction": 1.0,
+        "non_interference_passed": true,
+        "hard_fail": false,
+        "info": {
+          "task_id": "doc_handoff",
+          "changed": {
+            "n_bindings": 1,
+            "n_met": 1,
+            "met": [
+              {
+                "var_id": "launch_doc_location",
+                "app": "drive",
+                "entity_id": "F1",
+                "field": "parent",
+                "operator": "move_file",
+                "expected": "shared",
+                "actual": "shared",
+                "met": true
+              }
+            ],
+            "missed": []
+          },
+          "untouched": {
+            "n_protected": 4,
+            "n_violated": 0,
+            "violated": []
+          },
+          "resynced": {
+            "var_id": "launch_doc_location",
+            "expected_new": "shared",
+            "real_post_value": "shared",
+            "rendered_line": "launch_doc_location [launch_doc_location] = shared",
+            "met": true
+          },
+          "hard_fail": false,
+          "weights": {
+            "changed": 0.5,
+            "untouched": 0.3,
+            "resynced": 0.2
+          }
+        }
+      },
+      "which_link_broke": null,
+      "rendered_surface": "# Task: doc_handoff\n\n✎ launch_doc_location  [launch_doc_location] = personal\n    → drive.F1.parent  (operator: move_file)\n",
+      "raw_compiler_output": "{\"task_binding\": {\"task_id\": \"doc_handoff\", \"variables\": [{\"var_id\": \"launch_doc_location\", \"label\": \"launch_doc_location\", \"value\": \"personal\", \"editable\": true, \"bindings\": [{\"var_id\": \"launch_doc_location\", \"app\": \"drive\", \"entity_id\": \"F1\", \"field\": \"parent\", \"operator\": \"move_file\"}]}], \"dependencies\": []}}"
+    }
+  ],
+  "sub_kills": {
+    "sub_kill_1": false,
+    "sub_kill_3": false,
+    "neg_control_honest": true,
+    "verdict": "INCONCLUSIVE",
+    "max_score": 1.0,
+    "any_round_trip_pass": true,
+    "any_task_pass": false,
+    "n_samples": 1
+  },
+  "executor": {
+    "driver": "playwright",
+    "grounding_model": "gpt-5.6-sol",
+    "coordinate_format": "normalized_0_1000",
+    "gui_screenshot_dir": "eval_results/p5_gui_visual_doc_handoff_mock"
+  }
+}

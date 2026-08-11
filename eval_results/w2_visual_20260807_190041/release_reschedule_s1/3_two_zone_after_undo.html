@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8">
+<title>TaskVM · release_reschedule_w2_s1_41980</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         margin: 0; background: #f5f5f7; color: #1d1d1f; }
+  header { background: #1d1d1f; color: #fff; padding: 10px 18px; }
+  header .brand { font-weight: 600; }
+  header .sub { opacity: .7; font-size: 13px; margin-left: 8px; }
+  main { max-width: 1100px; margin: 18px auto; display: grid;
+         grid-template-columns: 1fr 1fr; gap: 18px; }
+  .zone { background: #fff; border-radius: 10px; padding: 16px 20px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .zone h2 { font-size: 14px; color: #6e6e73; text-transform: uppercase;
+             margin-top: 0; letter-spacing: .5px; }
+  .zone.ro { border-left: 4px solid #188038; }
+  .zone.rw { border-left: 4px solid #1a73e8; }
+  .card { background: #f5f5f7; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+  .card h3 { margin: 0 0 4px; font-size: 13px; }
+  .ro-row { font-size: 13px; }
+  .ro-row code { background: #e5e5e7; padding: 0 4px; border-radius: 3px; }
+  form.rw-field { margin-bottom: 10px; }
+  form.rw-field label { display: block; font-size: 13px; margin-bottom: 2px; }
+  form.rw-field .muted { color: #6e6e73; font-size: 11px; }
+  input[type=text] { padding: 4px 6px; border: 1px solid #d2d2d7; border-radius: 6px;
+                     width: 60%; }
+  button { padding: 4px 10px; border: 0; border-radius: 6px; background: #1a73e8;
+           color: #fff; cursor: pointer; font-size: 13px; }
+  button.undo { background: #b06000; }
+  button.ckpt { background: #188038; }
+  .actions form { display: inline; margin-right: 6px; }
+  .log { font-size: 12px; color: #6e6e73; margin-top: 8px; }
+  .meta { font-size: 12px; color: #6e6e73; }
+  .notice { font-size: 12px; padding: 4px 8px; border-radius: 6px; margin-bottom: 8px; }
+  .notice.ok { background: #e6f4ea; color: #188038; }
+  .notice.undo { background: #fef7e0; color: #b06000; }
+</style></head>
+<body>
+  <header><span class="brand">TaskVM</span><span class="sub">workspace · release_reschedule</span></header>
+  <main>
+    <section class="zone ro">
+      <h2>只读区 · projected app state (read-only)</h2>
+      <div class="card ro"><h3>calendar</h3><div class="ro-row"><code>E1</code> calendar=work date=2026-08-14 eid=E1 rsvp=accepted time=14:00-15:00 title=项目发布会议</div><div class="ro-row"><code>E2</code> calendar=work date=2026-08-12 eid=E2 rsvp=accepted time=10:00-10:30 title=周会</div><div class="ro-row"><code>E7</code> calendar=personal date=2026-08-13 eid=E7 rsvp=accepted time=09:00-09:30 title=牙医</div></div><div class="card ro"><h3>taskboard</h3><div class="ro-row"><code>T1</code> assignee=Alex deadline=2026-08-18 depends_on=['release_date'] status=todo tid=T1 title=最终检查演示文档</div><div class="ro-row"><code>T2</code> assignee=Bo deadline=2026-08-18 depends_on=['release_date'] status=todo tid=T2 title=确认发布公告</div><div class="ro-row"><code>T3</code> assignee=Cara deadline=2026-08-10 depends_on=[] status=done tid=T3 title=整理会议纪要</div></div><div class="card ro"><h3>drive</h3><p class="muted">no entities</p></div>
+      <p class="meta">projected from read_canonical via the binding — no inputs here.</p>
+    </section>
+    <section class="zone rw">
+      <h2>可读可写区 · governance (edit / undo / checkpoint)</h2>
+      <div class="notice ok">applied 3/3 op(s) — read-only zone re-synced.</div>
+      <form class="rw-field" method="post" action="edit">  <label>release_date <span class="muted">[release_date] · calendar</span></label>  <input type="text" name="new_value" value="2026-08-14">  <input type="hidden" name="var_id" value="release_date">  <button type="submit">apply</button></form>
+      <div class="actions">
+        <form class="rw-undo" method="post" action="undo/taskboard">  <button type="submit" class="undo">↶ undo last taskboard write</button></form>
+        <form class="rw-ckpt" method="post" action="checkpoint"><button type="submit" class="ckpt">⚑ checkpoint</button></form>
+      </div>
+      <div class="log">rollback log: 2 record(s) · checkpoints: 0</div>
+      <div class="log">sid: <code>release_reschedule_w2_s1_41980</code></div>
+    </section>
+  </main>
+</body></html>

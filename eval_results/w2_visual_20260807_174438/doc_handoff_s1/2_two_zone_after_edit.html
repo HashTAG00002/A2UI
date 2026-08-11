@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8">
+<title>TaskVM · doc_handoff_w2_s1_79163</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         margin: 0; background: #f5f5f7; color: #1d1d1f; }
+  header { background: #1d1d1f; color: #fff; padding: 10px 18px; }
+  header .brand { font-weight: 600; }
+  header .sub { opacity: .7; font-size: 13px; margin-left: 8px; }
+  main { max-width: 1100px; margin: 18px auto; display: grid;
+         grid-template-columns: 1fr 1fr; gap: 18px; }
+  .zone { background: #fff; border-radius: 10px; padding: 16px 20px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .zone h2 { font-size: 14px; color: #6e6e73; text-transform: uppercase;
+             margin-top: 0; letter-spacing: .5px; }
+  .zone.ro { border-left: 4px solid #188038; }
+  .zone.rw { border-left: 4px solid #1a73e8; }
+  .card { background: #f5f5f7; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+  .card h3 { margin: 0 0 4px; font-size: 13px; }
+  .ro-row { font-size: 13px; }
+  .ro-row code { background: #e5e5e7; padding: 0 4px; border-radius: 3px; }
+  form.rw-field { margin-bottom: 10px; }
+  form.rw-field label { display: block; font-size: 13px; margin-bottom: 2px; }
+  form.rw-field .muted { color: #6e6e73; font-size: 11px; }
+  input[type=text] { padding: 4px 6px; border: 1px solid #d2d2d7; border-radius: 6px;
+                     width: 60%; }
+  button { padding: 4px 10px; border: 0; border-radius: 6px; background: #1a73e8;
+           color: #fff; cursor: pointer; font-size: 13px; }
+  button.undo { background: #b06000; }
+  button.ckpt { background: #188038; }
+  .actions form { display: inline; margin-right: 6px; }
+  .log { font-size: 12px; color: #6e6e73; margin-top: 8px; }
+  .meta { font-size: 12px; color: #6e6e73; }
+  .notice { font-size: 12px; padding: 4px 8px; border-radius: 6px; margin-bottom: 8px; }
+  .notice.ok { background: #e6f4ea; color: #188038; }
+  .notice.undo { background: #fef7e0; color: #b06000; }
+</style></head>
+<body>
+  <header><span class="brand">TaskVM</span><span class="sub">workspace · doc_handoff</span></header>
+  <main>
+    <section class="zone ro">
+      <h2>只读区 · projected app state (read-only)</h2>
+      <div class="card ro"><h3>calendar</h3><div class="ro-row"><code>E1</code> calendar=work date=2026-08-14 eid=E1 rsvp=accepted time=14:00-15:00 title=项目发布会议</div></div><div class="card ro"><h3>taskboard</h3><div class="ro-row"><code>T1</code> assignee=Alex deadline=2026-08-14 depends_on=[] status=todo tid=T1 title=审阅发布公告</div></div><div class="card ro"><h3>drive</h3><div class="ro-row"><code>F1</code> content=v1 fid=F1 modified=2026-08-12 name=发布公告.doc owner=Alex parent=shared type=doc</div><div class="ro-row"><code>F2</code> content= fid=F2 modified=2026-08-10 name=设计稿.png owner=Bo parent=shared type=image</div><div class="ro-row"><code>F3</code> content=draft fid=F3 modified=2026-08-11 name=会议纪要.doc owner=Cara parent=shared type=doc</div></div>
+      <p class="meta">projected from read_canonical via the binding — no inputs here.</p>
+    </section>
+    <section class="zone rw">
+      <h2>可读可写区 · governance (edit / undo / checkpoint)</h2>
+      <div class="notice ok">applied 1/1 op(s) — read-only zone re-synced.</div>
+      <form class="rw-field" method="post" action="edit">  <label>launch_doc_location <span class="muted">[launch_doc_location] · drive</span></label>  <input type="text" name="new_value" value="shared">  <input type="hidden" name="var_id" value="launch_doc_location">  <button type="submit">apply</button></form>
+      <div class="actions">
+        <form class="rw-undo" method="post" action="undo/drive">  <button type="submit" class="undo">↶ undo last drive write</button></form>
+        <form class="rw-ckpt" method="post" action="checkpoint"><button type="submit" class="ckpt">⚑ checkpoint</button></form>
+      </div>
+      <div class="log">rollback log: 1 record(s) · checkpoints: 0</div>
+      <div class="log">sid: <code>doc_handoff_w2_s1_79163</code></div>
+    </section>
+  </main>
+</body></html>

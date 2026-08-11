@@ -159,22 +159,91 @@ def check_round_trip(sid: str, fixture: CanonicalTaskGraph,
 def binding_accuracy(compiler_binding, fixture: CanonicalTaskGraph) -> dict:
     """Compare the compiler's discovered binding against the GT bindings (for the
     binding-accuracy metric — NOT a gate, a diagnostic). Counts how many GT
-    (var_id, app, entity_id, operator) tuples the compiler recovered."""
-    gt = {(b.var_id, b.app, b.entity_id, b.operator) for b in fixture.bindings}
+    (var_id, app, entity_id, operator) tuples the compiler recovered.
+
+    Reports THREE granularities of match (honesty: var_id is a free-form
+    model-chosen snake_case label — the spec does NOT prescribe the exact string,
+    so byte-exact var_id matching is an over-strict secondary diagnostic, not the
+    primary signal):
+
+    - ``f1`` (varid-byte-exact): the original W1 metric — (var_id, app,
+      entity_id, operator) 4-tuple match, var_id byte-exact. Kept for W1
+      regression continuity (W1 tasks have prescriptive var_ids the model
+      reproduced exactly, so this was 1.0 there).
+    - ``f1_varid_semantic``: align var_ids by their BINDING SET — a model var_id
+      "matches" a GT var_id iff they bind the same set of (app, entity_id,
+      operator) triples. This is the correct primary signal: var_id is a label,
+      alignment is by what it binds. Robust to the model choosing
+      ``project_release_announcement_priority`` where GT said
+      ``announcement_priority`` (same binding set → match).
+    - ``f1_triples`` (varid-agnostic): ignore var_id entirely — did the model
+      find the right (app, entity_id, operator) triples at all? The raw
+      generalization diagnostic.
+    """
+    gt_bindings = list(fixture.bindings)
+    # GT 4-tuples (byte-exact var_id)
+    gt = {(b.var_id, b.app, b.entity_id, b.operator) for b in gt_bindings}
+    # GT var_id → set of triples
+    gt_var_to_triples: dict[str, frozenset] = {}
+    for b in gt_bindings:
+        gt_var_to_triples.setdefault(b.var_id, set()).add(
+            (b.app, b.entity_id, b.operator))
+    gt_var_to_triples = {k: frozenset(v) for k, v in gt_var_to_triples.items()}
+    gt_triples = {t for s in gt_var_to_triples.values() for t in s}
+
+    # compiler 4-tuples + var_id → triples
     got = set()
+    got_var_to_triples: dict[str, set] = {}
     if compiler_binding is not None:
         for v in (compiler_binding.get("variables") or []):
             vid = v.get("var_id")
             for b in (v.get("bindings") or []):
-                got.add((vid, b.get("app"), b.get("entity_id"), b.get("operator")))
+                triple = (b.get("app"), b.get("entity_id"), b.get("operator"))
+                got.add((vid, *triple))
+                got_var_to_triples.setdefault(vid, set()).add(triple)
+    got_var_to_triples = {k: frozenset(v) for k, v in got_var_to_triples.items()}
+    got_triples = {t for s in got_var_to_triples.values() for t in s}
+
+    # --- byte-exact 4-tuple (original W1 metric) ---
     tp = len(gt & got)
     fp = len(got - gt)
     fn = len(gt - got)
     precision = tp / (tp + fp) if (tp + fp) else 0.0
     recall = tp / (tp + fn) if (tp + fn) else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+
+    # --- var_id-semantic: align by binding set (var_id is a label) ---
+    # a model var_id matches a GT var_id iff their triple-sets are equal.
+    # tp = matched GT var_ids; fp = model var_ids with no GT match; fn = unmatched GT var_ids.
+    matched_gt, matched_model = set(), set()
+    for mv, mset in got_var_to_triples.items():
+        for gv, gset in gt_var_to_triples.items():
+            if gset == mset and gv not in matched_gt:
+                matched_gt.add(gv); matched_model.add(mv); break
+    sem_tp = len(matched_gt)
+    sem_fp = len(got_var_to_triples) - len(matched_model)
+    sem_fn = len(gt_var_to_triples) - len(matched_gt)
+    sem_prec = sem_tp / (sem_tp + sem_fp) if (sem_tp + sem_fp) else 0.0
+    sem_rec = sem_tp / (sem_tp + sem_fn) if (sem_tp + sem_fn) else 0.0
+    f1_sem = 2 * sem_prec * sem_rec / (sem_prec + sem_rec) if (sem_prec + sem_rec) else 0.0
+
+    # --- varid-agnostic triples ---
+    t_tp = len(gt_triples & got_triples)
+    t_fp = len(got_triples - gt_triples)
+    t_fn = len(gt_triples - got_triples)
+    t_prec = t_tp / (t_tp + t_fp) if (t_tp + t_fp) else 0.0
+    t_rec = t_tp / (t_tp + t_fn) if (t_tp + t_fn) else 0.0
+    f1_triples = 2 * t_prec * t_rec / (t_prec + t_rec) if (t_prec + t_rec) else 0.0
+
     return {"n_gt": len(gt), "tp": tp, "fp": fp, "fn": fn,
             "precision": round(precision, 4), "recall": round(recall, 4),
             "f1": round(f1, 4),
+            "f1_varid_semantic": round(f1_sem, 4),
+            "f1_triples": round(f1_triples, 4),
+            "semantic_alignment": {
+                "gt_vars_matched": sorted(matched_gt),
+                "gt_vars_unmatched": sorted(set(gt_var_to_triples) - matched_gt),
+                "model_vars_matched": sorted(matched_model),
+                "model_vars_unmatched": sorted(set(got_var_to_triples) - matched_model)},
             "gt": sorted([list(t) for t in gt]),
             "got": sorted([list(t) for t in got])}

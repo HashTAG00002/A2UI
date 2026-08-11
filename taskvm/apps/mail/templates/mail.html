@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Mail · {{ sid }}{% endblock %}
+{% block content %}
+<div class="meta">session: <code>{{ sid }}</code>{% if task_id %} · task: <code>{{ task_id }}</code>{% endif %}</div>
+{% if goal %}<div class="meta">goal: {{ goal }}</div>{% endif %}
+{% if moved %}<div class="toast" data-toast="moved">✓ message <code>{{ moved_mid }}</code> {{ moved_op }} → <code>{{ moved_value }}</code>.</div>{% endif %}
+
+<table id="mail-list">
+  <thead>
+    <tr><th>MID</th><th>Subject</th><th>From</th><th>To</th><th>State</th><th>Received</th><th>Priority</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for m in messages %}
+    <tr class="mail-row" data-mail-id="{{ m.mid }}" data-state="{{ m.state }}">
+      <td data-field="mid"><code>{{ m.mid }}</code></td>
+      <td data-field="subject">{{ m.subject }}</td>
+      <td data-field="from_addr">{{ m.from_addr }}</td>
+      <td data-field="to_addr">{{ m.to_addr }}</td>
+      <td data-field="state" class="mail-state">{{ m.state }}</td>
+      <td data-field="received">{{ m.received }}</td>
+      <td data-field="priority"><span class="pill {{ m.priority }}">{{ m.priority }}</span></td>
+      <td><a class="btn view" href="{{ sid }}/message/{{ m.mid }}">View</a></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="8" class="muted">no messages</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{# P1 (E10 rework): inline-JS fetch→/api/mail/<sid>/<mid> debug button REMOVED.
+   Writes now go through list → detail → edit form → confirm <dialog> → PRG POST. #}
+{% endblock %}

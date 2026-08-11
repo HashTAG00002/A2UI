@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ appointment.subject }} · {{ sid }}{% endblock %}
+{% block content %}
+<a class="back-link" href="/{{ sid }}">← back to outlook calendar</a>
+{% if moved %}<div class="toast" data-toast="moved">✓ appointment <code>{{ moved_aid }}</code> rescheduled to <code>{{ moved_value }}</code>.</div>{% endif %}
+<div class="meta">session: <code>{{ sid }}</code>{% if task_id %} · task: <code>{{ task_id }}</code>{% endif %}</div>
+
+<div class="detail" data-appointment-id="{{ appointment.aid }}">
+  <h2>{{ appointment.subject }} <code>{{ appointment.aid }}</code></h2>
+  <dl>
+    <dt>AID</dt><dd data-field="aid"><code>{{ appointment.aid }}</code></dd>
+    <dt>Subject</dt><dd data-field="subject">{{ appointment.subject }}</dd>
+    <dt>Scheduled for</dt><dd data-field="scheduled_for" class="appt-date">{{ appointment.scheduled_for }}</dd>
+    <dt>Time</dt><dd data-field="time">{{ appointment.time }}</dd>
+    <dt>Calendar</dt><dd data-field="calendar"><span class="pill {{ appointment.calendar }}">{{ appointment.calendar }}</span></dd>
+    <dt>Response</dt><dd data-field="response">{{ appointment.response }}</dd>
+  </dl>
+  <div class="actions">
+    <a class="btn" href="/{{ sid }}/appointment/{{ appointment.aid }}/edit">Edit</a>
+    <a class="btn secondary" href="/{{ sid }}">Done</a>
+  </div>
+</div>
+{% endblock %}

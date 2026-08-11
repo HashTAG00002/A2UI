@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ appointment.aid }} · {{ sid }}{% endblock %}
+{% block content %}
+<a class="back-link" href="/{{ sid }}/appointment/{{ appointment.aid }}">← back to {{ appointment.aid }}</a>
+<div class="meta">session: <code>{{ sid }}</code> · editing appointment <code>{{ appointment.aid }}</code></div>
+
+<form class="edit-form" method="post" action="/{{ sid }}/appointment/{{ appointment.aid }}/reschedule"
+      data-appointment-id="{{ appointment.aid }}">
+  <div class="field">
+    <label for="new_scheduled_for">Scheduled for (reschedule_appointment operator)</label>
+    <input type="date" name="new_scheduled_for" value="{{ appointment.scheduled_for }}" id="new_scheduled_for" required>
+    <input type="hidden" name="aid" value="{{ appointment.aid }}">
+  </div>
+  <div class="field">
+    <label>Subject (read-only)</label>
+    <div class="readonly-val" data-field="subject">{{ appointment.subject }}</div>
+  </div>
+  <div class="field">
+    <label>Time (read-only)</label>
+    <div class="readonly-val" data-field="time">{{ appointment.time }}</div>
+  </div>
+  <div class="actions">
+    <button type="button" id="review-btn">Review changes</button>
+    <a class="btn secondary" href="/{{ sid }}/appointment/{{ appointment.aid }}">Cancel</a>
+  </div>
+
+  <dialog id="confirm-reschedule">
+    <div class="dlg-head">Confirm reschedule</div>
+    <div class="dlg-body">
+      Reschedule appointment <code>{{ appointment.aid }}</code> ({{ appointment.subject }})?
+      <div class="diff">
+        <div class="row"><span>From</span><span class="v" id="old-date">{{ appointment.scheduled_for }}</span></div>
+        <div class="row"><span>To</span><span class="v" id="new-date-display">{{ appointment.scheduled_for }}</span></div>
+      </div>
+    </div>
+    <div class="dlg-actions">
+      <button type="button" class="secondary" onclick="document.getElementById('confirm-reschedule').close()">← Cancel</button>
+      <button type="submit">✓ Confirm reschedule</button>
+    </div>
+  </dialog>
+</form>
+
+<script>
+  (function () {
+    var btn = document.getElementById('review-btn');
+    var inp = document.getElementById('new_scheduled_for');
+    var disp = document.getElementById('new-date-display');
+    var dlg = document.getElementById('confirm-reschedule');
+    btn.addEventListener('click', function () {
+      disp.textContent = inp.value || '(empty)';
+      dlg.showModal();
+    });
+  })();
+</script>
+{% endblock %}

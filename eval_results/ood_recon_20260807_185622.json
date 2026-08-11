@@ -1,0 +1,1379 @@
+{
+  "ts": "20260807_185622",
+  "week": "W4_ood_recon",
+  "model": "gpt-5.6-sol",
+  "mock": false,
+  "n_samples_per_task": 3,
+  "cost": {
+    "total_input_tokens": 41313,
+    "total_output_tokens": 2262,
+    "total_reasoning_tokens": 668,
+    "total_cached_tokens": 0,
+    "total_tokens": 43575,
+    "n_llm_calls": 9,
+    "calls": [
+      {
+        "prompt_tokens": 3973,
+        "completion_tokens": 341,
+        "reasoning_tokens": 192,
+        "cached_tokens": 0,
+        "tool": "compile_binding",
+        "model": "gpt-5.6-sol",
+        "role": "compiler"
+      },
+      {
+        "prompt_tokens": 3973,
+        "completion_tokens": 300,
+        "reasoning_tokens": 179,
+        "cached_tokens": 0,
+        "tool": "compile_binding",
+        "model": "gpt-5.6-sol",
+        "role": "compiler"
+      },
+      {
+        "prompt_tokens": 3973,
+        "completion_tokens": 445,
+        "reasoning_tokens": 297,
+        "cached_tokens": 0,
+        "tool": "compile_binding",
+        "model": "gpt-5.6-sol",
+        "role": "compiler"
+      },
+      {
+        "prompt_tokens": 5811,
+        "completion_tokens": 254,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "compile_binding",
+        "model": "gpt-5.6-sol",
+        "role": "compiler"
+      },
+      {
+        "prompt_tokens": 5811,
+        "completion_tokens": 223,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "compile_binding",
+        "model": "gpt-5.6-sol",
+        "role": "compiler"
+      },
+      {
+        "prompt_tokens": 5811,
+        "completion_tokens": 214,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "compile_binding",
+        "model": "gpt-5.6-sol",
+        "role": "compiler"
+      },
+      {
+        "prompt_tokens": 3987,
+        "completion_tokens": 160,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "compile_binding",
+        "model": "gpt-5.6-sol",
+        "role": "compiler"
+      },
+      {
+        "prompt_tokens": 3987,
+        "completion_tokens": 163,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "compile_binding",
+        "model": "gpt-5.6-sol",
+        "role": "compiler"
+      },
+      {
+        "prompt_tokens": 3987,
+        "completion_tokens": 162,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool": "compile_binding",
+        "model": "gpt-5.6-sol",
+        "role": "compiler"
+      }
+    ]
+  },
+  "tasks": [
+    {
+      "task_id": "send_launch_announcement",
+      "category": "unseen_app",
+      "category_description": "truly-unseen Mail app (message kind, data-mail-id, set_state operator)",
+      "required_apps": [
+        "mail"
+      ],
+      "n_samples": 3,
+      "binding_f1_samples": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "binding_f1_mean": 0.0,
+      "binding_f1_max": 0.0,
+      "binding_f1_semantic_samples": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "binding_f1_semantic_mean": 0.3333,
+      "binding_f1_semantic_max": 1.0,
+      "binding_f1_triples_samples": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "binding_f1_triples_mean": 1.0,
+      "binding_f1_triples_max": 1.0,
+      "neg_control_score": 0.3,
+      "neg_control_passed": true,
+      "samples": [
+        {
+          "sample": 0,
+          "model": "gpt-5.6-sol",
+          "mock": false,
+          "compile_ok": true,
+          "compile_error": null,
+          "binding_valid": true,
+          "binding_errors": [],
+          "binding_accuracy": {
+            "n_gt": 2,
+            "tp": 0,
+            "fp": 2,
+            "fn": 2,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "f1_varid_semantic": 0.0,
+            "f1_triples": 1.0,
+            "semantic_alignment": {
+              "gt_vars_matched": [],
+              "gt_vars_unmatched": [
+                "announcement_send_state"
+              ],
+              "model_vars_matched": [],
+              "model_vars_unmatched": [
+                "launch_announcement_state",
+                "launch_reminder_state"
+              ]
+            },
+            "gt": [
+              [
+                "announcement_send_state",
+                "mail",
+                "M1",
+                "set_state"
+              ],
+              [
+                "announcement_send_state",
+                "mail",
+                "M3",
+                "set_state"
+              ]
+            ],
+            "got": [
+              [
+                "launch_announcement_state",
+                "mail",
+                "M1",
+                "set_state"
+              ],
+              [
+                "launch_reminder_state",
+                "mail",
+                "M3",
+                "set_state"
+              ]
+            ]
+          },
+          "round_trip_score": 0.3,
+          "round_trip": {
+            "score": 0.3,
+            "changed_fraction": 0.0,
+            "untouched_fraction": 1.0,
+            "resynced_fraction": 0.0,
+            "non_interference_passed": true,
+            "hard_fail": false,
+            "info": {
+              "task_id": "send_launch_announcement",
+              "changed": {
+                "n_bindings": 2,
+                "n_met": 0,
+                "met": [],
+                "missed": [
+                  {
+                    "var_id": "announcement_send_state",
+                    "app": "mail",
+                    "entity_id": "M1",
+                    "field": "state",
+                    "operator": "set_state",
+                    "expected": "sent",
+                    "actual": "scheduled",
+                    "met": false
+                  },
+                  {
+                    "var_id": "announcement_send_state",
+                    "app": "mail",
+                    "entity_id": "M3",
+                    "field": "state",
+                    "operator": "set_state",
+                    "expected": "sent",
+                    "actual": "draft",
+                    "met": false
+                  }
+                ]
+              },
+              "untouched": {
+                "n_protected": 1,
+                "n_violated": 0,
+                "violated": []
+              },
+              "resynced": {
+                "var_id": "announcement_send_state",
+                "expected_new": "sent",
+                "real_post_value": "scheduled",
+                "rendered_line": "announcement_send_state [announcement_send_state] = scheduled",
+                "met": false
+              },
+              "hard_fail": false,
+              "weights": {
+                "changed": 0.5,
+                "untouched": 0.3,
+                "resynced": 0.2
+              }
+            }
+          },
+          "which_link_broke": "dispatch_partial",
+          "rendered_surface": "# Task: send_launch_announcement\n\n✎ 项目发布公告状态  [launch_announcement_state] = sent\n    → mail.M1.state  (operator: set_state)\n\n✎ 发布提醒状态  [launch_reminder_state] = sent\n    → mail.M3.state  (operator: set_state)\n",
+          "raw_compiler_output": "{\"task_binding\":{\"task_id\":\"send_launch_announcement\",\"variables\":[{\"var_id\":\"launch_announcement_state\",\"label\":\"项目发布公告状态\",\"value\":\"sent\",\"editable\":true,\"bindings\":[{\"app\":\"mail\",\"entity_id\":\"M1\",\"field\":\"state\",\"operator\":\"set_state\"}]},{\"var_id\":\"launch_reminder_state\",\"label\":\"发布提醒状态\",\"value\":\"sent\",\"editable\":true,\"bindings\":[{\"app\":\"mail\",\"entity_id\":\"M3\",\"field\":\"state\",\"operator\":\"set_state\"}]}],\"dependencies\":[]},\"text_response\":\"将项目发布公告 M1 和发布提醒 M3 的状态分别改为 sent。\",\"a2ui\":[]}"
+        },
+        {
+          "sample": 1,
+          "model": "gpt-5.6-sol",
+          "mock": false,
+          "compile_ok": true,
+          "compile_error": null,
+          "binding_valid": true,
+          "binding_errors": [],
+          "binding_accuracy": {
+            "n_gt": 2,
+            "tp": 0,
+            "fp": 2,
+            "fn": 2,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "f1_varid_semantic": 1.0,
+            "f1_triples": 1.0,
+            "semantic_alignment": {
+              "gt_vars_matched": [
+                "announcement_send_state"
+              ],
+              "gt_vars_unmatched": [],
+              "model_vars_matched": [
+                "launch_message_state"
+              ],
+              "model_vars_unmatched": []
+            },
+            "gt": [
+              [
+                "announcement_send_state",
+                "mail",
+                "M1",
+                "set_state"
+              ],
+              [
+                "announcement_send_state",
+                "mail",
+                "M3",
+                "set_state"
+              ]
+            ],
+            "got": [
+              [
+                "launch_message_state",
+                "mail",
+                "M1",
+                "set_state"
+              ],
+              [
+                "launch_message_state",
+                "mail",
+                "M3",
+                "set_state"
+              ]
+            ]
+          },
+          "round_trip_score": 0.3,
+          "round_trip": {
+            "score": 0.3,
+            "changed_fraction": 0.0,
+            "untouched_fraction": 1.0,
+            "resynced_fraction": 0.0,
+            "non_interference_passed": true,
+            "hard_fail": false,
+            "info": {
+              "task_id": "send_launch_announcement",
+              "changed": {
+                "n_bindings": 2,
+                "n_met": 0,
+                "met": [],
+                "missed": [
+                  {
+                    "var_id": "announcement_send_state",
+                    "app": "mail",
+                    "entity_id": "M1",
+                    "field": "state",
+                    "operator": "set_state",
+                    "expected": "sent",
+                    "actual": "scheduled",
+                    "met": false
+                  },
+                  {
+                    "var_id": "announcement_send_state",
+                    "app": "mail",
+                    "entity_id": "M3",
+                    "field": "state",
+                    "operator": "set_state",
+                    "expected": "sent",
+                    "actual": "draft",
+                    "met": false
+                  }
+                ]
+              },
+              "untouched": {
+                "n_protected": 1,
+                "n_violated": 0,
+                "violated": []
+              },
+              "resynced": {
+                "var_id": "announcement_send_state",
+                "expected_new": "sent",
+                "real_post_value": "scheduled",
+                "rendered_line": "announcement_send_state [announcement_send_state] = scheduled",
+                "met": false
+              },
+              "hard_fail": false,
+              "weights": {
+                "changed": 0.5,
+                "untouched": 0.3,
+                "resynced": 0.2
+              }
+            }
+          },
+          "which_link_broke": "dispatch_partial",
+          "rendered_surface": "# Task: send_launch_announcement\n\n✎ 发布相关邮件状态  [launch_message_state] = sent\n    → mail.M1.state  (operator: set_state)\n    → mail.M3.state  (operator: set_state)\n",
+          "raw_compiler_output": "{\"task_binding\":{\"task_id\":\"send_launch_announcement\",\"variables\":[{\"var_id\":\"launch_message_state\",\"label\":\"发布相关邮件状态\",\"value\":\"sent\",\"editable\":true,\"bindings\":[{\"app\":\"mail\",\"entity_id\":\"M1\",\"field\":\"state\",\"operator\":\"set_state\"},{\"app\":\"mail\",\"entity_id\":\"M3\",\"field\":\"state\",\"operator\":\"set_state\"}]}],\"dependencies\":[]},\"text_response\":\"将项目发布公告 M1 和发布提醒 M3 的状态统一改为 sent。\",\"a2ui\":[]}"
+        },
+        {
+          "sample": 2,
+          "model": "gpt-5.6-sol",
+          "mock": false,
+          "compile_ok": true,
+          "compile_error": null,
+          "binding_valid": true,
+          "binding_errors": [],
+          "binding_accuracy": {
+            "n_gt": 2,
+            "tp": 0,
+            "fp": 2,
+            "fn": 2,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "f1_varid_semantic": 0.0,
+            "f1_triples": 1.0,
+            "semantic_alignment": {
+              "gt_vars_matched": [],
+              "gt_vars_unmatched": [
+                "announcement_send_state"
+              ],
+              "model_vars_matched": [],
+              "model_vars_unmatched": [
+                "launch_announcement_state",
+                "launch_reminder_state"
+              ]
+            },
+            "gt": [
+              [
+                "announcement_send_state",
+                "mail",
+                "M1",
+                "set_state"
+              ],
+              [
+                "announcement_send_state",
+                "mail",
+                "M3",
+                "set_state"
+              ]
+            ],
+            "got": [
+              [
+                "launch_announcement_state",
+                "mail",
+                "M1",
+                "set_state"
+              ],
+              [
+                "launch_reminder_state",
+                "mail",
+                "M3",
+                "set_state"
+              ]
+            ]
+          },
+          "round_trip_score": 0.3,
+          "round_trip": {
+            "score": 0.3,
+            "changed_fraction": 0.0,
+            "untouched_fraction": 1.0,
+            "resynced_fraction": 0.0,
+            "non_interference_passed": true,
+            "hard_fail": false,
+            "info": {
+              "task_id": "send_launch_announcement",
+              "changed": {
+                "n_bindings": 2,
+                "n_met": 0,
+                "met": [],
+                "missed": [
+                  {
+                    "var_id": "announcement_send_state",
+                    "app": "mail",
+                    "entity_id": "M1",
+                    "field": "state",
+                    "operator": "set_state",
+                    "expected": "sent",
+                    "actual": "scheduled",
+                    "met": false
+                  },
+                  {
+                    "var_id": "announcement_send_state",
+                    "app": "mail",
+                    "entity_id": "M3",
+                    "field": "state",
+                    "operator": "set_state",
+                    "expected": "sent",
+                    "actual": "draft",
+                    "met": false
+                  }
+                ]
+              },
+              "untouched": {
+                "n_protected": 1,
+                "n_violated": 0,
+                "violated": []
+              },
+              "resynced": {
+                "var_id": "announcement_send_state",
+                "expected_new": "sent",
+                "real_post_value": "scheduled",
+                "rendered_line": "announcement_send_state [announcement_send_state] = scheduled",
+                "met": false
+              },
+              "hard_fail": false,
+              "weights": {
+                "changed": 0.5,
+                "untouched": 0.3,
+                "resynced": 0.2
+              }
+            }
+          },
+          "which_link_broke": "dispatch_partial",
+          "rendered_surface": "# Task: send_launch_announcement\n\n✎ 项目发布公告状态  [launch_announcement_state] = sent\n    → mail.M1.state  (operator: set_state)\n\n✎ 发布提醒状态  [launch_reminder_state] = sent\n    → mail.M3.state  (operator: set_state)\n",
+          "raw_compiler_output": "{\"text_response\":\"将项目发布公告 M1 和发布提醒 M3 的状态分别设为 sent。\",\"a2ui\":[],\"task_binding\":{\"task_id\":\"send_launch_announcement\",\"variables\":[{\"var_id\":\"launch_announcement_state\",\"label\":\"项目发布公告状态\",\"value\":\"sent\",\"editable\":true,\"bindings\":[{\"app\":\"mail\",\"entity_id\":\"M1\",\"field\":\"state\",\"operator\":\"set_state\"}]},{\"var_id\":\"launch_reminder_state\",\"label\":\"发布提醒状态\",\"value\":\"sent\",\"editable\":true,\"bindings\":[{\"app\":\"mail\",\"entity_id\":\"M3\",\"field\":\"state\",\"operator\":\"set_state\"}]}],\"dependencies\":[]}}"
+        }
+      ]
+    },
+    {
+      "task_id": "outlook_release_reschedule",
+      "category": "reskin",
+      "category_description": "calendar reskin (appointment/scheduled_for/reschedule_appointment)",
+      "required_apps": [
+        "outlook_cal",
+        "taskboard"
+      ],
+      "n_samples": 3,
+      "binding_f1_samples": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "binding_f1_mean": 1.0,
+      "binding_f1_max": 1.0,
+      "binding_f1_semantic_samples": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "binding_f1_semantic_mean": 1.0,
+      "binding_f1_semantic_max": 1.0,
+      "binding_f1_triples_samples": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "binding_f1_triples_mean": 1.0,
+      "binding_f1_triples_max": 1.0,
+      "neg_control_score": 0.3,
+      "neg_control_passed": true,
+      "samples": [
+        {
+          "sample": 0,
+          "model": "gpt-5.6-sol",
+          "mock": false,
+          "compile_ok": true,
+          "compile_error": null,
+          "binding_valid": true,
+          "binding_errors": [],
+          "binding_accuracy": {
+            "n_gt": 3,
+            "tp": 3,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "f1_varid_semantic": 1.0,
+            "f1_triples": 1.0,
+            "semantic_alignment": {
+              "gt_vars_matched": [
+                "release_date"
+              ],
+              "gt_vars_unmatched": [],
+              "model_vars_matched": [
+                "release_date"
+              ],
+              "model_vars_unmatched": []
+            },
+            "gt": [
+              [
+                "release_date",
+                "outlook_cal",
+                "A1",
+                "reschedule_appointment"
+              ],
+              [
+                "release_date",
+                "taskboard",
+                "T1",
+                "set_deadline"
+              ],
+              [
+                "release_date",
+                "taskboard",
+                "T2",
+                "set_deadline"
+              ]
+            ],
+            "got": [
+              [
+                "release_date",
+                "outlook_cal",
+                "A1",
+                "reschedule_appointment"
+              ],
+              [
+                "release_date",
+                "taskboard",
+                "T1",
+                "set_deadline"
+              ],
+              [
+                "release_date",
+                "taskboard",
+                "T2",
+                "set_deadline"
+              ]
+            ]
+          },
+          "round_trip_score": 1.0,
+          "round_trip": {
+            "score": 1.0,
+            "changed_fraction": 1.0,
+            "untouched_fraction": 1.0,
+            "resynced_fraction": 1.0,
+            "non_interference_passed": true,
+            "hard_fail": false,
+            "info": {
+              "task_id": "outlook_release_reschedule",
+              "changed": {
+                "n_bindings": 3,
+                "n_met": 3,
+                "met": [
+                  {
+                    "var_id": "release_date",
+                    "app": "outlook_cal",
+                    "entity_id": "A1",
+                    "field": "scheduled_for",
+                    "operator": "reschedule_appointment",
+                    "expected": "2026-08-18",
+                    "actual": "2026-08-18",
+                    "met": true
+                  },
+                  {
+                    "var_id": "release_date",
+                    "app": "taskboard",
+                    "entity_id": "T1",
+                    "field": "deadline",
+                    "operator": "set_deadline",
+                    "expected": "2026-08-18",
+                    "actual": "2026-08-18",
+                    "met": true
+                  },
+                  {
+                    "var_id": "release_date",
+                    "app": "taskboard",
+                    "entity_id": "T2",
+                    "field": "deadline",
+                    "operator": "set_deadline",
+                    "expected": "2026-08-18",
+                    "actual": "2026-08-18",
+                    "met": true
+                  }
+                ],
+                "missed": []
+              },
+              "untouched": {
+                "n_protected": 3,
+                "n_violated": 0,
+                "violated": []
+              },
+              "resynced": {
+                "var_id": "release_date",
+                "expected_new": "2026-08-18",
+                "real_post_value": "2026-08-18",
+                "rendered_line": "release_date [release_date] = 2026-08-18",
+                "met": true
+              },
+              "hard_fail": false,
+              "weights": {
+                "changed": 0.5,
+                "untouched": 0.3,
+                "resynced": 0.2
+              }
+            }
+          },
+          "which_link_broke": null,
+          "rendered_surface": "# Task: outlook_release_reschedule\n\n✎ 发布日期  [release_date] = 2026-08-18\n    → outlook_cal.A1.scheduled_for  (operator: reschedule_appointment)\n    → taskboard.T1.deadline  (operator: set_deadline)\n    → taskboard.T2.deadline  (operator: set_deadline)\n",
+          "raw_compiler_output": "{\"text_response\":\"已将发布日期作为单一共享变量编译，发布会议及两个依赖任务将同步从 2026-08-14 推迟至 2026-08-18。\",\"a2ui\":[],\"task_binding\":{\"task_id\":\"outlook_release_reschedule\",\"variables\":[{\"var_id\":\"release_date\",\"label\":\"发布日期\",\"value\":\"2026-08-18\",\"editable\":true,\"bindings\":[{\"app\":\"outlook_cal\",\"entity_id\":\"A1\",\"field\":\"scheduled_for\",\"operator\":\"reschedule_appointment\"},{\"app\":\"taskboard\",\"entity_id\":\"T1\",\"field\":\"deadline\",\"operator\":\"set_deadline\"},{\"app\":\"taskboard\",\"entity_id\":\"T2\",\"field\":\"deadline\",\"operator\":\"set_deadline\"}]}],\"dependencies\":[{\"from_var\":\"release_date\",\"to_entity\":{\"app\":\"outlook_cal\",\"entity_id\":\"A1\"},\"relation\":\"release_meeting_tracks_release_date\"},{\"from_var\":\"release_date\",\"to_entity\":{\"app\":\"taskboard\",\"entity_id\":\"T1\"},\"relation\":\"deadline_tracks_release_date\"},{\"from_var\":\"release_date\",\"to_entity\":{\"app\":\"taskboard\",\"entity_id\":\"T2\"},\"relation\":\"deadline_tracks_release_date\"}]}}"
+        },
+        {
+          "sample": 1,
+          "model": "gpt-5.6-sol",
+          "mock": false,
+          "compile_ok": true,
+          "compile_error": null,
+          "binding_valid": true,
+          "binding_errors": [],
+          "binding_accuracy": {
+            "n_gt": 3,
+            "tp": 3,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "f1_varid_semantic": 1.0,
+            "f1_triples": 1.0,
+            "semantic_alignment": {
+              "gt_vars_matched": [
+                "release_date"
+              ],
+              "gt_vars_unmatched": [],
+              "model_vars_matched": [
+                "release_date"
+              ],
+              "model_vars_unmatched": []
+            },
+            "gt": [
+              [
+                "release_date",
+                "outlook_cal",
+                "A1",
+                "reschedule_appointment"
+              ],
+              [
+                "release_date",
+                "taskboard",
+                "T1",
+                "set_deadline"
+              ],
+              [
+                "release_date",
+                "taskboard",
+                "T2",
+                "set_deadline"
+              ]
+            ],
+            "got": [
+              [
+                "release_date",
+                "outlook_cal",
+                "A1",
+                "reschedule_appointment"
+              ],
+              [
+                "release_date",
+                "taskboard",
+                "T1",
+                "set_deadline"
+              ],
+              [
+                "release_date",
+                "taskboard",
+                "T2",
+                "set_deadline"
+              ]
+            ]
+          },
+          "round_trip_score": 1.0,
+          "round_trip": {
+            "score": 1.0,
+            "changed_fraction": 1.0,
+            "untouched_fraction": 1.0,
+            "resynced_fraction": 1.0,
+            "non_interference_passed": true,
+            "hard_fail": false,
+            "info": {
+              "task_id": "outlook_release_reschedule",
+              "changed": {
+                "n_bindings": 3,
+                "n_met": 3,
+                "met": [
+                  {
+                    "var_id": "release_date",
+                    "app": "outlook_cal",
+                    "entity_id": "A1",
+                    "field": "scheduled_for",
+                    "operator": "reschedule_appointment",
+                    "expected": "2026-08-18",
+                    "actual": "2026-08-18",
+                    "met": true
+                  },
+                  {
+                    "var_id": "release_date",
+                    "app": "taskboard",
+                    "entity_id": "T1",
+                    "field": "deadline",
+                    "operator": "set_deadline",
+                    "expected": "2026-08-18",
+                    "actual": "2026-08-18",
+                    "met": true
+                  },
+                  {
+                    "var_id": "release_date",
+                    "app": "taskboard",
+                    "entity_id": "T2",
+                    "field": "deadline",
+                    "operator": "set_deadline",
+                    "expected": "2026-08-18",
+                    "actual": "2026-08-18",
+                    "met": true
+                  }
+                ],
+                "missed": []
+              },
+              "untouched": {
+                "n_protected": 3,
+                "n_violated": 0,
+                "violated": []
+              },
+              "resynced": {
+                "var_id": "release_date",
+                "expected_new": "2026-08-18",
+                "real_post_value": "2026-08-18",
+                "rendered_line": "release_date [release_date] = 2026-08-18",
+                "met": true
+              },
+              "hard_fail": false,
+              "weights": {
+                "changed": 0.5,
+                "untouched": 0.3,
+                "resynced": 0.2
+              }
+            }
+          },
+          "which_link_broke": null,
+          "rendered_surface": "# Task: outlook_release_reschedule\n\n✎ 发布日期  [release_date] = 2026-08-18\n    → outlook_cal.A1.scheduled_for  (operator: reschedule_appointment)\n    → taskboard.T1.deadline  (operator: set_deadline)\n    → taskboard.T2.deadline  (operator: set_deadline)\n",
+          "raw_compiler_output": "{\"text_response\":\"已将发布日期建模为统一变量：发布会议及两项依赖任务将从 2026-08-14 同步推迟至 2026-08-18。\",\"a2ui\":[],\"task_binding\":{\"task_id\":\"outlook_release_reschedule\",\"variables\":[{\"var_id\":\"release_date\",\"label\":\"发布日期\",\"value\":\"2026-08-18\",\"editable\":true,\"bindings\":[{\"app\":\"outlook_cal\",\"entity_id\":\"A1\",\"field\":\"scheduled_for\",\"operator\":\"reschedule_appointment\"},{\"app\":\"taskboard\",\"entity_id\":\"T1\",\"field\":\"deadline\",\"operator\":\"set_deadline\"},{\"app\":\"taskboard\",\"entity_id\":\"T2\",\"field\":\"deadline\",\"operator\":\"set_deadline\"}]}],\"dependencies\":[{\"from_var\":\"release_date\",\"to_entity\":{\"app\":\"taskboard\",\"entity_id\":\"T1\"},\"relation\":\"deadline_tracks_release_date\"},{\"from_var\":\"release_date\",\"to_entity\":{\"app\":\"taskboard\",\"entity_id\":\"T2\"},\"relation\":\"deadline_tracks_release_date\"}]}}"
+        },
+        {
+          "sample": 2,
+          "model": "gpt-5.6-sol",
+          "mock": false,
+          "compile_ok": true,
+          "compile_error": null,
+          "binding_valid": true,
+          "binding_errors": [],
+          "binding_accuracy": {
+            "n_gt": 3,
+            "tp": 3,
+            "fp": 0,
+            "fn": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "f1_varid_semantic": 1.0,
+            "f1_triples": 1.0,
+            "semantic_alignment": {
+              "gt_vars_matched": [
+                "release_date"
+              ],
+              "gt_vars_unmatched": [],
+              "model_vars_matched": [
+                "release_date"
+              ],
+              "model_vars_unmatched": []
+            },
+            "gt": [
+              [
+                "release_date",
+                "outlook_cal",
+                "A1",
+                "reschedule_appointment"
+              ],
+              [
+                "release_date",
+                "taskboard",
+                "T1",
+                "set_deadline"
+              ],
+              [
+                "release_date",
+                "taskboard",
+                "T2",
+                "set_deadline"
+              ]
+            ],
+            "got": [
+              [
+                "release_date",
+                "outlook_cal",
+                "A1",
+                "reschedule_appointment"
+              ],
+              [
+                "release_date",
+                "taskboard",
+                "T1",
+                "set_deadline"
+              ],
+              [
+                "release_date",
+                "taskboard",
+                "T2",
+                "set_deadline"
+              ]
+            ]
+          },
+          "round_trip_score": 1.0,
+          "round_trip": {
+            "score": 1.0,
+            "changed_fraction": 1.0,
+            "untouched_fraction": 1.0,
+            "resynced_fraction": 1.0,
+            "non_interference_passed": true,
+            "hard_fail": false,
+            "info": {
+              "task_id": "outlook_release_reschedule",
+              "changed": {
+                "n_bindings": 3,
+                "n_met": 3,
+                "met": [
+                  {
+                    "var_id": "release_date",
+                    "app": "outlook_cal",
+                    "entity_id": "A1",
+                    "field": "scheduled_for",
+                    "operator": "reschedule_appointment",
+                    "expected": "2026-08-18",
+                    "actual": "2026-08-18",
+                    "met": true
+                  },
+                  {
+                    "var_id": "release_date",
+                    "app": "taskboard",
+                    "entity_id": "T1",
+                    "field": "deadline",
+                    "operator": "set_deadline",
+                    "expected": "2026-08-18",
+                    "actual": "2026-08-18",
+                    "met": true
+                  },
+                  {
+                    "var_id": "release_date",
+                    "app": "taskboard",
+                    "entity_id": "T2",
+                    "field": "deadline",
+                    "operator": "set_deadline",
+                    "expected": "2026-08-18",
+                    "actual": "2026-08-18",
+                    "met": true
+                  }
+                ],
+                "missed": []
+              },
+              "untouched": {
+                "n_protected": 3,
+                "n_violated": 0,
+                "violated": []
+              },
+              "resynced": {
+                "var_id": "release_date",
+                "expected_new": "2026-08-18",
+                "real_post_value": "2026-08-18",
+                "rendered_line": "release_date [release_date] = 2026-08-18",
+                "met": true
+              },
+              "hard_fail": false,
+              "weights": {
+                "changed": 0.5,
+                "untouched": 0.3,
+                "resynced": 0.2
+              }
+            }
+          },
+          "which_link_broke": null,
+          "rendered_surface": "# Task: outlook_release_reschedule\n\n✎ 发布日期  [release_date] = 2026-08-18\n    → outlook_cal.A1.scheduled_for  (operator: reschedule_appointment)\n    → taskboard.T1.deadline  (operator: set_deadline)\n    → taskboard.T2.deadline  (operator: set_deadline)\n",
+          "raw_compiler_output": "{\"text_response\":\"已将发布日期建模为统一变量，目标日期为 2026-08-18，并关联发布会议及两项依赖任务。\",\"a2ui\":[],\"task_binding\":{\"task_id\":\"outlook_release_reschedule\",\"variables\":[{\"var_id\":\"release_date\",\"label\":\"发布日期\",\"value\":\"2026-08-18\",\"editable\":true,\"bindings\":[{\"app\":\"outlook_cal\",\"entity_id\":\"A1\",\"field\":\"scheduled_for\",\"operator\":\"reschedule_appointment\"},{\"app\":\"taskboard\",\"entity_id\":\"T1\",\"field\":\"deadline\",\"operator\":\"set_deadline\"},{\"app\":\"taskboard\",\"entity_id\":\"T2\",\"field\":\"deadline\",\"operator\":\"set_deadline\"}]}],\"dependencies\":[{\"from_var\":\"release_date\",\"to_entity\":{\"app\":\"taskboard\",\"entity_id\":\"T1\"},\"relation\":\"deadline_tracks_release_date\"},{\"from_var\":\"release_date\",\"to_entity\":{\"app\":\"taskboard\",\"entity_id\":\"T2\"},\"relation\":\"deadline_tracks_release_date\"}]}}"
+        }
+      ]
+    },
+    {
+      "task_id": "set_mail_priorities",
+      "category": "unseen_app_reverse",
+      "category_description": "reverse-check: 2 distinct var_ids (announcement_priority=high, digest_priority=low) on the unseen mail app — guards against over-merging from the granularity heuristic",
+      "required_apps": [
+        "mail"
+      ],
+      "n_samples": 3,
+      "binding_f1_samples": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "binding_f1_mean": 0.0,
+      "binding_f1_max": 0.0,
+      "binding_f1_semantic_samples": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "binding_f1_semantic_mean": 1.0,
+      "binding_f1_semantic_max": 1.0,
+      "binding_f1_triples_samples": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "binding_f1_triples_mean": 1.0,
+      "binding_f1_triples_max": 1.0,
+      "neg_control_score": 0.3,
+      "neg_control_passed": true,
+      "samples": [
+        {
+          "sample": 0,
+          "model": "gpt-5.6-sol",
+          "mock": false,
+          "compile_ok": true,
+          "compile_error": null,
+          "binding_valid": true,
+          "binding_errors": [],
+          "binding_accuracy": {
+            "n_gt": 2,
+            "tp": 0,
+            "fp": 2,
+            "fn": 2,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "f1_varid_semantic": 1.0,
+            "f1_triples": 1.0,
+            "semantic_alignment": {
+              "gt_vars_matched": [
+                "announcement_priority",
+                "digest_priority"
+              ],
+              "gt_vars_unmatched": [],
+              "model_vars_matched": [
+                "project_announcement_priority",
+                "weekly_report_priority"
+              ],
+              "model_vars_unmatched": []
+            },
+            "gt": [
+              [
+                "announcement_priority",
+                "mail",
+                "M1",
+                "set_priority"
+              ],
+              [
+                "digest_priority",
+                "mail",
+                "M2",
+                "set_priority"
+              ]
+            ],
+            "got": [
+              [
+                "project_announcement_priority",
+                "mail",
+                "M1",
+                "set_priority"
+              ],
+              [
+                "weekly_report_priority",
+                "mail",
+                "M2",
+                "set_priority"
+              ]
+            ]
+          },
+          "round_trip_score": 0.3,
+          "round_trip": {
+            "score": 0.3,
+            "changed_fraction": 0.0,
+            "untouched_fraction": 1.0,
+            "resynced_fraction": 0.0,
+            "non_interference_passed": true,
+            "hard_fail": false,
+            "info": {
+              "task_id": "set_mail_priorities",
+              "changed": {
+                "n_bindings": 2,
+                "n_met": 0,
+                "met": [],
+                "missed": [
+                  {
+                    "var_id": "announcement_priority",
+                    "app": "mail",
+                    "entity_id": "M1",
+                    "field": "priority",
+                    "operator": "set_priority",
+                    "expected": "high",
+                    "actual": "normal",
+                    "met": false
+                  },
+                  {
+                    "var_id": "digest_priority",
+                    "app": "mail",
+                    "entity_id": "M2",
+                    "field": "priority",
+                    "operator": "set_priority",
+                    "expected": "low",
+                    "actual": "normal",
+                    "met": false
+                  }
+                ]
+              },
+              "untouched": {
+                "n_protected": 1,
+                "n_violated": 0,
+                "violated": []
+              },
+              "resynced": {
+                "var_id": "announcement_priority",
+                "expected_new": "high",
+                "real_post_value": "normal",
+                "rendered_line": "announcement_priority [announcement_priority] = normal",
+                "met": false
+              },
+              "hard_fail": false,
+              "weights": {
+                "changed": 0.5,
+                "untouched": 0.3,
+                "resynced": 0.2
+              }
+            }
+          },
+          "which_link_broke": "dispatch_partial",
+          "rendered_surface": "# Task: set_mail_priorities\n\n✎ 项目发布公告优先级  [project_announcement_priority] = high\n    → mail.M1.priority  (operator: set_priority)\n\n✎ 周报优先级  [weekly_report_priority] = low\n    → mail.M2.priority  (operator: set_priority)\n",
+          "raw_compiler_output": "{\"text_response\":\"已编译两个独立的邮件优先级调整：项目发布公告设为 high，周报设为 low；M3 保持不变。\",\"a2ui\":[],\"task_binding\":{\"task_id\":\"set_mail_priorities\",\"variables\":[{\"var_id\":\"project_announcement_priority\",\"label\":\"项目发布公告优先级\",\"value\":\"high\",\"editable\":true,\"bindings\":[{\"app\":\"mail\",\"entity_id\":\"M1\",\"field\":\"priority\",\"operator\":\"set_priority\"}]},{\"var_id\":\"weekly_report_priority\",\"label\":\"周报优先级\",\"value\":\"low\",\"editable\":true,\"bindings\":[{\"app\":\"mail\",\"entity_id\":\"M2\",\"field\":\"priority\",\"operator\":\"set_priority\"}]}],\"dependencies\":[]}}"
+        },
+        {
+          "sample": 1,
+          "model": "gpt-5.6-sol",
+          "mock": false,
+          "compile_ok": true,
+          "compile_error": null,
+          "binding_valid": true,
+          "binding_errors": [],
+          "binding_accuracy": {
+            "n_gt": 2,
+            "tp": 0,
+            "fp": 2,
+            "fn": 2,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "f1_varid_semantic": 1.0,
+            "f1_triples": 1.0,
+            "semantic_alignment": {
+              "gt_vars_matched": [
+                "announcement_priority",
+                "digest_priority"
+              ],
+              "gt_vars_unmatched": [],
+              "model_vars_matched": [
+                "release_announcement_priority",
+                "weekly_report_priority"
+              ],
+              "model_vars_unmatched": []
+            },
+            "gt": [
+              [
+                "announcement_priority",
+                "mail",
+                "M1",
+                "set_priority"
+              ],
+              [
+                "digest_priority",
+                "mail",
+                "M2",
+                "set_priority"
+              ]
+            ],
+            "got": [
+              [
+                "release_announcement_priority",
+                "mail",
+                "M1",
+                "set_priority"
+              ],
+              [
+                "weekly_report_priority",
+                "mail",
+                "M2",
+                "set_priority"
+              ]
+            ]
+          },
+          "round_trip_score": 0.3,
+          "round_trip": {
+            "score": 0.3,
+            "changed_fraction": 0.0,
+            "untouched_fraction": 1.0,
+            "resynced_fraction": 0.0,
+            "non_interference_passed": true,
+            "hard_fail": false,
+            "info": {
+              "task_id": "set_mail_priorities",
+              "changed": {
+                "n_bindings": 2,
+                "n_met": 0,
+                "met": [],
+                "missed": [
+                  {
+                    "var_id": "announcement_priority",
+                    "app": "mail",
+                    "entity_id": "M1",
+                    "field": "priority",
+                    "operator": "set_priority",
+                    "expected": "high",
+                    "actual": "normal",
+                    "met": false
+                  },
+                  {
+                    "var_id": "digest_priority",
+                    "app": "mail",
+                    "entity_id": "M2",
+                    "field": "priority",
+                    "operator": "set_priority",
+                    "expected": "low",
+                    "actual": "normal",
+                    "met": false
+                  }
+                ]
+              },
+              "untouched": {
+                "n_protected": 1,
+                "n_violated": 0,
+                "violated": []
+              },
+              "resynced": {
+                "var_id": "announcement_priority",
+                "expected_new": "high",
+                "real_post_value": "normal",
+                "rendered_line": "announcement_priority [announcement_priority] = normal",
+                "met": false
+              },
+              "hard_fail": false,
+              "weights": {
+                "changed": 0.5,
+                "untouched": 0.3,
+                "resynced": 0.2
+              }
+            }
+          },
+          "which_link_broke": "dispatch_partial",
+          "rendered_surface": "# Task: set_mail_priorities\n\n✎ 项目发布公告邮件优先级  [release_announcement_priority] = high\n    → mail.M1.priority  (operator: set_priority)\n\n✎ 周报邮件优先级  [weekly_report_priority] = low\n    → mail.M2.priority  (operator: set_priority)\n",
+          "raw_compiler_output": "{\"text_response\":\"已编译两个独立的邮件优先级调整：M1 设为 high，M2 设为 low；M3 保持不变。\",\"a2ui\":[],\"task_binding\":{\"task_id\":\"set_mail_priorities\",\"variables\":[{\"var_id\":\"release_announcement_priority\",\"label\":\"项目发布公告邮件优先级\",\"value\":\"high\",\"editable\":true,\"bindings\":[{\"app\":\"mail\",\"entity_id\":\"M1\",\"field\":\"priority\",\"operator\":\"set_priority\"}]},{\"var_id\":\"weekly_report_priority\",\"label\":\"周报邮件优先级\",\"value\":\"low\",\"editable\":true,\"bindings\":[{\"app\":\"mail\",\"entity_id\":\"M2\",\"field\":\"priority\",\"operator\":\"set_priority\"}]}],\"dependencies\":[]}}"
+        },
+        {
+          "sample": 2,
+          "model": "gpt-5.6-sol",
+          "mock": false,
+          "compile_ok": true,
+          "compile_error": null,
+          "binding_valid": true,
+          "binding_errors": [],
+          "binding_accuracy": {
+            "n_gt": 2,
+            "tp": 0,
+            "fp": 2,
+            "fn": 2,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "f1_varid_semantic": 1.0,
+            "f1_triples": 1.0,
+            "semantic_alignment": {
+              "gt_vars_matched": [
+                "announcement_priority",
+                "digest_priority"
+              ],
+              "gt_vars_unmatched": [],
+              "model_vars_matched": [
+                "project_release_announcement_priority",
+                "weekly_report_priority"
+              ],
+              "model_vars_unmatched": []
+            },
+            "gt": [
+              [
+                "announcement_priority",
+                "mail",
+                "M1",
+                "set_priority"
+              ],
+              [
+                "digest_priority",
+                "mail",
+                "M2",
+                "set_priority"
+              ]
+            ],
+            "got": [
+              [
+                "project_release_announcement_priority",
+                "mail",
+                "M1",
+                "set_priority"
+              ],
+              [
+                "weekly_report_priority",
+                "mail",
+                "M2",
+                "set_priority"
+              ]
+            ]
+          },
+          "round_trip_score": 0.3,
+          "round_trip": {
+            "score": 0.3,
+            "changed_fraction": 0.0,
+            "untouched_fraction": 1.0,
+            "resynced_fraction": 0.0,
+            "non_interference_passed": true,
+            "hard_fail": false,
+            "info": {
+              "task_id": "set_mail_priorities",
+              "changed": {
+                "n_bindings": 2,
+                "n_met": 0,
+                "met": [],
+                "missed": [
+                  {
+                    "var_id": "announcement_priority",
+                    "app": "mail",
+                    "entity_id": "M1",
+                    "field": "priority",
+                    "operator": "set_priority",
+                    "expected": "high",
+                    "actual": "normal",
+                    "met": false
+                  },
+                  {
+                    "var_id": "digest_priority",
+                    "app": "mail",
+                    "entity_id": "M2",
+                    "field": "priority",
+                    "operator": "set_priority",
+                    "expected": "low",
+                    "actual": "normal",
+                    "met": false
+                  }
+                ]
+              },
+              "untouched": {
+                "n_protected": 1,
+                "n_violated": 0,
+                "violated": []
+              },
+              "resynced": {
+                "var_id": "announcement_priority",
+                "expected_new": "high",
+                "real_post_value": "normal",
+                "rendered_line": "announcement_priority [announcement_priority] = normal",
+                "met": false
+              },
+              "hard_fail": false,
+              "weights": {
+                "changed": 0.5,
+                "untouched": 0.3,
+                "resynced": 0.2
+              }
+            }
+          },
+          "which_link_broke": "dispatch_partial",
+          "rendered_surface": "# Task: set_mail_priorities\n\n✎ 项目发布公告邮件优先级  [project_release_announcement_priority] = high\n    → mail.M1.priority  (operator: set_priority)\n\n✎ 周报邮件优先级  [weekly_report_priority] = low\n    → mail.M2.priority  (operator: set_priority)\n",
+          "raw_compiler_output": "{\"text_response\":\"已编译两个独立的邮件优先级调整：项目发布公告设为 high，周报设为 low；发布提醒保持不变。\",\"a2ui\":[],\"task_binding\":{\"task_id\":\"set_mail_priorities\",\"variables\":[{\"var_id\":\"project_release_announcement_priority\",\"label\":\"项目发布公告邮件优先级\",\"value\":\"high\",\"editable\":true,\"bindings\":[{\"app\":\"mail\",\"entity_id\":\"M1\",\"field\":\"priority\",\"operator\":\"set_priority\"}]},{\"var_id\":\"weekly_report_priority\",\"label\":\"周报邮件优先级\",\"value\":\"low\",\"editable\":true,\"bindings\":[{\"app\":\"mail\",\"entity_id\":\"M2\",\"field\":\"priority\",\"operator\":\"set_priority\"}]}],\"dependencies\":[]}}"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "overall_binding_f1_semantic_mean": 0.7778,
+    "overall_binding_f1_semantic_max": 1.0,
+    "overall_binding_f1_byte_mean": 0.3333,
+    "overall_binding_f1_byte_max": 1.0,
+    "overall_binding_f1_triples_mean": 1.0,
+    "overall_binding_f1_triples_max": 1.0,
+    "by_category": {
+      "unseen_app": {
+        "semantic_mean": 0.3333,
+        "semantic_max": 1.0,
+        "byte_max": 0.0,
+        "triples_max": 1.0,
+        "n": 3
+      },
+      "reskin": {
+        "semantic_mean": 1.0,
+        "semantic_max": 1.0,
+        "byte_max": 1.0,
+        "triples_max": 1.0,
+        "n": 3
+      },
+      "unseen_app_reverse": {
+        "semantic_mean": 1.0,
+        "semantic_max": 1.0,
+        "byte_max": 0.0,
+        "triples_max": 1.0,
+        "n": 3
+      }
+    },
+    "neg_control_all_passed": true,
+    "verdict": "OOD_PASS_SIGNAL",
+    "guidance": "all 3 OOD categories pass on var_id-semantic alignment F1 (≥ 0.6): ['unseen_app', 'reskin', 'unseen_app_reverse'] → model generalizes to held-out apps AND respects var_id granularity (reverse-check split confirmed); continue scaling benchmark + full W4 kill-test",
+    "thresholds": {
+      "pass_f1": 0.6,
+      "fail_f1": 0.3,
+      "neg_control_max": 0.3
+    },
+    "gate_metric": "f1_varid_semantic (var_id is a free-form label; align by binding-set)"
+  }
+}

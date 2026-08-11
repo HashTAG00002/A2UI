@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ message.mid }} · {{ sid }}{% endblock %}
+{% block content %}
+<a class="back-link" href="/{{ sid }}/message/{{ message.mid }}">← back to {{ message.mid }}</a>
+<div class="meta">session: <code>{{ sid }}</code> · editing message <code>{{ message.mid }}</code></div>
+
+<form class="edit-form" method="post" action="/{{ sid }}/message/{{ message.mid }}/mutate"
+      data-mail-id="{{ message.mid }}">
+  <div class="field">
+    <label>State (set_state operator — click a state to select it)</label>
+    <div id="op_state" class="radio-group" style="display:flex; gap:12px; padding:6px 0;">
+      {% for s in ["draft", "sent", "scheduled"] %}
+        <label style="display:inline-flex; align-items:center; gap:4px; cursor:pointer; padding:4px 10px; border:1px solid #d2d2d7; border-radius:6px; {% if s == message.state %}background:#1a73e8; color:#fff; border-color:#1a73e8;{% endif %}">
+          <input type="radio" name="set_state" value="{{ s }}" {% if s == message.state %}checked{% endif %} style="margin:0;">
+          <span>{{ s }}</span>
+        </label>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="field">
+    <label>Priority (set_priority operator — click a priority to select it)</label>
+    <div id="op_priority" class="radio-group" style="display:flex; gap:12px; padding:6px 0;">
+      {% for pr in ["high", "normal", "low"] %}
+        <label style="display:inline-flex; align-items:center; gap:4px; cursor:pointer; padding:4px 10px; border:1px solid #d2d2d7; border-radius:6px; {% if pr == message.priority %}background:#1a73e8; color:#fff; border-color:#1a73e8;{% endif %}">
+          <input type="radio" name="set_priority" value="{{ pr }}" {% if pr == message.priority %}checked{% endif %} style="margin:0;">
+          <span>{{ pr }}</span>
+        </label>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="field">
+    <label for="op_to">To (set_to operator)</label>
+    <input type="text" name="set_to" value="{{ message.to_addr }}" id="op_to">
+  </div>
+  <input type="hidden" name="mid" value="{{ message.mid }}">
+  <div class="actions">
+    <button type="button" id="review-btn">Review changes</button>
+    <a class="btn secondary" href="/{{ sid }}/message/{{ message.mid }}">Cancel</a>
+  </div>
+
+  <dialog id="confirm-mutate">
+    <div class="dlg-head">Confirm message edit</div>
+    <div class="dlg-body">
+      Apply the changes to message <code>{{ message.mid }}</code> ({{ message.subject }})?
+      <div class="diff" id="diff-rows"></div>
+    </div>
+    <div class="dlg-actions">
+      <button type="button" class="secondary" onclick="document.getElementById('confirm-mutate').close()">← Cancel</button>
+      <button type="submit">✓ Confirm edit</button>
+    </div>
+  </dialog>
+</form>
+
+<script>
+  (function () {
+    var btn = document.getElementById('review-btn');
+    var dlg = document.getElementById('confirm-mutate');
+    var diff = document.getElementById('diff-rows');
+    var orig = {state: "{{ message.state }}", priority: "{{ message.priority }}", to: {{ message.to_addr|tojson|safe }}};
+    btn.addEventListener('click', function () {
+      var rows = "";
+      function row(label, oldv, newv) {
+        if (String(oldv) === String(newv)) return "";
+        return '<div class="row"><span>' + label + '</span><span class="v">' + oldv + ' → ' + newv + '</span></div>';
+      }
+      rows += row("state", orig.state, document.getElementById('op_state').value);
+      rows += row("priority", orig.priority, document.getElementById('op_priority').value);
+      rows += row("to", orig.to, document.getElementById('op_to').value);
+      diff.innerHTML = rows || '<div class="row"><span>(no changes)</span></div>';
+      dlg.showModal();
+    });
+  })();
+</script>
+{% endblock %}

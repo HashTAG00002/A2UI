@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ task.title }} · {{ sid }}{% endblock %}
+{% block content %}
+<a class="back-link" href="/{{ sid }}">← back to taskboard</a>
+{% if moved %}<div class="toast" data-toast="moved">✓ task <code>{{ moved_tid }}</code> {{ moved_op }} → <code>{{ moved_value }}</code>.</div>{% endif %}
+<div class="meta">session: <code>{{ sid }}</code>{% if task_id %} · task: <code>{{ task_id }}</code>{% endif %}</div>
+
+<div class="detail" data-task-id="{{ task.tid }}">
+  <h2>{{ task.title }} <code>{{ task.tid }}</code></h2>
+  <dl>
+    <dt>TID</dt><dd data-field="tid"><code>{{ task.tid }}</code></dd>
+    <dt>Title</dt><dd data-field="title">{{ task.title }}</dd>
+    <dt>Status</dt><dd data-field="status"><span class="pill {{ task.status }}">{{ task.status }}</span></dd>
+    <dt>Assignee</dt><dd data-field="assignee">{{ task.assignee }}</dd>
+    <dt>Deadline</dt><dd data-field="deadline" class="task-deadline">{{ task.deadline }}</dd>
+    <dt>Depends on</dt><dd data-field="depends_on" class="dep">{{ task.depends_on | join(", ") }}</dd>
+  </dl>
+  <div class="actions">
+    <a class="btn" href="/{{ sid }}/task/{{ task.tid }}/edit">Edit</a>
+    <a class="btn secondary" href="/{{ sid }}">Done</a>
+  </div>
+</div>
+{% endblock %}

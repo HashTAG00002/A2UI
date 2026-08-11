@@ -16,6 +16,11 @@ signatures, no var_ids. See W1 plan §deliverable 3 + Verification step 6.
 W1 ships 2 tasks: ``release_reschedule`` + ``design_review_delay``. The 2-task
 minimum is the sub-kill-3 defense ("only hand-written binding works → custom
 dashboard, not a compiler").
+
+W2 adds ``doc_handoff`` — a Drive-using task (third app). It is a single-app
+single-step edit (move_file F1 parent: personal→shared), which makes it the
+canonical undo target for the W2 rollback gate. The 2 W1 tasks stay for
+regression + two-zone coverage.
 """
 from __future__ import annotations
 
@@ -132,9 +137,54 @@ DESIGN_REVIEW_DELAY = CanonicalTaskGraph(
 )
 
 
+# ── Task 3: doc_handoff (W2 — Drive, the third app; single-app single-step) ──
+# A Drive-only edit: move the launch announcement doc F1 from the personal
+# folder to the shared folder. One binding, one app, one op — the canonical
+# undo target for the W2 rollback gate (undo_last → F1.parent reverts to
+# "personal" via the real app's write API). Calendar+TaskBoard are seeded so the
+# 3-app mount is exercised and appear in the two-zone UI, but are protected
+# (non_interference_set) — only Drive F1.parent changes.
+DOC_HANDOFF = CanonicalTaskGraph(
+    task_id="doc_handoff",
+    goal="把项目发布公告文档移到共享文件夹，供团队审阅。（当前文档在 personal 文件夹。）",
+    seed_state={
+        "calendar": {"events": [
+            {"eid": "E1", "title": "项目发布会议", "date": "2026-08-14",
+             "time": "14:00-15:00", "calendar": "work", "rsvp": "accepted"},
+        ]},
+        "taskboard": {"tasks": [
+            {"tid": "T1", "title": "审阅发布公告", "status": "todo",
+             "assignee": "Alex", "deadline": "2026-08-14", "depends_on": []},
+        ]},
+        "drive": {"files": [
+            {"fid": "F1", "name": "发布公告.doc", "content": "v1", "parent": "personal",
+             "owner": "Alex", "modified": "2026-08-12", "type": "doc"},
+            {"fid": "F2", "name": "设计稿.png", "content": "", "parent": "shared",
+             "owner": "Bo", "modified": "2026-08-10", "type": "image"},
+            {"fid": "F3", "name": "会议纪要.doc", "content": "draft", "parent": "shared",
+             "owner": "Cara", "modified": "2026-08-11", "type": "doc"},
+        ]},
+    },
+    user_edit={"var_id": "launch_doc_location", "old": "personal", "new": "shared"},
+    bindings=[
+        CanonicalBinding("launch_doc_location", "drive", "F1", "parent",
+                         "move_file", "shared"),
+    ],
+    non_interference_set=[("drive", "F2"), ("drive", "F3"),
+                          ("calendar", "E1"), ("taskboard", "T1")],
+    expected_diff={
+        "drive": {"F1": {"parent": "shared"}},
+    },
+    description="User moves launch doc F1 personal→shared folder; only "
+                "Drive F1.parent changes; F2/F3/E1/T1 untouched. Single-app "
+                "single-step → the W2 rollback gate's canonical undo target.",
+)
+
+
 TASKS: dict[str, CanonicalTaskGraph] = {
     RELEASE_RESCHEDULE.task_id: RELEASE_RESCHEDULE,
     DESIGN_REVIEW_DELAY.task_id: DESIGN_REVIEW_DELAY,
+    DOC_HANDOFF.task_id: DOC_HANDOFF,
 }
 
 

@@ -1,6 +1,6 @@
 # TaskVM：把异质既有应用编译成可治理的可执行任务虚拟机
 
-> **CHI 2027 full paper 开工对齐文档（一次成型版）**。项目代号 **TaskVM**（不再用 A2UI 作代号——`A2UI` 是 Google 2025 年的通用 agentic-UI 声明式协议名 `a2ui.org` v0.8/v0.9.1，Macaron-A2UI 是团队自家的该协议训练侧实现，均非本项目私有名）。实现中可选择性复用 A2UI v0.8 作 UI 渲染传输格式，与更名不冲突。
+> **CHI 2027 full paper 开工对齐文档（一次成型版）**。项目代号 **TaskVM**（不再用 A2UI 作代号——`A2UI` 是 Google 2025 年的通用 agentic-UI 声明式协议名 `a2ui.org` v0.8/v0.9/v0.9.1/v1.0（candidate），Macaron-A2UI 是团队自家的该协议训练侧实现，均非本项目私有名）。实现中可选择性复用 A2UI v0.9 作 UI 渲染传输格式，与更名不冲突。**【2026-08-11 升级】** 此前因 `a2ui.org` 网络不可达，只能从 Macaron 论文附录手抄 v0.8 精简版；现已通过代理直连官方仓库 `github.com/a2ui-project/a2ui` 拉取 v0.9 官方源文件（`docs/references/A2UI-protocol-spec/v0_9/`，见该目录 `SOURCE.txt` 的完整出处记录），协议主线切换为 v0.9（v0.8→v0.9 是破坏性变更，非小版本递增，详见 `taskvm/benchmark/a2ui_spec.py` 顶部 docstring 及 `evolution_guide.md`）。
 >
 > 本文件是通读全部输入材料（`docs/oracle/` 5 份规划 txt + `docs/references/` 9 篇竞品/自家论文 tex）并完成全部对齐后形成的**唯一开工基础**。所有 novelty 引用均经独立逐字核对（标【核对】+ 文件:行号）。今天 2026-08-06；CHI 2027 full paper deadline ≈ 2026-09-10 AoE，无延期、约 5 周。
 
@@ -211,7 +211,7 @@ TaskVM 不展示几十步轨迹，而是解码成一个**活的任务虚拟机�
 - **投影什么**：**assistant 侧 A2UI 消息序列**（surfaceUpdate/dataModelUpdate/beginRendering/deleteSurface）。`3-problem.tex:7`。
 - **用户操纵什么**：client 渲染的 UI 控件（declarative 协议 + trusted catalog）。`3-problem.tex:5`。
 - **关键核实**：Macaron **明确拒绝执行现有界面**。`2-relatedworks.tex:5` *"we focus on assistant-side Generative UI rather than action execution over an existing interface"*。
-- **与 TaskVM 本质区别**：Macaron 是**解码器**这一半（GenUI 模型），明确排除**编码器**（既有界面执行）。TaskVM 占据的正是 Macaron 让出的那一半。**可复用资产**（不作竞品）：A2UI-Bench（300 任务）、L1 自动 / L2·L3 LLM-judge(gpt-5.1) / V1-V3 VLM-judge、Flutter Web renderer + 23 组件 catalog + render-check gate、LoRA SFT→GRPO 配方、训练好的 Grande(235B,74.2)/Venti(GLM-5.1,75.6)。但**不部署其训练模型**（主线用前沿通用模型 + A2UI v0.8 spec 注入 prompt；不下载 → 不算复用训练产物 → 不 pin 死 v0.8）。
+- **与 TaskVM 本质区别**：Macaron 是**解码器**这一半（GenUI 模型），明确排除**编码器**（既有界面执行）。TaskVM 占据的正是 Macaron 让出的那一半。**可复用资产**（不作竞品）：A2UI-Bench（300 任务）、L1 自动 / L2·L3 LLM-judge(gpt-5.1) / V1-V3 VLM-judge、Flutter Web renderer + 23 组件 catalog + render-check gate、LoRA SFT→GRPO 配方、训练好的 Grande(235B,74.2)/Venti(GLM-5.1,75.6)。但**不部署其训练模型**（主线用前沿通用模型 + A2UI v0.9 spec 注入 prompt；不下载 → 不算复用训练产物 → 不 pin 死具体协议版本）。
 - **撞车风险（VM 框架下）**：**1.5/10**。
 
 ### 3.9 Sidekick — 纯反馈层，不执行不写回【核对】
@@ -297,6 +297,8 @@ TaskVM 不展示几十步轨迹，而是解码成一个**活的任务虚拟机�
 
 ### 4.5 诚实代价（不报喜不报忧）
 
+> **【2026-08-11 订正】本节以下内容是 2026-08-07 重构时的历史判断，当时仍以为"binding-discovery + round-trip verifier"这一半已经扎实。`.mrules` E10 审计推翻了这个前提——见 §5 诚实现状盘点，读路径部分真实、写路径几乎全是后门、GenUI 完全不存在。以下段落保留作为历史记录，但"已实现"的判断不再成立，最新现状以 §5、§8 为准。**
+
 VM 框架**降低 collision 风险，但抬高执行门槛**：
 - **Collision 风险 ↓**：楔子更锋利、更无人占（性质 2-5 全缺）。novelty 这仗现在能打。
 - **Execution 风险 ↑**：W1 已实现 binding-discovery compiler + round-trip verifier（非干涉硬门 + 负对照，已 PASS）。但 VM 的其余性质——**回退/撤销真实变更（compensation）、只读区/可读写区分离、JVM moment、checkpoint+自底向上动态收集**——全是 W2-W5 要建的。5 周内建不完，"VM"就是 aspirational，审稿人会说"你叫 VM 但没回退没 substrate-invariance"。
@@ -304,29 +306,59 @@ VM 框架**降低 collision 风险，但抬高执行门槛**：
 
 ---
 
-## 5. 系统架构骨架（VM 框架，W1 已实现粗体部分）
+## 5. 系统架构骨架 + 诚实现状盘点（2026-08-11，`.mrules` E10 审计后重写，取消周次话术）
+
+> **本节是全文最重要的一次改写**。此前版本用"W1 已实现粗体部分"这种周次叙事，掩盖了一个根本问题：**从项目诞生第一天起，架构图里最核心的两个模型角色——GUI Agent 执行器（写/回退）与 GenUI 解码器——从未被真正实现过**，全部是 REST API 后门 + 硬编码字符串模板。详见 `.mrules` E10（全仓库级诚实审计）。**本节不再用"W1/W2/W3/W4 做完了什么"来组织，而是直接按新心智模型的五个阶段，逐段标注"现状=真实还是造假/占位符"，这才是唯一诚实、唯一权威的现状描述。**
+
+### 5.1 新心智模型主链路（唯一权威架构图，取代旧版目录树的隐含叙事）
 
 ```
-taskvm/
-├── apps/                  # 自建可重置 Web 应用（sqlite/内存后端，复用 SenseAct engine 模式）
-│   ├── calendar/  taskboard/  drive/  _heldout/
-│   │   └── engine/        # reward.py(判成功) / injector.py(初始状态+外部并发注入) / *_db.py
-├── harness/               # browser_controller(Playwright) / state_adapter(reset·seed·read-canonical) / trace_capture / replay_engine / shadow_txn(★回退/compensation, W2-W3 建)
-├── task_state/            # representation(VM-state schema) / compiler(GUI Agent=编码器→VM-state) / entity_binding(★双向绑定,一变量→多 app) / dependency_graph(effect 传播) / projection_policy(规则/启发式,不追求 Pareto)
-├── execution/             # patch_compiler(VM 变量→semantic patch) / replanner / action_dispatcher(GUI/MCP/API hybrid) / rollback(★compensation/saga,W3 建)
-├── verifier/              # app_state_checks / cross_app_checks / non_interference(硬门) / round_trip_checks / reconciliation(★随世界重投影,W3-W4) / rollback_verify(★回退后真实复原,W3)
-├── workspace_ui/          # renderer / editable_components / live_sync  ★两区分离:只读区(投影)+可读可写区(governance),W2-W3 建
-├── benchmark/             # task_templates / initial_states(隐藏 canonical graph) / user_edits / ood_splits / live_runs；API 成本追踪复用 SenseAct cost_model.py
-├── baselines/             # 规则/类型匹配·prompt-only·frontier+shadow·人工 binding 上界·规则+critic
-├── user_study/            # 4 条件
-└── evaluation/  docker-compose.yml  README.md
+真实 app 渲染画面（截图 / DOM / a11y）
+        │
+        │ 【① 编码器 = GUI Agent 的"观测"能力】
+        │  输入：截图/DOM/a11y；输出：VM-state（结构化任务状态）
+        │  可复用 OSWorld mm_agents 的 grounding/观测模式
+        ▼
+   VM-state（结构化任务状态：var_id → app.entity_id.field via operator）
+        │
+        │ 【② 解码器 = 真正的 GenUI 模型调用】
+        │  输入：VM-state；输出：人可操纵界面描述（如 A2UI 消息或等价结构）
+        ▼
+   人可操纵的两区界面（只读区投影 + 可读可写区 governance）
+        │
+        │ 【③ 人在界面上编辑】
+        │  产生一个语义化的"意图 patch"（如"把日期改成 8/18"或"撤销上一步"）
+        ▼
+   语义化 patch / 撤销意图
+        │
+        │ 【④ 执行器 = GUI Agent 的"动作"能力】
+        │  输入：当前渲染画面 + 这个意图；模型自主决定点哪里/输入什么/按什么键
+        │  逐步执行，可复用 OSWorld mm_agents 某个 agent 的 grounding+动作循环模式
+        │  【回退同理：GUI Agent 重新观察当前画面，自主规划一次新的撤销手势序列；
+        │   找不到能完成撤销意图的 UI 控件，诚实报告"做不到"，不得回退到调 API】
+        ▼
+   真实 app 状态改变（通过浏览器自动化产生的真实点击/输入/回车）
+        │
+        │ 【⑤ 独立 verifier 重新读真实状态】
+        ▼
+   判定 changed-happened / non-interference / reconciliation / 是否可回退
 ```
 
-**W1 已实现**（commit `1d8feee`，已 PASS，非 cherry-pick）：`apps/{calendar,taskboard}` + `harness/{state_adapter,replay_engine,trace_capture}` + `task_state/{representation,compiler,entity_binding,dependency_graph,projection_policy(rule stub)}` + `execution/{patch_compiler,action_dispatcher}` + `verifier/{canonical_state,round_trip_checks,non_interference}` + `workspace_ui/renderer` + `benchmark/{fixtures,model_client,cost_model,a2ui_spec}` + `evaluation/run_w1_killtest`。
+**唯一判定标准（`.mrules` E10，写死，任何审计/实现都必须遵守）**：
+> 如果一步写操作或回退操作，不需要打开浏览器、不需要渲染出页面、也不需要模拟一次真实的点击/输入/回车，就能让状态发生改变，那它就是后门，不合规——无论其内部实现看起来多么"语义化"、多么像是在调用 app 自己的业务 API。
 
-**W1 实测**：2 任务×3 样本，binding F1=1.0（模型仅从 a11y/DOM 观测发现 `release_date→calendar.E1.move_event+taskboard.T1/T2.set_deadline`），round-trip changed/untouched/resynced 全 1.0，**neg-control=0.3**（诚实，不报假阳性），**non-interference 硬门**（违反钳到 ≤0.3），**no-leak 静态可强制**（compiler 不 import fixtures/verifier）。跨 gpt-5.5/gpt-5.6-sol 可复现。
+### 5.2 逐阶段诚实现状（不是"做完了多少"，是"哪一段是真的、哪一段是造假"）
 
-**三个承重不变量（违反任一即 void）**：① read-path-is-GUI/write-path-is-API split（compiler 读渲染 GUI 观测，永不读 DB）；② no-leak canonical state（verifier-only GT）；③ negative-control（broken dispatcher 必须 ≤0.3）。
+| 架构阶段 | 现状定性 | 证据 |
+|---|---|---|
+| ① 编码器·读（`task_state/compiler.py`） | **部分真实，全系统唯一被模型化的环节** | 只读 `TraceFixture.final_obs`（a11y 文本+DOM HTML），不 import GT fixtures；W1 kill-test 真实调用 `gpt-5.6-sol` 从渲染文本发现 binding。**但**渲染页面极单薄（`calendar.html` 只是一张表格+内嵌 JS `fetch()`），测的更接近结构化信息抽取而非真实 GUI 场景理解。 |
+| ④ 执行器·写（`execution/action_dispatcher.py` → `harness/state_adapter.py::mutate`） | **除 1 处例外，全部是后门** | `CalendarAdapter`/`TaskBoardAdapter`/`DriveAdapter`/`MailAdapter`/`OutlookCalAdapter` 的 `mutate` 全是 `requests.post(内部 JSON API)`，从未打开浏览器、从未渲染页面、从未模拟点击/输入。唯一例外 `mobilegym_bridge.py::_send_message` 用了真实 Playwright 按键事件，但也只是一段**硬编码固定动作序列**（`open_app→深链→固定 evaluate 脚本 focus→type_text→ENTER`），不是"观察画面→自己决定点哪/输入什么"的决策过程，连"agent"的最低标准都够不上，对照 OSWorld `mm_agents`（`uitars_agent.py`/`aguvis_agent.py`/`gta1` 等，截图/a11y→模型决策→坐标动作→执行→重新观测的真实闭环）差距明显。 |
+| 回退（`execution/rollback.py`） | **字段级值反转，不是 GUI 重规划** | 直接把 `before_value` 塞回同一个 `operator` 重新调一次 `mutate` API，本质仍是③的后门写路径，没有"GUI Agent 重新观察画面、自主规划一次新撤销手势"这个环节。 |
+| ② 解码器·GenUI（`workspace_ui/renderer.py` + `server.py`） | **完全不存在，本轮新发现，此前所有交接文档均未点破** | `render()` 是纯 Python f-string 拼接，`_PAGE_TPL` 是写死的 Jinja2 模板，`editable_components.py` 全部是字符串拼接函数。全仓库找不到任何一处调用"GenUI 生成模型"把 VM-state 解码成界面的代码。开工大纲反复强调的"两个模型角色独立（解码器 vs 编码器+写回）"，目前**两个角色都没有被真正实现**——执行器是硬编码 API 调用，解码器是硬编码模板渲染。 |
+| ⑤ 独立 verifier（`verifier/*`） | **诚实，本层不需要变** | 只读真实 app 状态判定，不关心状态是被 API 改的还是被 GUI 点出来的，因此在①③返工后大概率可以直接复用。 |
+| kill-test 数字（`eval_results/*.json`） | **需要重新定性，此前全部作废** | `run_w1_killtest.py` 等衡量的实际上只是"模型能否从渲染 HTML 文本正确抽取 `(var_id, app, entity_id, operator)` 四元组，且套进硬编码 REST API 后状态按预期改变"——是一个信息抽取任务的成功率，与"GUI Agent 能否操作真实软件""GenUI 能否生成好界面"这两个本该是核心贡献的问题完全无关。这两个问题至今从未被测过一次，重跑前不得再引用旧数字。 |
+
+**责任归属（不是这一轮 coding agent 编的谎）**：审查 `renderer.py` 与 `compiler.py` 的原始 docstring 可确认，把 GenUI 换成硬编码模板、把执行器换成 REST API，是项目早期为了先把 round-trip/non-interference/rollback 等验证器逻辑跑通而做的、显式声明过的工程简化。但这个简化从项目早期一直存活到现在，跨越多轮迭代，**从未有任何一次交接文档把"这是占位符，不是真实模型"这件事讲清楚过**。任何后续审计如果只回答被问到的那一个点，很容易把"这一处有问题"默认成"其余没被问到的地方大概率没问题"——这正是本项目吃过的亏，见 `.mrules` E10。
 
 ---
 
@@ -338,40 +370,57 @@ taskvm/
 
 ---
 
-## 7. AI 侧：训什么 / 不训什么 + 协议
+## 7. AI 侧：四个真实模型调用点 + 训什么 / 不训什么（2026-08-11 按 E10 新架构改写）
 
-- **不训** UI 生成器（Macaron 已做到 30B/235B/754B + A2UI-Bench，且是自家工作）。**不训** GUI executor（UI-TARS/GUI-Owl/UI-Venus/Claude Computer Use 已在做，复用）。**不部署 Macaron 已训练模型**（Grande/Venti）。
-- **主线 train-free**：前沿通用模型（GPT-5.6-sol / Claude-Sonnet-5）+ A2UI v0.8 spec 注入 system prompt（Macaron 自己对标的 full-prompt baseline 做法，不需要 skill 机制）。**两个模型角色独立**：Agentic-UI 生成模型（解码器）vs compute-use 执行模型（编码器+写回），两次独立调用不共享 context。
-- **唯一值得学（W5 Go/No-Go）**：`Cross-App Binding Critic`——一个 VM 变量在异质 app、不同字段名、不同 GUI 表达中分别对应哪些真实状态与操作；改它后哪些关联状态必须同步（effect propagation）。标签来源：cloned sandbox 候选 binding → 读真实 before/after state diff → 与隐藏 expected diff 比 → 完全匹配正例、漏改/错改/多改 hard negative。**非 LLM 自评。** 仅当 seen app prompt≈92% 但 renamed≈71%、unseen≈54%、错误集中在同名异义/隐含依赖时才训（3B-7B QLoRA）。否则 train-free。**verifier 永远来自环境状态，绝不让生成 binding 的模型自评。**
+> 此前版本只笼统提"两个模型角色独立"，但从未把"哪四次调用、各自输入输出契约是什么、各自可复用哪个开源实现"讲清楚，导致执行器/解码器长期停留在占位符。本节按 §5.1 主链路的四个箭头逐一拆解。
+
+### 7.1 ① 编码器·观测（GUI Agent 读）
+- **输入**：真实 app 渲染画面（截图 + a11y 树 / DOM）。**输出**：VM-state 结构化绑定 `(var_id, app, entity_id, operator)`。
+- **现状**：W1 已验证此环节可用前沿通用模型（`gpt-5.6-sol`）从渲染文本零样本发现 binding，本环节**保留、可复用**，不需要重新选型，但后续要在更丰富的真实交互页面（§8 新 app UI）上重新验证泛化性。
+
+### 7.2 ② 解码器·GenUI（真正需要新增的模型调用）
+- **输入**：VM-state。**输出**：人可操纵的两区界面描述（直接复用 A2UI v0.9 协议消息格式：`createSurface`/`updateComponents`/`updateDataModel`/`deleteSurface` 等，作为 renderer 的目标 schema，而不是自己发明一套；具体消息形状见 `taskvm/benchmark/a2ui_spec.py::A2UI_V09_SPEC` 及 `docs/references/A2UI-protocol-spec/v0_9/`）。
+- **现状**：**完全不存在，是本轮必须新增的调用**。做法：前沿通用模型 + system prompt 注入 A2UI v0.9 spec（Macaron 自己对标的 full-prompt baseline 做法，协议版本已从 v0.8 升级），输出结构化 UI 描述后再由一个薄的渲染层转成 HTML，渲染层本身不再包含任何"决定界面长什么样"的逻辑——那必须由模型决定。
+- **不训**：UI 生成器（Macaron 已做到 30B/235B/754B + A2UI-Bench，且是自家工作），**不部署 Macaron 已训练模型**（Grande/Venti），主线用前沿通用模型 train-free。
+
+### 7.3 ③ 意图 patch 生成（人编辑 → 语义化 patch，轻量，通常规则/小模型即可）
+- 由 GenUI 渲染出的可编辑控件产生结构化 patch（不是自由文本），这一步不需要重的模型调用，但如果人以自然语言下达撤销/修改意图，需要一个轻量解析步骤把它转成语义化 patch/撤销意图。
+
+### 7.4 ④ 执行器·动作（GUI Agent 写/回退，最需要补的一环）
+- **输入**：当前渲染画面 + 语义化 patch/撤销意图。**输出**：一串真实 GUI 手势动作（点击坐标/输入文本/按键），通过浏览器自动化真实执行，重新观测确认。
+- **可复用参考实现**：`/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/OSWorld/mm_agents` 下的真实 GUI Agent harness（如 `uitars_agent.py`、`aguvis_agent.py`、`gta1`、`opencua`、`qwen25vl_agent.py`），研究它们"截图/a11y → 模型决策 → 坐标动作 → 执行 → 重新截图"的闭环协议，选一种模式接入，**不是照抄某个具体模型权重，而是照抄这个 harness 的输入输出契约**。
+- **不训** GUI executor（UI-TARS/GUI-Owl/UI-Venus/Claude Computer Use 已在做，直接复用其推理接口，不重新训练）。
+- **回退**：同样是这个执行器的调用，输入变成"当前画面 + 撤销意图"，模型自主重新规划一次撤销手势序列；如果模型判断找不到能完成撤销的 UI 路径，必须诚实返回"不可逆"，不允许回退到调用内部 API 强行改状态。
+
+### 7.5 两个模型角色独立的边界（继承自旧版，依然成立）
+**Agentic-UI 生成模型（②解码器）vs compute-use 执行模型（①④编码器+写回）两次独立调用，不共享 context**，即使同用一家厂商模型也要分开调，避免"生成界面的模型"和"执行动作的模型"互相污染彼此的推理链条。
+
+### 7.6 唯一值得学（Go/No-Go，训练非默认）
+`Cross-App Binding Critic`——一个 VM 变量在异质 app、不同字段名、不同 GUI 表达中分别对应哪些真实状态与操作；改它后哪些关联状态必须同步（effect propagation）。标签来源：cloned sandbox 候选 binding → 读真实 before/after state diff → 与隐藏 expected diff 比 → 完全匹配正例、漏改/错改/多改 hard negative。**非 LLM 自评。** 仅当 seen app prompt≈92% 但 renamed≈71%、unseen≈54%、错误集中在同名异义/隐含依赖时才训（3B-7B QLoRA）。否则 train-free。**verifier 永远来自环境状态，绝不让生成 binding 的模型自评。**
 
 ---
 
-## 8. 五周工作计划（VM 框架，W1 已 PASS，重新组织 W2-W6）
+## 8. 返工任务分解（2026-08-11 按 E10 新架构重写，取消 W1-W6 周次划分）
 
-> 用户确认：W1 一下午 agent 就做完了，不用一周；不需要训练模型，尽力赶上 CHI。旧版 W1/W4 双 kill-test 已过时——VM 框架下 kill-test 是**分布式的**，每个 VM 性质都有自己的 gate。计划按"5 周建完 VM 其余性质 + OOD 站 + 用户研究"组织，工作 solid 优先、尽力赶 CHI。
+> **为什么取消周次划分**：旧版"五周工作计划"是在"读写链路已经跑通、只差 VM 剩余性质"这个错误假设下写的。E10 审计证明这个假设本身不成立——读写链路的"写"这一半从未真实存在过。继续套用周次框架会诱导 coding agent 把"写更多占位代码、生成更多 kill-test JSON"误当成进度。**新组织方式：不分周，按 §5.1 新心智模型的五个阶段拆出可独立验收的任务包，每个任务包只有"真做完/没做完"两种状态，不存在"看起来做完了"这种中间态。** 任务量刻意开得很大，允许自主长时间连续执行，不需要每完成一小步就等待确认。
 
-### 核心锚点重述（驱动排期）
-旧四锚点（跨 app 等）只抓 VM 冰山一角，导致 W1 只建了"binding-discovery + round-trip verify"而**忽视了回退/两区/JVM-moment/governance**。新计划围绕 **5 个 VM 性质**（§0 锚点）各设一个 gate：
+### 8.1 五个任务包总览（对应 §5.1 主链路的五个箭头）
 
-| VM 性质 | gate 名 | 周次 | gate 判据 |
+| 任务包 | 对应架构环节 | 目标产物 | 验收标准（唯一诚实标准，见 §5.1 判定标准） |
 |---|---|---|---|
-| bidirectional binding + round-trip | **W1 已 PASS** | W1（done） | binding F1=1.0 from GUI obs + round-trip 1.0 + neg-control ≤0.3 |
-| governance + reversibility | **W3 rollback kill-test** | W3 | 撤销一次跨 app 变更 → 真实 app 复原忠实（Rollback Fidelity）+ 只读区/可读写区分离可用 |
-| bottom-up dynamic re-projection | **W3 reconciliation kill-test** | W3 | 外部并发改 app → 只读区自动标红 + 合并选项（reconciliation） |
-| substrate-independence | **W4 JVM-moment kill-test** | W4 | 同操作跨 Stack A/B 界面稳定 + 语义一致 + 轨迹不同（Substrate-Invariance） |
-| OOD generalization | **W4 OOD kill-test（命门）** | W4 | rename/reskin/未见 app 上 binding F1 不崩（>0.6） |
+| **P1 真实可交互 UI** | 前置基础设施 | 5 个自建 app（calendar/taskboard/drive/mail/outlook_cal）全部补齐可被真实点击/输入的完整 GUI（详情页/编辑表单/删除确认对话框/发送按钮等），不再是"一张只读表格+JS 直连按钮" | 每个 app 的每个写操作都能找到一条纯 GUI 路径完成，不需要看任何内部 API 文档 |
+| **P2 GUI Agent 执行器（写）** | ④ | 接入真实 GUI grounding/agent 模型（参考 OSWorld `mm_agents`），驱动浏览器自动化完成 P1 里每个 app 的写操作 | 写路径全部满足 §5.1 判定标准；`state_adapter.py::mutate` 不再直接 `requests.post` 业务 API，而是调用执行器模块 |
+| **P3 GUI Agent 回退（撤销）** | ④ 回退分支 | 执行器收到"撤销上一步"意图后，重新观察当前画面，自主规划一次新的撤销手势序列；找不到路径则诚实返回不可逆 | `execution/rollback.py` 不再是字段值反转，而是调用执行器重新规划；不可逆情况有明确、可复现的失败路径（参考 MobileGym 微信 409 案例） |
+| **P4 GenUI 解码器** | ② | 真正调用一个 GenUI 生成模型，输入 VM-state，输出人可操纵界面描述（A2UI v0.9 消息格式），替换 `renderer.py` 的字符串拼接 | `renderer.py` 里不再有任何硬编码的"界面长什么样"的判断逻辑，界面结构由模型输出决定 |
+| **P5 重新验证** | ⑤ + 全链路 | 用 P2-P4 的真实实现重跑 binding-discovery + round-trip + non-interference + rollback 全套 kill-test，产出新的、可信的 `eval_results/*.json` | 旧 `eval_results/*.json`（除 verifier 相关）全部标记作废；新报告必须能被此文档 §5.2 的判定标准复核通过 |
 
-### 排期
+### 8.2 任务包之间的依赖与建议顺序
 
-| 周 | 日期 | 目标 | 必须完成的纵向切片 + gate |
-|---|---|---|---|
-| **W2** | 8/7–8/13 | 第 3 app + 两区 UI + 回退骨架 | Drive app + state adapter 泛化；`workspace_ui` 两区分离（只读区投影 + 可读可写区 governance）；`execution/rollback`（compensation/saga）骨架；live-mode 小规模。**gate：两区可分别操纵，回退骨架能撤销单 app 单步** |
-| **W3** | 8/14–8/20 | **governance kill-test（rollback + reconciliation）** + benchmark 雏形 | 跨 app 回退忠实（Rollback Fidelity）+ 外部并发注入触发 reconciliation 标红；`verifier/rollback_verify` + `verifier/reconciliation`；benchmark 40 模板/800 实例 + 隐藏 canonical graph + 各 baseline。**gate：W3 rollback kill-test + reconciliation kill-test 双 PASS（neg-control 仍 ≤0.3）** |
-| **W4** | 8/21–8/27 | **JVM-moment + OOD kill-test（命门）** + 训练 Go/No-Go | Stack A/B（2 stack × 2-3 app）substrate-invariance；OOD split（rename/reskin/未见 app）；训练决策（大概率 train-free）；failure analysis。**gate：JVM-moment kill-test + OOD kill-test（命门，F1>0.6）** |
-| **W5** | 8/28–9/3 | 用户研究 + 论文主体并行 | 若 IRB 就绪：~12-18 人 within-subject 4 条件（C0 raw-multi-app / C1 static-read-only / C2 chat-agent+tools non-inferiority / C3 ours），非劣性 margin=C3 不低于 C2 的 5pp，N=18；并行写 Intro/RW/System/Benchmark/Eval。IRB 无则走轻量自述路径，pilot + 后置正式，不阻塞投稿 |
-| **W6** | 9/4–9/10 | 冻结 + 投稿 | 重跑终值 + 统计/可视化 + ablation + figure（teaser 用 §4.4 四步弧）+ demo 视频 + 匿名化 + 全文收敛 + 投稿 |
+P1（UI）是 P2/P3 的前提（没有可点击的界面，执行器无从谈起）；P4（GenUI）与 P1/P2/P3 相对独立，可以并行推进；P5 必须在 P1-P4 全部完成后才有意义（否则测的还是旧的、已作废的链路）。**不需要每个 app 都做完 P1 才开始 P2**——建议以 Calendar 为第一个纵向打穿的 app（P1→P2→P3→P5 全链路在 Calendar 上先跑通一次，验证整体方案可行），再横向推广到 TaskBoard/Drive/Mail/OutlookCal。
 
-**最关键风险**：① **W4 OOD 是命门**（W1 只测近同构 date-move，泛化未证）——建议 W2 收尾就备 OOD fixture，W3 benchmark 嵌 OOD split 提前跑，别等 W4 才发现不泛化。② **W3 rollback/reconciliation 的工程量**——compensation/saga 跨真实 app 不简单，是 VM 事务性的硬骨头。**功能冻结**（W6）：禁止新增 OSWorld 全量/记忆/长期 history/UI 风格生成/多任务族/通用 Agent OS/训练（除非 W4 OOD gap）。
+### 8.3 不设"周"、但设"诚实检查点"
+
+不再用"第几周该做到哪"来管理进度，取而代之的是：**每完成一个任务包，必须立刻用真实运行产出一份可复核的证据（截图/录屏/落盘 JSON），不接受纯文字汇报"已完成"**——这是 `.mrules` E8/E9 反复强调的教训在新架构下的延续。具体证据形式见交接 prompt（`docs/HANDOFF_TaskVM.md`）。
 
 ---
 
@@ -424,7 +473,7 @@ taskvm/
 
 1. **VM 框架五性质同时存在**才拉开差距（§0）。少一个就被竞品吸收。**尤其：governance（人侧）≠ autonomous（agent 侧），不要搞混**——AgentLens 侧重 autonomous 下何时介入，ALLOY 人类监督工作流，TaskVM 是 governance 大前提下尽量自治，方向相反。
 2. **verifier 永远来自环境状态**（sandbox 隐藏 canonical state），**绝不让生成 binding 的模型自评**。
-3. **不部署 Macaron 已训练模型**。主线 = 前沿通用模型 + A2UI v0.8 spec 注入 prompt。不下载模型 → 不算复用训练产物 → 不 pin 死 v0.8（协议升级只换 prompt 文本）。
+3. **不部署 Macaron 已训练模型**。主线 = 前沿通用模型 + A2UI v0.9 spec 注入 prompt。不下载模型 → 不算复用训练产物 → 不 pin 死具体协议版本（协议升级只换 `taskvm/benchmark/a2ui_spec.py` 这一处 prompt 文本；v0.8→v0.9 已完成一次这样的升级，v0.8 已作废）。
 4. **两个模型角色独立**（解码器=UI 生成 vs 编码器+写回=compute-use），两次独立调用不共享 context。
 5. **SCF 降级为衍生贡献**。一等贡献 = 可治理的可执行 VM 本身。`projection_policy` 用规则/启发式，不跑 Pareto；SCF 完整三轴测量写 Discussion/Future Work。
 6. **demo 开场必须用 §4.4 四步弧**（改日期→真实同步改→verifier 非干涉→撤销真实复原→外部改触发 reconcile→跨 Stack 稳定）。**绝不用状态仪表盘开场**。
@@ -432,20 +481,28 @@ taskvm/
 8. **"统一信息实体"仅作 task_state 叙事包装**，不建独立模块（否则撞 SaC）。
 9. **项目代号 = TaskVM**（不用 A2UI）。A2UI 协议可作渲染层传输格式，与更名不冲突。
 10. **AOHP 是相邻工作、不撞车**（OS 层 service composition，无 verify，无 state 绑定）。可借鉴 checkpoint-weighted completion rate。
-11. **benchmark 混合**：3 白盒（Calendar/TaskBoard/Drive）+ 1 held-out 黑盒（对模型黑盒/对 verifier 白盒）。held-out = 两者都要（1 个真未见 app + 已见 app 的 rename/reskin/schema 变体），分别报 OOD。Mail = out。规模 40 模板/800 实例/OOD ~20%。
+11. **benchmark 混合**：3 白盒（Calendar/TaskBoard/Drive）+ 1 held-out 黑盒（对模型黑盒/对 verifier 白盒）。held-out = 两者都要（1 个真未见 app + 已见 app 的 rename/reskin/schema 变体），分别报 OOD。Mail = out。规模 40 模板/800 实例/OOD ~20%。**Drive 建法照 W1 实际代码（单文件 `app.py`），不照 §5 蓝图的 `engine/` 子目录（见 §5 订正）。**
 12. **用户研究 = 4 条件**（后置非阻塞，自动评测是主体）。非劣性 margin = C3 不低于 C2 的 5pp，N=18 within-subject。IRB 无则走轻量自述路径。
-13. **reconciliation = re-read-on-action + 冲突标红不静默覆盖**；并发修改注入 = `injector.py` 预留最简接口（W3 用）。
+13. **reconciliation = re-read-on-action + 冲突标红不静默覆盖**；并发修改注入预留在 `POST /api/inject_task/<sid>` 路由或 adapter 的 `seed()` 上（不是独立 `injector.py`）。
 14. **跨设备 = appendix showcase**；wind-tunnel = 推迟。
-15. **回退/撤销 = compensation/saga 真实复原 app 变更**（不是内部 model cheap rollback）——这是 VM 事务性，W3 建。
+15. **回退/撤销 = compensation/saga 真实复原 app 变更**（不是内部 model cheap rollback）——这是 VM 事务性。
+16. **【2026-08-11 新增，`.mrules` E10】后门判定标准写死**：一步写/回退操作，只要不需要打开浏览器、不需要渲染出页面、不需要模拟一次真实点击/输入/回车就能让状态改变，就是后门，不合规——无论内部实现看起来多"语义化"。任何声称"GUI Agent 执行/回退"的代码，必须能在 §5.2 判定标准下经得起复核。
+17. **【E10】GenUI 解码器必须是真实模型调用**，不接受"先保留硬编码模板、只修执行器"的折中方案——没有真 GenUI 调用，"解码器"这个说法就不成立。
+18. **【E10】GUI Agent 执行智能必须来自真实的 grounding/agent 模型**（参考 `/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/OSWorld/mm_agents`），不接受"写死点击序列"这种介于人工脚本与真实 agent 之间的中间态。
+19. **【E10】旧 kill-test 数字全部作废**：一旦写路径换成真 GUI Agent，此前所有基于 API 直连的 `round_trip`/`binding_f1` 等数字不代表"GUI Agent 真的能在渲染页面上点对地方"，必须重新跑，不得在论文/demo 中继续引用旧数字而不加说明。
+20. **【E10 元原则】任何审计/实现如果只回答被问到的那一个具体点，要主动追问"同一类问题会不会也出现在其他看起来'已验证过'的模块里"**——不要因为只被要求验证 A，就默认 B/C/D 都没事；本项目的教训是，主线（非 MobileGym 支线）问题往往比局部支线问题更根本。
 
 ---
 
-## 13. 开工指引（面向 coding agent）
+## 13. 开工指引（面向 coding agent，2026-08-11 按 E10 重写）
 
-1. **W1 已 PASS**（§5），不重做。直接进 W2。
-2. 据 §5 骨架 + §8 排期，W2 先建：第 3 app（Drive）+ 两区 UI 分离 + rollback 骨架。
-3. **W3/W4 的 kill-test 是命门**（governance rollback/reconcile + JVM-moment + OOD）——这些是 VM 框架下"VM 之所以叫 VM"的证据，建不出来论文就退回"可编辑任务面"（撞 ALLOY/Jelly）。
-4. 开工即守：项目代号 TaskVM；独立项目不拖入其他仓库（SenseAct 仅作工程模式参考）；自动评测为主体、用户研究后置不阻塞；训练是 Go/No-Go 而非默认；不部署 Macaron 模型；两个模型角色独立；demo 用 §4.4 四步弧；人 = governance 者；回退 = compensation 真实复原。
+> 旧版指引默认"W1 已 PASS，直接进 W2"，这个假设已被证伪（§5 诚实现状盘点）。新指引不再有"哪一周已经做完"的说法，只有"哪个任务包是否真的做完"。
+
+1. **开工前必读**：`.mrules` 全文（尤其 E1-E10），以及本文档 §5（架构现状盘点）+ §7（四个模型调用点）+ §8（任务包分解）。不要跳过 `.mrules`，那里记录了此前每一次"看起来做完了但其实是造假/占位符"的具体案例，重犯同类错误的成本很高。
+2. **按 §8.1 五个任务包顺序推进**，建议先在 Calendar 一个 app 上纵向打穿 P1→P2→P3→P5 全链路，验证方案可行后再横向推广到其余 4 个 app。P4（GenUI）可与 P1-P3 并行。
+3. **每个任务包完成后必须落盘可复核证据**（截图/录屏/JSON），不接受纯文字汇报"已完成"——这是全文档反复强调、也是本项目历史上反复被抓到的漏洞（`.mrules` E8/E9）。
+4. **开工即守（不变量清单）**：项目代号 TaskVM；独立项目不拖入其他仓库（SenseAct/OSWorld/MobileGym 仅作工程模式参考，不修改其内部代码）；自动评测为主体，用户研究后置不阻塞；训练是 Go/No-Go 而非默认；不部署 Macaron 已训练模型；两个模型角色独立（GenUI 解码器 vs GUI Agent 编码器/执行器，两次独立调用不共享 context）；demo 用 §4.4 四步弧；人 = governance 者；回退 = GUI Agent 重新规划真实复原，做不到就诚实报告不可逆；**写/回退操作一律不得绕开浏览器和真实手势模拟（§12.16 后门判定标准）**。
+5. **完整的、任务量很大的交接 prompt 见 `docs/HANDOFF_TaskVM.md`**——按该文档逐任务包执行，允许长时间自主连续工作，不需要每完成一小步就等待用户确认。
 
 ---
 
@@ -550,4 +607,4 @@ Probe 方法：用文档给定 key 逐个模型发一次最小 `chat.completions
 
 ## B.4 与本项目既有决策的关系（不改变任何已锁定决策，仅补充工程实现细节）
 
-本节纯属"如何正确调用公司内部 API"的工程细节补充，**不涉及、不重新打开**大纲正文任何一个已拍板的产品/研究决策（不改变"前沿通用模型 + A2UI v0.8 spec 注入"的主线、不改变"两个模型角色独立"的设计、不改变 W1 kill test 的范围）。唯一的具体行动项：`taskvm/benchmark/model_client.py` 的默认模型名与限流/致命错误分层策略应按 B.1、B.2 调整，避免 W1 跑 kill test 时把"限流"误诊断为"模型不可用"或"compiler 出错"，污染 sub-kill 的判断依据。
+本节纯属"如何正确调用公司内部 API"的工程细节补充，**不涉及、不重新打开**大纲正文任何一个已拍板的产品/研究决策（不改变"前沿通用模型 + A2UI spec 注入"的主线、不改变"两个模型角色独立"的设计、不改变 W1 kill test 的范围）。唯一的具体行动项：`taskvm/benchmark/model_client.py` 的默认模型名与限流/致命错误分层策略应按 B.1、B.2 调整，避免 W1 跑 kill test 时把"限流"误诊断为"模型不可用"或"compiler 出错"，污染 sub-kill 的判断依据。

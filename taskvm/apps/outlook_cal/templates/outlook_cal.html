@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Outlook Calendar · {{ sid }}{% endblock %}
+{% block content %}
+<div class="meta">session: <code>{{ sid }}</code>{% if task_id %} · task: <code>{{ task_id }}</code>{% endif %}</div>
+{% if goal %}<div class="meta">goal: {{ goal }}</div>{% endif %}
+{% if moved %}<div class="toast" data-toast="moved">✓ appointment <code>{{ moved_aid }}</code> rescheduled to <code>{{ moved_value }}</code>.</div>{% endif %}
+
+<table id="appointment-list">
+  <thead>
+    <tr><th>AID</th><th>Subject</th><th>Scheduled for</th><th>Time</th><th>Calendar</th><th>Response</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for a in appointments %}
+    <tr class="appointment-row" data-appointment-id="{{ a.aid }}" data-scheduled_for="{{ a.scheduled_for }}">
+      <td data-field="aid"><code>{{ a.aid }}</code></td>
+      <td data-field="subject">{{ a.subject }}</td>
+      <td data-field="scheduled_for" class="appt-date">{{ a.scheduled_for }}</td>
+      <td data-field="time">{{ a.time }}</td>
+      <td data-field="calendar"><span class="pill {{ a.calendar }}">{{ a.calendar }}</span></td>
+      <td data-field="response">{{ a.response }}</td>
+      <td><a class="btn view" href="{{ sid }}/appointment/{{ a.aid }}">View</a></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">no appointments</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{# P1 (E10 rework): inline-JS fetch→/api/appointment/<sid>/reschedule debug button
+   REMOVED. Writes now go through list → detail → edit form → confirm <dialog> → PRG POST. #}
+{% endblock %}

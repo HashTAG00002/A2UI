@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ event.eid }} · {{ sid }}{% endblock %}
+{% block content %}
+<a class="back-link" href="/{{ sid }}/event/{{ event.eid }}">← back to {{ event.eid }}</a>
+<div class="meta">session: <code>{{ sid }}</code> · editing event <code>{{ event.eid }}</code></div>
+
+<form class="edit-form" method="post" action="/{{ sid }}/event/{{ event.eid }}/move"
+      data-event-id="{{ event.eid }}">
+  <div class="field">
+    <label for="new_date">Date (move_event operator — the only writable field)</label>
+    <input type="date" name="new_date" value="{{ event.date }}" id="new_date" required>
+    <input type="hidden" name="eid" value="{{ event.eid }}">
+  </div>
+  <div class="field">
+    <label>Title (read-only)</label>
+    <div class="readonly-val" data-field="title">{{ event.title }}</div>
+  </div>
+  <div class="field">
+    <label>Time (read-only)</label>
+    <div class="readonly-val" data-field="time">{{ event.time }}</div>
+  </div>
+  <div class="field">
+    <label>Calendar (read-only)</label>
+    <div class="readonly-val" data-field="calendar"><span class="pill {{ event.calendar }}">{{ event.calendar }}</span></div>
+  </div>
+  <div class="field">
+    <label>RSVP (read-only)</label>
+    <div class="readonly-val" data-field="rsvp">{{ event.rsvp }}</div>
+  </div>
+  <div class="actions">
+    <button type="button" id="review-btn">Review changes</button>
+    <a class="btn secondary" href="/{{ sid }}/event/{{ event.eid }}">Cancel</a>
+  </div>
+
+  {# Native <dialog> confirm step — a real confirm affordance (not a JS alert).
+     The GUI agent must click "Review changes" → read the dialog → click
+     "Confirm move" to submit. This is the "删除/危险操作确认对话框" the handoff
+     §2.2 requires for any state-changing write. #}
+  <dialog id="confirm-move">
+    <div class="dlg-head">Confirm move</div>
+    <div class="dlg-body">
+      Move event <code>{{ event.eid }}</code> ({{ event.title }})?
+      <div class="diff">
+        <div class="row"><span>From</span><span class="v" id="old-date">{{ event.date }}</span></div>
+        <div class="row"><span>To</span><span class="v" id="new-date-display">{{ event.date }}</span></div>
+      </div>
+    </div>
+    <div class="dlg-actions">
+      <button type="button" class="secondary" onclick="document.getElementById('confirm-move').close()">← Cancel</button>
+      <button type="submit">✓ Confirm move</button>
+    </div>
+  </dialog>
+</form>
+
+<script>
+  // Review-before-commit: open the <dialog> showing the live new-date value.
+  // Pure UI (a confirm step), NOT a write shortcut — the write only happens
+  // when the user/agent clicks "Confirm move" (type=submit) inside the dialog.
+  (function () {
+    var btn = document.getElementById('review-btn');
+    var inp = document.getElementById('new_date');
+    var disp = document.getElementById('new-date-display');
+    var dlg = document.getElementById('confirm-move');
+    btn.addEventListener('click', function () {
+      disp.textContent = inp.value || '(empty)';
+      dlg.showModal();
+    });
+  })();
+</script>
+{% endblock %}

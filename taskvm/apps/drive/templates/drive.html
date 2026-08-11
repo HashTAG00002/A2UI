@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Drive · {{ sid }}{% endblock %}
+{% block content %}
+<div class="meta">session: <code>{{ sid }}</code>{% if task_id %} · task: <code>{{ task_id }}</code>{% endif %}</div>
+{% if goal %}<div class="meta">goal: {{ goal }}</div>{% endif %}
+{% if moved %}<div class="toast" data-toast="moved">✓ file <code>{{ moved_fid }}</code> {{ moved_op }} → <code>{{ moved_value }}</code>.</div>{% endif %}
+
+<table id="file-list">
+  <thead>
+    <tr><th>FID</th><th>Name</th><th>Type</th><th>Folder</th><th>Owner</th><th>Modified</th><th>Content</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for f in files %}
+    <tr class="file-row" data-file-id="{{ f.fid }}" data-parent="{{ f.parent }}" data-owner="{{ f.owner }}">
+      <td data-field="fid"><code>{{ f.fid }}</code></td>
+      <td data-field="name">{{ f.name }}</td>
+      <td data-field="type"><span class="pill {{ f.type }}">{{ f.type }}</span></td>
+      <td data-field="parent" class="file-parent">{{ f.parent }}</td>
+      <td data-field="owner">{{ f.owner }}</td>
+      <td data-field="modified">{{ f.modified }}</td>
+      <td data-field="content" class="muted">{{ f.content }}</td>
+      <td><a class="btn view" href="{{ sid }}/file/{{ f.fid }}">View</a></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="8" class="muted">no files</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{# P1 (E10 rework): inline-JS fetch→/api/file/<sid>/<fid> debug button REMOVED.
+   Writes now go through list → detail → edit form → confirm <dialog> → PRG POST. #}
+{% endblock %}

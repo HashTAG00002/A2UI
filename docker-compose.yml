@@ -1,6 +1,8 @@
 version: "3.9"
-# TaskVM W1 apps — two minimal resettable Flask apps.
-# Calendar :3013, TaskBoard :3014. In-memory (no DB volume for W1).
+# TaskVM apps — minimal resettable Flask apps (in-memory, no DB volume).
+# Core (W1/W2/W3): Calendar :3013, TaskBoard :3014, Drive :3015.
+# Held-out (W4 OOD): Mail :3017 (truly-unseen), Outlook_Cal :3018 (calendar reskin).
+# Workspace UI (two-zone governance console): :3016 (run separately, not here).
 services:
   calendar:
     build: .
@@ -30,6 +32,54 @@ services:
       - PYTHONUNBUFFERED=1
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3014/health').read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  drive:
+    build: .
+    image: taskvm-apps
+    container_name: taskvm-drive
+    working_dir: /app
+    command: python -m taskvm.apps.drive.app --port 3015 --host 0.0.0.0
+    ports:
+      - "3015:3015"
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3015/health').read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mail:
+    build: .
+    image: taskvm-apps
+    container_name: taskvm-mail
+    working_dir: /app
+    command: python -m taskvm.apps.mail.app --port 3017 --host 0.0.0.0
+    ports:
+      - "3017:3017"
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3017/health').read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  outlook_cal:
+    build: .
+    image: taskvm-apps
+    container_name: taskvm-outlook-cal
+    working_dir: /app
+    command: python -m taskvm.apps.outlook_cal.app --port 3018 --host 0.0.0.0
+    ports:
+      - "3018:3018"
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3018/health').read()"]
       interval: 5s
       timeout: 3s
       retries: 10

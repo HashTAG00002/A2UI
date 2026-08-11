@@ -1,0 +1,247 @@
+/* TaskVM workspace UI — terminal/VM-console theme (handoff §4.2).
+   Dark, monospace-leaning, amber conflict (§5 reconciliation "amber").
+   Preserves the two-zone class names (.zone.ro / .zone.rw / .card /
+   .card.conflict / form.rw-field / button.undo / button.ckpt / button.merge)
+   — the gate script may grep for these. No framework, plain CSS. */
+
+:root {
+  --bg:        #0d1117;
+  --panel:     #161b22;
+  --panel-2:   #1c2330;
+  --border:    #30363d;
+  --text:      #c9d1d9;
+  --muted:     #8b949e;
+  --green:     #3fb950;   /* read-only zone accent (governance: safe) */
+  --blue:      #58a6ff;   /* read-write zone accent (governance: act) */
+  --amber:     #d29922;   /* conflict / reconciliation (§5 amber) */
+  --orange:    #db6d28;   /* undo */
+  --teal:      #2dd4bf;   /* checkpoint */
+  --red:       #f85149;
+  --code-bg:   #010409;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas,
+               "PingFang SC", "Microsoft YaHei", monospace;
+  margin: 0; background: var(--bg); color: var(--text);
+  font-size: 13px; line-height: 1.5;
+}
+
+header {
+  background: linear-gradient(90deg, #010409, #161b22);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 20px; display: flex; align-items: baseline; gap: 10px;
+}
+header .brand {
+  font-weight: 700; color: var(--blue); letter-spacing: 1px;
+  text-shadow: 0 0 8px rgba(88,166,255,.35);
+}
+header .brand::before { content: "▌ "; color: var(--green); }
+header .sub { color: var(--muted); font-size: 12px; }
+header .sim-link { margin-left: auto; font-size: 11px; }
+header .sim-link a { color: var(--teal); text-decoration: none; }
+header .sim-link a:hover { text-decoration: underline; }
+
+/* split-screen: left governance panel, right live phone sim (handoff §4.4) */
+main.split {
+  max-width: 1600px; margin: 14px auto; padding: 0 14px;
+  display: grid; grid-template-columns: 1fr 420px; gap: 14px; align-items: start;
+}
+main.no-split { max-width: 1100px; margin: 18px auto; padding: 0 14px; }
+
+/* the two-zone governance panel (left in split mode) */
+.zones { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+.zone {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px 16px;
+  box-shadow: 0 1px 0 rgba(0,0,0,.4), 0 0 0 1px rgba(88,166,255,.03);
+}
+.zone h2 {
+  font-size: 11px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 1.5px; margin: 0 0 10px; font-weight: 600;
+}
+.zone.ro { border-left: 3px solid var(--green); }
+.zone.rw { border-left: 3px solid var(--blue); }
+
+.card {
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px 10px; margin-bottom: 8px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.card:hover { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(88,166,255,.12); }
+.card h3 { margin: 0 0 5px; font-size: 12px; color: var(--text); font-weight: 600; }
+.ro-row { font-size: 12px; color: var(--text); margin: 2px 0; word-break: break-all; }
+.ro-row code, .conflict-row code {
+  background: var(--code-bg); color: var(--green);
+  padding: 1px 5px; border-radius: 3px; font-size: 11px;
+}
+
+/* read-write zone: editable fields + governance buttons */
+form.rw-field {
+  margin-bottom: 12px; padding: 10px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+}
+form.rw-field label { display: block; font-size: 12px; margin-bottom: 5px; color: var(--text); }
+form.rw-field .muted { color: var(--muted); font-size: 11px; }
+input[type=text] {
+  padding: 6px 8px; background: var(--code-bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 5px;
+  width: 92%; font-family: inherit; font-size: 12px;
+}
+input[type=text]:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px rgba(88,166,255,.2); }
+
+button {
+  padding: 5px 12px; border: 1px solid transparent; border-radius: 5px;
+  background: var(--blue); color: #fff; cursor: pointer; font-size: 12px;
+  font-family: inherit; transition: filter .12s, transform .08s;
+}
+button:hover { filter: brightness(1.15); }
+button:active { transform: translateY(1px); }
+button.undo { background: var(--orange); }
+button.ckpt  { background: var(--teal); color: #010409; }
+button.merge { background: var(--amber); color: #010409; font-size: 11px; }
+
+.actions { margin-top: 10px; }
+.actions form { display: inline; margin-right: 6px; }
+
+.log { font-size: 11px; color: var(--muted); margin-top: 6px; }
+.log code { background: var(--code-bg); color: var(--muted); padding: 0 4px; border-radius: 3px; }
+.meta { font-size: 11px; color: var(--muted); }
+
+/* notice banners */
+.notice { font-size: 11px; padding: 6px 10px; border-radius: 5px; margin-bottom: 8px; border: 1px solid transparent; }
+.notice.ok      { background: rgba(63,185,80,.12);  color: var(--green);  border-color: rgba(63,185,80,.3); }
+.notice.undo    { background: rgba(219,109,40,.12); color: var(--orange); border-color: rgba(219,109,40,.3); }
+.notice.resolve { background: rgba(210,153,34,.12); color: var(--amber);  border-color: rgba(210,153,34,.3); }
+
+/* conflict card (amber — §5 reconciliation) */
+.card.conflict {
+  background: rgba(210,153,34,.08); border: 1px solid rgba(210,153,34,.4);
+  border-left: 3px solid var(--amber);
+  animation: pulse-amber 1.8s ease-in-out infinite;
+}
+@keyframes pulse-amber {
+  0%,100% { box-shadow: 0 0 0 0 rgba(210,153,34,.0); }
+  50%     { box-shadow: 0 0 0 4px rgba(210,153,34,.18); }
+}
+.conflict-row { font-size: 12px; }
+.merge-opts { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.merge-opts form.inline { display: inline-flex; gap: 4px; align-items: center; }
+.merge-form input[type=text] { width: 100px; padding: 3px 6px; font-size: 11px; }
+
+/* ── honesty-based rollback timeline (E9.2 — 'progress bar 拖不回去') ────────
+   The frontend of SagaResult.partial_failure. A horizontal track of the saga's
+   steps: green = reverted (the bar can be dragged back through these), red+🔒
+   = irreversible (hard stop — the handle snaps here, '拖不回这一步'). The
+   honest one-liner names the irreversible step(s) and why (no set_state
+   backdoor). MobileGym send_message is the first real case. */
+.saga-timeline {
+  margin-bottom: 12px; padding: 12px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-left: 3px solid var(--green); border-radius: 6px;
+}
+.saga-timeline.partial {
+  border-left-color: var(--red);
+  background: rgba(248,81,73,.06);
+  box-shadow: 0 0 0 1px rgba(248,81,73,.15);
+}
+.saga-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 10px; gap: 8px; flex-wrap: wrap;
+}
+.saga-title { font-size: 12px; color: var(--text); font-weight: 600; }
+.saga-count { font-size: 11px; color: var(--muted); }
+.saga-pf, .pf-tag {
+  color: var(--red); font-weight: 700; font-size: 10px;
+  background: rgba(248,81,73,.14); padding: 1px 6px; border-radius: 3px;
+  border: 1px solid rgba(248,81,73,.35);
+}
+.saga-bar {
+  position: relative; display: flex; height: 34px; gap: 2px;
+  background: var(--code-bg); border: 1px solid var(--border);
+  border-radius: 5px; padding: 2px; margin-bottom: 10px;
+  overflow: visible;
+}
+.seg {
+  flex: 1 1 0; min-width: 14px; border-radius: 3px; position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-size: 10px; overflow: hidden; transition: filter .12s;
+}
+.seg.ok {
+  background: rgba(63,185,80,.22); border: 1px solid rgba(63,185,80,.45);
+  color: var(--green);
+}
+.seg.ok .seg-lbl { display: none; }
+.seg.ok:hover .seg-lbl { display: inline; position: absolute; top: 100%;
+  background: var(--code-bg); color: var(--green); padding: 1px 5px;
+  border-radius: 3px; white-space: nowrap; z-index: 4; font-size: 10px; }
+.seg.lock {
+  background: rgba(248,81,73,.22); border: 1px solid rgba(248,81,73,.55);
+  color: var(--red);
+  animation: pulse-red 1.6s ease-in-out infinite;
+}
+.seg.lock .seg-lbl { display: none; }
+.seg.lock:hover .seg-lbl { display: inline; position: absolute; top: 100%;
+  background: var(--code-bg); color: var(--red); padding: 1px 5px;
+  border-radius: 3px; white-space: nowrap; z-index: 4; font-size: 10px; }
+.seg.none { color: var(--muted); font-size: 11px; }
+.seg-no { font-weight: 700; }
+.seg-lbl { font-size: 9px; }
+.seg.lock .seg-no::before { content: ""; }
+@keyframes pulse-red {
+  0%,100% { box-shadow: 0 0 0 0 rgba(248,81,73,.0); }
+  50%     { box-shadow: 0 0 0 3px rgba(248,81,73,.22); }
+}
+/* the draggable handle — lives at the right end; JS drags it leftward through
+   green segs but snaps to a hard stop at any 🔒 (the 'progress bar 拖不回去'). */
+.handle {
+  position: absolute; top: 2px; bottom: 2px; width: 8px; right: 2px;
+  background: linear-gradient(180deg, var(--blue), #1f6feb);
+  border-radius: 3px; cursor: ew-resize; z-index: 5;
+  box-shadow: 0 0 6px rgba(88,166,255,.5);
+  display: flex; align-items: center; justify-content: center;
+  transition: right .08s ease-out;
+}
+.handle::before { content: "◄►"; font-size: 7px; color: #fff; letter-spacing: -2px; }
+.handle:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
+.handle.blocked { background: linear-gradient(180deg, var(--red), #b62324);
+  box-shadow: 0 0 8px rgba(248,81,73,.6); animation: pulse-red .6s ease-in-out 2; }
+.saga-timeline.full .handle { display: none; }   /* nothing locked → no stop needed */
+.saga-legend { display: flex; gap: 14px; margin-bottom: 8px; font-size: 10px; color: var(--muted); }
+.leg { display: inline-flex; align-items: center; gap: 4px; }
+.leg .dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.leg.ok .dot { background: var(--green); }
+.leg.lock .dot { background: var(--red); }
+.saga-msg { font-size: 11.5px; line-height: 1.55; color: var(--text); }
+.saga-timeline.partial .saga-msg { color: #ffb4b4; }
+.saga-msg strong { color: var(--red); font-weight: 700; }
+.saga-timeline.full .saga-msg strong { color: var(--green); }
+
+/* the live phone-sim iframe (right pane in split mode) */
+.sim-pane {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px; position: sticky; top: 14px;
+}
+.sim-pane h2 {
+  font-size: 11px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 1.5px; margin: 0 0 8px;
+}
+.sim-frame-wrap {
+  position: relative; width: 360px; margin: 0 auto;
+  border: 8px solid #1a1a1a; border-radius: 32px; overflow: hidden;
+  box-shadow: 0 0 24px rgba(88,166,255,.15), inset 0 0 0 2px #000;
+  aspect-ratio: 9 / 19.5;
+}
+.sim-frame-wrap::before {
+  content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 120px; height: 22px; background: #1a1a1a; border-radius: 0 0 14px 14px; z-index: 2;
+}
+.sim-frame {
+  width: 100%; height: 100%; border: 0; background: #fff; display: block;
+}
+.sim-hint { font-size: 10px; color: var(--muted); text-align: center; margin-top: 8px; }
+.sim-hint .dot { color: var(--green); }
+.sim-hint .dot.changing { color: var(--amber); animation: pulse-amber 1s infinite; }

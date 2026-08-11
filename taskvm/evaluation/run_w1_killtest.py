@@ -325,13 +325,27 @@ def main(argv=None):
                         help="capture a screenshot per app (visual grounding; needs playwright)")
     parser.add_argument("--full-a2ui", action="store_true",
                         help="require a full A2UI surface (W1 default: binding-only, doc §10)")
+    parser.add_argument("--execution-mode", choices=["api", "gui_agent"],
+                        default="api",
+                        help="E10 rework (P5): 'api' (legacy requests.post to the app's "
+                             "Flask route) or 'gui_agent' (drive a real browser via the "
+                             "GUI executor — non-invasive write/rollback, .mrules E7/E10). "
+                             "Default 'api' preserves the W1 baseline for comparison.")
+    parser.add_argument("--gui-screenshot-dir", default=None,
+                        help="dir for per-step GUI executor screenshots (gui_agent mode; "
+                             "default: eval_results/p5_gui_visual_<ts>/<app>_<op>)")
     parser.add_argument("--out", default=None)
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s")
 
-    adapters = make_adapters(host=args.host)
+    # GUI-executor screenshot dir (auto per-ts if gui_agent + not specified)
+    gui_shot_dir = args.gui_screenshot_dir
+    if args.execution_mode == "gui_agent" and gui_shot_dir is None:
+        gui_shot_dir = str(EVAL_DIR / f"p5_gui_visual_{time.strftime('%Y%m%d_%H%M%S')}")
+    adapters = make_adapters(host=args.host, executor=args.execution_mode,
+                             gui_screenshot_dir=gui_shot_dir)
     # health check
     for app, ad in adapters.items():
         h = ad.health()
@@ -342,6 +356,12 @@ def main(argv=None):
 
     tasks = [get_task(args.task)] if args.task else all_tasks()
     cost_model = CostModel()
+    # E10 rework (P5): wire the GUI executor's cost_model to the W1 cost_model
+    # so GUI-grounding calls are attributed in the report's cost (honesty: the
+    # report must reflect the FULL token cost, not just compile_binding).
+    if args.execution_mode == "gui_agent":
+        from taskvm.execution.gui_executor import get_executor
+        get_executor().cost_model = cost_model
     ts = time.strftime("%Y%m%d_%H%M%S")
 
     if args.neg_control:
@@ -376,6 +396,13 @@ def main(argv=None):
                         f"binding_f1={s['binding_accuracy']['f1']} "
                         f"broke={s['which_link_broke']}")
             samples.append(s)
+            # E10 rework (P5): GUI-executor writes hit gpt-5.6-sol's QPM ~10/min.
+            # Between samples, let the quota refill so the next sample's GUI
+            # writes don't 429-loop (the executor retries, but it's slower +
+            # burns the step budget). Skip after the last sample.
+            if args.execution_mode == "gui_agent" and i < args.samples - 1:
+                logger.info(f"[gui_agent] QPM refill: sleeping 60s before next sample")
+                time.sleep(60)
         neg = run_neg_control(fx, adapters, model=args.model, mock=args.mock,
                               cost_model=cost_model)
         logger.info(f"[neg-control] {fx.task_id}: score={neg['score']} → "
@@ -388,15 +415,28 @@ def main(argv=None):
                     f"binding_f1_mean={sm['binding_f1_mean']} neg={neg['score']}")
 
     sk = evaluate_sub_kills(summaries, all_samples)
+    # E10 rework (P5): tag the execution mode so GUI-agent results are never
+    # confused with legacy API-direct results (handoff §6.2 / §12.19). Also
+    # record the executor config for traceability.
     report = {
         "ts": ts, "model": args.model or model_client.TASKVM_DEFAULT_MODEL,
         "mock": args.mock, "n_samples_per_task": args.samples,
+        "execution_mode": args.execution_mode,   # 'api' (legacy) | 'gui_agent' (E10 rework)
         "cost": cost_model.summary(),
         "summaries": summaries,
         "samples": all_samples,
         "sub_kills": sk,
     }
-    out_path = Path(args.out) if args.out else EVAL_DIR / f"w1_{ts}.json"
+    if args.execution_mode == "gui_agent":
+        report["executor"] = {
+            "driver": "playwright",
+            "grounding_model": args.model or model_client.TASKVM_DEFAULT_MODEL,
+            "coordinate_format": "normalized_0_1000",
+            "gui_screenshot_dir": gui_shot_dir,
+        }
+    out_path = Path(args.out) if args.out else (
+        EVAL_DIR / f"p5_full_killtest_{ts}.json" if args.execution_mode == "gui_agent"
+        else EVAL_DIR / f"w1_{ts}.json")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2))
     print(f"\nWrote {out_path}")

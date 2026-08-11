@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ file.fid }} · {{ sid }}{% endblock %}
+{% block content %}
+<a class="back-link" href="/{{ sid }}/file/{{ file.fid }}">← back to {{ file.fid }}</a>
+<div class="meta">session: <code>{{ sid }}</code> · editing file <code>{{ file.fid }}</code></div>
+
+<form class="edit-form" method="post" action="/{{ sid }}/file/{{ file.fid }}/mutate"
+      data-file-id="{{ file.fid }}">
+  <div class="field">
+    <label>Folder (move_file operator — click a folder to select it)</label>
+    <div id="op_parent" class="radio-group" style="display:flex; gap:16px; padding:6px 0;">
+      {% for p in ["personal", "shared", "inbox"] %}
+        <label style="display:inline-flex; align-items:center; gap:4px; cursor:pointer; padding:4px 10px; border:1px solid #d2d2d7; border-radius:6px; {% if p == file.parent %}background:#1a73e8; color:#fff; border-color:#1a73e8;{% endif %}">
+          <input type="radio" name="move_file" value="{{ p }}" {% if p == file.parent %}checked{% endif %} style="margin:0;">
+          <span class="radio-label">{{ p }}</span>
+        </label>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="field">
+    <label for="op_name">Name (rename operator)</label>
+    <input type="text" name="rename" value="{{ file.name }}" id="op_name">
+  </div>
+  <div class="field">
+    <label for="op_owner">Owner (set_owner operator)</label>
+    <input type="text" name="set_owner" value="{{ file.owner }}" id="op_owner">
+  </div>
+  <input type="hidden" name="fid" value="{{ file.fid }}">
+  <div class="actions">
+    <button type="button" id="review-btn">Review changes</button>
+    <a class="btn secondary" href="/{{ sid }}/file/{{ file.fid }}">Cancel</a>
+  </div>
+
+  <dialog id="confirm-mutate">
+    <div class="dlg-head">Confirm file edit</div>
+    <div class="dlg-body">
+      Apply the changes to file <code>{{ file.fid }}</code> ({{ file.name }})?
+      <div class="diff" id="diff-rows"></div>
+    </div>
+    <div class="dlg-actions">
+      <button type="button" class="secondary" onclick="document.getElementById('confirm-mutate').close()">← Cancel</button>
+      <button type="submit">✓ Confirm edit</button>
+    </div>
+  </dialog>
+</form>
+
+<script>
+  (function () {
+    var btn = document.getElementById('review-btn');
+    var dlg = document.getElementById('confirm-mutate');
+    var diff = document.getElementById('diff-rows');
+    var orig = {parent: "{{ file.parent }}", name: {{ file.name|tojson|safe }}, owner: {{ file.owner|tojson|safe }}};
+    btn.addEventListener('click', function () {
+      var rows = "";
+      function row(label, oldv, newv) {
+        if (String(oldv) === String(newv)) return "";
+        return '<div class="row"><span>' + label + '</span>'
+             + '<span class="v">' + oldv + ' → ' + newv + '</span></div>';
+      }
+      rows += row("folder", orig.parent, document.getElementById('op_parent').value);
+      rows += row("name", orig.name, document.getElementById('op_name').value);
+      rows += row("owner", orig.owner, document.getElementById('op_owner').value);
+      diff.innerHTML = rows || '<div class="row"><span>(no changes)</span></div>';
+      dlg.showModal();
+    });
+  })();
+</script>
+{% endblock %}
