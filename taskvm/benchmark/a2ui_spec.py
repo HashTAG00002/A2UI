@@ -332,8 +332,22 @@ bindings + current values), emit the A2UI v0.9 message stream that renders the
 def genui_decoder_system_prompt() -> str:
     """Build the GenUI decoder system prompt (A2UI v0.9 spec + the two-zone
     governance directive). This is the P4 model role — SEPARATE from the
-    compiler (different output shape: A2UI component tree, not task_binding)."""
+    compiler (different output shape: A2UI component tree, not task_binding).
+
+    Task6 (E10 rework): prefer ``genui_decoder_directive_only()`` +
+    ``a2ui_schema_manager.generate_system_prompt()`` — that injects the FORMAL
+    JSON Schema + catalog instead of this hand-transcribed ``A2UI_V09_SPEC``
+    prose. This function is kept for backward compat / fallback."""
     return A2UI_V09_SPEC + "\n" + GENUI_DECODER_DIRECTIVE
+
+
+def genui_decoder_directive_only() -> str:
+    """Just the TaskVM-specific GenUI decoder directive (two-zone governance +
+    output shape), WITHOUT the hand-transcribed A2UI_V09_SPEC prose. Task6: the
+    formal A2UI schema + catalog are injected separately by
+    ``a2ui_schema_manager.generate_system_prompt(directive=...)``, so the
+    decoder prompt no longer duplicates the spec as prose."""
+    return GENUI_DECODER_DIRECTIVE
 
 
 if __name__ == "__main__":

@@ -538,3 +538,23 @@ E12 根因：重试从头完整重走表单流程（View→Edit→改字段→Re
 - 直接 `decode_genui` 测试也确认：3 条 A2UI 消息（createSurface + updateComponents + updateDataModel），render 出 2364 bytes HTML 含 genui-card。
 
 **诚实边界**：governance form 契约保留意味着 live 页面的 editable 控件目前仍是 per-var `<form>` 包的 text input（模型决定的 control type 通过 `<details>` 块展示但没直接驱动 form input 的 type）。要真正让模型决定的 ChoicePicker/DateTimeInput 直接作为 form input 生效，需要解析 A2UI component tree 并注入 form-action 到每个 control——本轮做了"接入 live 路径 + 模型真的被调用 + surface 真的渲染"，control-type 直接驱动 form 是 follow-on（记入 .mrules 供下一个 agent）。
+
+### Task6：genui system prompt 按 A2UI 官方 SDK 优化（formal schema + catalog + 运行时校验 + repair）
+
+交接要求：参考官方 A2UI agent SDK，给 genui_decoder 的 system prompt 注入 (a) 正式 JSON Schema、(b) few-shot examples、(c) 运行时 schema 校验 + repair。
+
+**实现（`taskvm/benchmark/a2ui_schema_manager.py` 新模块）**：
+- 加载 `docs/A2UI-protocol-spec/v0_9/json/server_to_client.json`（formal message schema，oneOf 4 消息类型）+ `catalogs_basic/catalog.json`（18 组件）+ `common_types.json`。
+- `generate_system_prompt(directive)`：注入 (a) formal schema 摘要（含 `version: const "v0.9"` 等约束）+ (b) catalog 18 组件列表 + flat-discriminator 形状提示（关键：模型倾向 v1.0 keyed-wrapper `{"component":{"Column":{...}}}`，提示明确 v0.9 是 `{"component":"Column",...}`）+ TaskVM directive。
+- `validate_a2ui_messages(messages)`：用 jsonschema 4.26.0 + `referencing.Registry`（解析跨文件 $ref：server_to_client → common_types + catalog）校验每条消息匹配 oneOf 某分支。单元测试通过：合法 stream valid=True、`{"bogusKey":{}}` valid=False。
+- `repair_prompt(messages, errors)`：列出校验错误 + 明确常见修复（version 必须是 string `"v0.9"` 不是 object；flat-discriminator 不是 keyed；children/text 是 plain array/string 不是 explicitList/literalString wrapper）。
+- `decode_genui` 改用 `generate_system_prompt(genui_decoder_directive_only())`（替代手写 A2UI_V09_SPEC prose）+ 校验失败时一次 repair retry。
+
+**诚实验证结果（重要发现）**：
+- 校验**真的在工作**，捕获了 2 个真实模型输出问题：(1) 模型一度输出 `{"version":{"major":0,"minor":9}}`（v1.0 object 形式）——schema 要求 `const "v0.9"` string，校验正确拒绝；(2) 修了 version 后模型输出 v1.0 keyed-wrapper 组件 `{"component":{"Column":{...}}}` + `{"children":{"explicitList":[...]}}` ——校验也正确拒绝。
+- 加了 flat-discriminator 提示后，模型输出**变成正确的 v0.9 flat 形式**（`{"component":"Column","children":[...]}`）——prompt 提示生效。
+- **但**：updateComponents 消息仍校验失败（oneOf 无分支匹配），根因是 catalog 的 `anyComponent` allOf 链（ComponentCommon + CatalogComponentCommon + 具体组件 props）对模型输出仍过严——这是模型输出质量 vs 正式 schema 严格度的深层问题，不是校验逻辑 bug。
+- **设计决策**：校验是 diagnostic 不是 hard gate——`ok=True`（messages 解析成功）时仍渲染（页面可用），validation 结果透明记录在 `out["validation"]`（valid/errors/repaired）。这样既暴露了 schema 不合规（诚实），又不因校验过严而让 GenUI 页面完全不可用。
+- repair retry 目前**未能成功修复**（模型在 catalog allOf 严格度下难以一次修对）——如实报告，不假装 repair 成功。
+
+**遗留**：要达到 validation.valid=True，需要更精细的 prompt（注入完整 catalog $defs 而非摘要）或更宽松的校验（只校验 message 结构不校验组件 allOf）。本轮交付了"formal schema + catalog + 校验 + repair 全部接入"，校验真实生效并捕获了真实问题——这是 Task6 的核心；让模型输出完全合规 catalog 是 follow-on（记入 .mrules）。

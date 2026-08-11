@@ -132,10 +132,22 @@ def decode_genui(binding: TaskBinding, values: dict[str, Any], *,
                  max_tokens: int = 3072) -> dict:
     """Call the GenUI decoder model. Returns a dict with:
       ``ok``: bool, ``messages``: list[dict] (parsed A2UI messages), ``raw``: str,
-      ``error``: str | None.
+      ``error``: str | None, ``validation``: dict (schema-validation result).
 
-    The caller (renderer) passes ``messages`` to ``render_a2ui_to_html``."""
-    sys_prompt = genui_decoder_system_prompt()
+    The caller (renderer) passes ``messages`` to ``render_a2ui_to_html``.
+
+    Task6 (E10 rework): uses ``a2ui_schema_manager.generate_system_prompt`` (the
+    FORMAL JSON Schema + catalog injected, per the official A2UI agent SDK
+    pattern) instead of the hand-transcribed ``A2UI_V09_SPEC`` prose. After
+    parsing, validates the messages against the formal schema + does ONE repair
+    retry if validation fails (mirrors ``model_client.complete_json``'s
+    repair_retries)."""
+    from taskvm.benchmark.a2ui_schema_manager import (generate_system_prompt,
+                                                       validate_a2ui_messages,
+                                                       repair_prompt)
+    from taskvm.benchmark.a2ui_spec import genui_decoder_directive_only
+    # Task6: formal schema + catalog + directive (replaces hand-transcribed spec)
+    sys_prompt = generate_system_prompt(directive=genui_decoder_directive_only())
     user_prompt = _build_user_prompt(binding, values)
     parsed, raw, resp = model_client.complete_json(
         sys_prompt, user_prompt, max_tokens=max_tokens,
@@ -157,9 +169,36 @@ def decode_genui(binding: TaskBinding, values: dict[str, Any], *,
                 messages = [m for m in parsed["messages"] if isinstance(m, dict)]
             else:
                 messages = [parsed]
+    # Task6 (c): runtime schema validation + ONE repair retry on failure
+    valid, errors = validate_a2ui_messages(messages)
+    validation = {"valid": valid, "errors": errors, "repaired": False}
+    if not valid and messages:
+        logger.warning(f"[genui_decoder] schema validation failed ({len(errors)} "
+                       f"errors); attempting one repair retry")
+        repair_user = repair_prompt(messages, errors) + "\n\n" + user_prompt
+        parsed2, raw2, resp2 = model_client.complete_json(
+            sys_prompt, repair_user, max_tokens=max_tokens,
+            temperature=None, model=model, repair_retries=1)
+        if resp2 is not None and cost_model is not None:
+            model_client.record_usage(resp2, cost_model, tool="genui_decoder_repair",
+                                      role=MODEL_ROLE,
+                                      model=model or model_client.TASKVM_DEFAULT_MODEL)
+        msgs2 = _parse_jsonl(raw2)
+        if msgs2:
+            valid2, errs2 = validate_a2ui_messages(msgs2)
+            if valid2:
+                messages = msgs2
+                raw = raw2
+                validation = {"valid": True, "errors": [], "repaired": True,
+                              "prior_errors": errors}
+                logger.info("[genui_decoder] repair retry succeeded")
+            else:
+                validation = {"valid": False, "errors": errs2, "repaired": False,
+                              "prior_errors": errors}
     out = {"ok": bool(messages), "messages": messages, "raw": raw,
            "error": None if messages else "no_a2ui_messages_parsed",
-           "model": model or model_client.TASKVM_DEFAULT_MODEL}
+           "model": model or model_client.TASKVM_DEFAULT_MODEL,
+           "validation": validation}
     if not messages:
         logger.warning(f"[genui_decoder] no messages parsed; raw[:200]={raw[:200]!r}")
     return out
