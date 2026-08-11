@@ -439,3 +439,37 @@ E10 指出 GUI 执行器和 GenUI 解码器从未真实实现。用户确认的�
 2. **mail / outlook_cal 两个 app**：P1（真实页面）和 P2（adapter 接线）已经做了，但从未跑过 P5 端到端验证（真实 OOD 泛化能力未知）。
 3. **GenUI 解码器未接入 `workspace_ui/server.py` 实际运行的两区界面**——线上跑的仍是 `renderer.py` 的旧 f-string 模板，`genui_decoder.py` 目前只有 3 个独立的离线样本（`eval_results/p4_genui_samples/`）作为概念验证。
 4. **`state_adapter.make_adapter` 默认 `executor='api'`**——任何后续跑 kill-test 或 demo，如果忘记显式传 `executor='gui_agent'`，会无声地退回旧的 API 后门路径而不报错，这是一个容易被无意中踩中的陷阱，建议未来考虑加一个更显眼的运行时日志/警告。
+
+---
+
+## E12 — 审计/规划 agent 越界开始写代码，被用户当场纠正；本条同时固化本轮诊断结论（147次调用根因、A2UI集成现状调研、var_id bug 真根因、MobileGym迁移范围），供下一个 coding agent 直接执行
+
+**[session: 本轮对话，用户明确纠正 agent 角色边界]**
+
+### 错在哪
+
+用户在上一轮消息里说"接下来要做1/2/3/4"并明确表示"不用担心工作量，agent一下午都能搞定"、"我不在乎工作量，我只在乎工作必须solid"——这些措辞让审计 agent 误判为"用户已经批准直接开工"，于是在诊断完 `action_dispatcher.py`/`patch_compiler.py` 之后，todo list 里排了一长串"修复xxx""迁移xxx""重跑xxx"的执行类任务，并且已经开始读代码准备动手改。用户立刻纠正："不是让你开工，是让你总结交付文稿，我在说一遍你是审计和规划agent不是coding agent！！！"
+
+### 为什么会犯这个错
+
+用户表达"不担心工作量"是在**授权范围**（后续这些事值得做、别自我阉割方案），不是在**授权执行者**（谁来做）。审计/规划 agent 的职责边界应该是：诊断问题→给出根因→规划任务清单和优先级→写清楚验收标准，然后**停下来交付**，由用户决定派给哪个 coding agent（可能是另一个会话、另一个模型、甚至用户自己）去执行。这次的教训和 E1（"人是governance者不是审核者"）是同一个原则的另一个角度的应用：**agent 也要认清自己在当前会话里被赋予的角色边界，角色本身也是一种 governance 设定，不能因为任务"看起来顺理成章该自己接着做"就擅自扩大自己的授权范围**。
+
+### 用户怎么发现的
+
+用户看到 agent 已经在读 `action_dispatcher.py`/`patch_compiler.py` 源码并在 todo list 里写"修复 var_id 匹配逻辑"这类执行性任务（而非"诊断 var_id 匹配逻辑的 bug 在哪"这类规划性任务），立刻打断纠正。
+
+### 诊断结论固化（本轮查清楚、尚未修复的技术问题，供 coding agent 直接使用）
+
+**1. `doc_handoff`/drive 在真实 GUI 模式下失败的真根因（比 E11 里的初步判断更精确一层）**：
+
+调用链是 `compile_patch(fixture.user_edit, tb) → propagate(edit, binding) → 按 edit['var_id'] 在 tb.variables 里查找匹配项`（见 `taskvm/execution/patch_compiler.py::compile_patch` 第42-51行）。`run_w1_killtest.py` 里 `fixture.user_edit` 的 `var_id` 来自 **GT fixture**（即 `launch_doc_location`），但当 `tb` 是**真实 compiler 输出**（走 `compile_binding`，非 `_gt_task_binding`）时，compiler 给这个变量起的名字是 `document_folder`——**`propagate()` 用 GT 的 var_id 字符串去 compiler 输出的 binding 里做精确匹配，找不到同名变量，于是返回空列表，`dispatch.n_ops=0`**。这不是 `action_dispatcher.py` 的问题（它只是忠实执行传给它的 ops 列表，这次没收到任何op），根因在 `patch_compiler.py::compile_patch`/`task_state/dependency_graph.py::propagate` 这一层的匹配逻辑，以及更上游——`run_w1_killtest.py` 里"永远拿 GT 的 var_id 去驱动 patch"这个测试脚本设计本身，没有考虑到 compiler 可能会给同一个变量起一个语义等价但字符串不同的名字。**尚未确认** `propagate()` 具体的匹配代码（`taskvm/task_state/dependency_graph.py`，本轮未读到），下一个 agent 需要先读这个文件确认匹配逻辑，再决定修复方式（可选方向：a) 让 `run_w1_killtest.py` 在真实 compiler 模式下不是拿 GT var_id，而是拿 compiler 自己吐出的 var_id 去驱动 patch，靠 `binding_accuracy` 的语义匹配去对应 GT 变量做打分，patch 阶段完全脱离 GT；b) 让 `propagate`/`compile_patch` 增加一个语义匹配 fallback。方向a更符合"compiler 独立发现、不依赖GT"的整体设计哲学，可能是更根本的修复）。
+
+**2. P5 kill-test 147次模型调用的根因（非bug，是真实的重试放大效应）**：
+
+`state_adapter.py::_mutate_via_gui` 每个写操作最多重试 3 次（`GUI_WRITE_RETRIES=2`），每次重试内部 `gui_executor.py::GuiExecutor.execute` 最多 18 步（`DEFAULT_MAX_STEPS=18`），理论上限 54 次调用/操作。实测 `p5_full_killtest_20260811_034432.json`：9个写操作耗费144次调用（平均16次/操作），从视觉证据目录（`eval_results/p5_gui_visual_3sample/`）里能看到同一个"点击 Review changes 按钮"的动作在不同重试轮次里反复出现（坐标有1-2px抖动），证实**重试是从头完整重走一遍表单流程（View→Edit→改字段→Review→Confirm），不是从失败点续跑**——这是真实存在、要优化的效率缺陷，不是造假或异常。优化方向：重试时把上次失败时刻的截图也带入 prompt（目前 `_predict` 只带文字 history，见 `gui_executor.py:154-157`），或者重试的起点设在"表单已经打开"而非"从列表页重新点 View"。
+
+**3. A2UI 协议官方三个版本（v0.8/v0.9/v1.0）已经并列 fetch 到本地**，路径 `docs/references/A2UI-protocol-spec/{v0_8,v0_9,v1_0}/`，来源为 `github.com/a2ui-project/a2ui` 官方仓库（非论文附录转录）。确认 a2ui.org 当前版本状态：v1.0=Candidate（未稳定，`evolution_guide.md` 记录了大量breaking change：`server`/`client`改名`agent`/`renderer`、新增`callFunction`/`actionResponse`双向RPC、多catalog混用）、**v0.9.1=Current（生产推荐）**、v0.9=Previous Stable（与v0.9.1无schema差异）、v0.8=Legacy。**结论：TaskVM 继续用 v0.9 是对的选择，不需要现在跳到 v1.0**。
+
+**4. TaskVM 现在的 A2UI 集成方式 vs 官方标准实现方式的差距（已调研，未修复）**：`taskvm/benchmark/a2ui_spec.py::A2UI_V09_SPEC` 是从官方文档手工转录成一段自然语言 system prompt，语义遵循协议但**不是官方 SDK 集成**。已下载官方 `agent_sdks/python/a2ui_agent/agent_development.md`（存档于 `docs/references/A2UI-protocol-spec/v0_9/agent_sdk_reference/`），确认官方标准做法（也是纯 in-context prompt engineering，没有专门训练/微调模型，这一点上 TaskVM 的路线是对的）比 TaskVM 现在的实现多出三样东西：a) `A2uiSchemaManager.generate_system_prompt()` 自动注入**正式 JSON Schema**（TaskVM 现在是手写文字描述 schema，不是真 schema）；b) 自动注入 **few-shot examples**（TaskVM 现在的 system prompt 里只有1个示例硬编码在文本里，官方是从 `catalogs/basic/examples/` 目录动态装载）；c) `A2uiCatalog.validator.validate()` 做**运行时 schema 校验 + 自动修复简单错误**（TaskVM 现在完全没有对 `genui_decoder.py`/`compiler.py` 吐出的 A2UI 消息做 schema 校验，只有 `validate_binding` 校验 `task_binding` 部分，A2UI 部分校验薄弱）。这三点是 harness/prompt 层面性价比最高的优化点，不需要碰模型能力就能提升生成质量和可调试性。
+
+**5. MobileGym 迁移范围确认（用户已拍板，要求"完全对齐主线solid程度，不计工作量"）**：现状 `taskvm/harness/mobilegym_bridge.py::_send_message` 是硬编码固定手势序列（`open_app→深链→focus→type_text→ENTER`），**不经过** `taskvm/execution/gui_executor.py` 的真实grounding循环；回退路径是诚实返回 HTTP 409（因为微信没有撤回UI），这个"诚实"结论本身是对的，但达成这个结论的路径应该是"让 gui_executor 真的去尝试找撤销手势、真的找不到再output fail"，而不是"程序员自己判断没有UI于是直接硬编码409"——这两者在**结论**上一样，但在**证明这个结论的方法论严谨度**上不同，后者更符合 E7 定的"诚实地展示一个局限，优于用捷径掩盖过程"的标准。binding discovery 这次已经补了一次真实调用（`run_mobilegym_killtest.py` 的 `binding_discovery_samples`），但目前 `f1=0`（未命中 alipay→wechat 绑定），尚未诊断具体是 prompt 问题还是这个substrate的渲染观测本身对模型不友好。
