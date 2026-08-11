@@ -106,6 +106,8 @@ class StateAdapter:
         old_value = ent.get(field)
         last_resp = None
         last_err = None
+        prev_screenshot = None   # Task2 (E12): retry carries the stuck screenshot
+        resume_url = None        # Task2 (E12): retry resumes from the edit form
         for attempt in range(1, GUI_WRITE_RETRIES + 2):   # 1..3
             try:
                 resp = gui_write(
@@ -113,10 +115,19 @@ class StateAdapter:
                     value=value, field=field, entity_kind=self.entity_kind,
                     base_url=self.base_url, old_value=old_value,
                     screenshot_dir=self.gui_screenshot_dir, undo=undo,
-                    attempt=attempt)
+                    attempt=attempt,
+                    prev_screenshot=prev_screenshot, resume_url=resume_url)
             except GuiExecutorFailure:
                 raise   # honest irreversibility — don't retry
             last_resp = resp
+            # Task2: capture the stuck screenshot + edit-form URL for the retry.
+            # On the NEXT attempt the executor resumes from the edit form (not
+            # the list page) + the model sees where this attempt got stuck, so
+            # it doesn't re-walk View→Edit→…→Confirm from scratch (E12 measured
+            # 16 calls/op avg because retries re-walked the whole form).
+            trace = resp.get("trace") or {}
+            prev_screenshot = trace.get("last_screenshot")
+            resume_url = self._edit_form_url(sid, entity_id)
             # verify the change landed in the real app state (honest check)
             after_state = self.read_canonical(sid)
             ent_after = (after_state.get("entities") or {}).get(entity_id) or {}
@@ -135,6 +146,22 @@ class StateAdapter:
                         f"got {new_value!r} after {resp.get('trace',{}).get('steps',0)} steps (attempt {attempt})")
             logger.warning(f"[gui_mutate] {last_err}; {'retrying' if attempt <= GUI_WRITE_RETRIES else 'giving up'}")
         raise RuntimeError(last_err or "GUI write failed")
+
+    # ── edit-form URL (Task2: retry resume point, per-app kind) ───────────────
+    _EDIT_PATH_KIND = {   # app → URL path segment for the edit form
+        "calendar": "event", "taskboard": "task", "drive": "file",
+        "mail": "message", "outlook_cal": "appointment",
+    }
+
+    def _edit_form_url(self, sid: str, entity_id: str) -> str | None:
+        """The edit-form URL for this app+entity (the retry resume point).
+        Each app's P1 GUI exposes ``/<sid>/<kind>/<eid>/edit``. Returns None if
+        the app has no known edit-form path (the retry then falls back to the
+        list URL, as before)."""
+        kind = self._EDIT_PATH_KIND.get(self.app)
+        if not kind:
+            return None
+        return f"{self.base_url}/{sid}/{kind}/{entity_id}/edit"
 
     # ── canonical read (verifier-only) ──────────────────────────────────────
     def read_canonical(self, sid: str) -> dict:

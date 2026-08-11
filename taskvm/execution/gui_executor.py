@@ -145,21 +145,53 @@ class GuiExecutor:
         return os.path.join(self.screenshot_dir,
                             f"step_{self._shot_counter:02d}_{label}.png")
 
-    def _predict(self, instruction: str, history: list[str]) -> dict | None:
+    def _predict(self, instruction: str, history: list[str],
+                 prev_screenshot: str | None = None) -> dict | None:
         """One grounding call: screenshot → model → parse action dict. Returns
         None on parse failure OR on a persistent call error (e.g. 429 QPM
-        exhaustion) so the loop's backoff handles it instead of crashing."""
+        exhaustion) so the loop's backoff handles it instead of crashing.
+
+        ``prev_screenshot`` (Task2 optimization, E12): on a RETRY, the caller
+        passes the LAST screenshot from the previous failed attempt (as a data
+        URL). The model then sees "where the previous try got stuck" as a second
+        image, so it doesn't have to re-derive the page state from the text
+        history alone — this cuts the retry's step count substantially (E12
+        measured 16 calls/op avg because retries re-walked View→Edit→…→Confirm
+        from scratch). None on the first attempt (no previous screenshot)."""
         data_url = self.bc.screenshot_data_url()
         user = instruction
         if history:
             user += "\n\nAction history so far:\n" + "\n".join(
                 f"  step {i+1}: {h}" for i, h in enumerate(history))
+        if prev_screenshot:
+            user += ("\n\nThe SECOND image is where your PREVIOUS attempt got "
+                     "stuck (it did not complete). The FIRST image is the page "
+                     "RIGHT NOW. Continue from the current page — if a form / "
+                     "dialog is already open, do NOT re-navigate to it; just "
+                     "finish the remaining steps (change the field + confirm).")
         user += "\n\nOutput the next action as JSON now."
         try:
-            parsed, raw, resp = model_client.complete_vision_json(
-                GROUNDING_SYSTEM, user, data_url,
-                max_tokens=300, temperature=None, model=self.model,
-                repair_retries=1)
+            if prev_screenshot:
+                # two-image call: build the content blocks manually (current +
+                # previous) so complete_vision_json's single-image helper doesn't fit.
+                sys_prompt = GROUNDING_SYSTEM + "\n\nRespond with ONLY valid JSON - no markdown fences, no prose."
+                content = [
+                    {"type": "text", "text": sys_prompt + "\n\n" + user},
+                    {"type": "image_url",
+                     "image_url": {"url": data_url, "detail": "high"}},
+                    {"type": "text", "text": "Previous attempt's last screen (where it got stuck):"},
+                    {"type": "image_url",
+                     "image_url": {"url": prev_screenshot, "detail": "high"}},
+                ]
+                raw, resp = model_client.complete_vision(
+                    [{"role": "user", "content": content}],
+                    max_tokens=300, temperature=None, model=self.model)
+                parsed = model_client._parse_json(raw)
+            else:
+                parsed, raw, resp = model_client.complete_vision_json(
+                    GROUNDING_SYSTEM, user, data_url,
+                    max_tokens=300, temperature=None, model=self.model,
+                    repair_retries=1)
         except Exception as e:
             logger.warning(f"[gui_executor] vision call failed (likely 429 QPM): "
                            f"{e!s:.120}; will back off + retry")
@@ -229,24 +261,41 @@ class GuiExecutor:
             raise GuiExecutorFailure(reason)
         return f"unknown_action({act!r})"
 
-    def execute(self, instruction: str, page_url: str) -> dict:
+    def execute(self, instruction: str, page_url: str, *,
+                prev_screenshot: str | None = None,
+                resume_url: str | None = None) -> dict:
         """Run the predict→execute→re-observe loop. Returns a trace dict:
         {steps, actions, final_url, done}.
 
         Raises ``GuiExecutorFailure`` if the model outputs ``fail`` (honest
         irreversibility). Raises ``RuntimeError`` if max_steps exceeded without
-        ``done`` (cost/timeout protection — handoff §3.3)."""
-        with self._lock:   # one GUI op at a time (shared resident page)
-            return self._execute_locked(instruction, page_url)
+        ``done`` (cost/timeout protection — handoff §3.3).
 
-    def _execute_locked(self, instruction: str, page_url: str) -> dict:
-        self.bc.goto(page_url)
+        ``prev_screenshot`` / ``resume_url`` (Task2, E12): on a RETRY, the caller
+        passes the previous attempt's last screenshot + a URL to resume from
+        (e.g. the edit-form URL, not the list URL) so the retry doesn't re-walk
+        View→Edit→… from scratch. None on the first attempt."""
+        with self._lock:   # one GUI op at a time (shared resident page)
+            return self._execute_locked(instruction, page_url,
+                                         prev_screenshot=prev_screenshot,
+                                         resume_url=resume_url)
+
+    def _execute_locked(self, instruction: str, page_url: str, *,
+                        prev_screenshot: str | None = None,
+                        resume_url: str | None = None) -> dict:
+        # Task2 (E12): on retry, resume from the deeper URL (edit form / detail)
+        # instead of re-navigating to the list page + re-clicking View/Edit.
+        self.bc.goto(resume_url or page_url)
         self.bc.wait_load()
         history: list[str] = []
         trace = {"steps": 0, "actions": [], "final_url": None, "done": False,
-                 "page_url": page_url}
+                 "page_url": page_url,
+                 "last_screenshot": None}   # Task2: expose for retry resume
         if self.screenshot_dir:
             self.bc.save_screenshot(self._shot_path("00_initial") or "")
+        # the first predict call carries the previous attempt's stuck screenshot
+        # (Task2 direction a) so the model can continue instead of re-deriving.
+        first_predict_prev = prev_screenshot
         # count only EXECUTED actions toward max_steps (429/parse-fail attempts
         # don't burn the budget — they're retried, not progress). max_attempts
         # bounds total model calls (prevents infinite 429 loops).
@@ -255,7 +304,9 @@ class GuiExecutor:
         attempts = 0
         while executed < self.max_steps and attempts < max_attempts:
             attempts += 1
-            action = self._predict(instruction, history)
+            action = self._predict(instruction, history,
+                                   prev_screenshot=first_predict_prev)
+            first_predict_prev = None   # only the very first call gets it
             if action is None:
                 history.append(f"attempt {attempts}: (no parseable action — retrying)")
                 trace["actions"].append({"attempt": attempts, "raw": None})
@@ -272,6 +323,10 @@ class GuiExecutor:
                 break
             time.sleep(1.5)   # nav settle + QPM spacing (gpt-5.6-sol ~10/min)
             self.bc.wait_load(timeout_ms=4000)
+            # Task2: capture the current screenshot as a data URL after each
+            # executed step, so if this attempt fails verification, the caller
+            # can pass trace["last_screenshot"] to the retry's _predict.
+            trace["last_screenshot"] = self.bc.screenshot_data_url()
             if self.screenshot_dir:
                 self.bc.save_screenshot(self._shot_path(desc) or "")
         trace["final_url"] = self.bc.current_url()
@@ -320,7 +375,9 @@ def gui_write(*, app: str, sid: str, entity_id: str, operator: str, value: Any,
               field: str, entity_kind: str, base_url: str,
               old_value: Any, screenshot_dir: str | None = None,
               undo: bool = False, max_steps: int = DEFAULT_MAX_STEPS,
-              attempt: int = 1) -> dict:
+              attempt: int = 1,
+              prev_screenshot: str | None = None,
+              resume_url: str | None = None) -> dict:
     """Drive the GUI executor to perform one write (or rollback) via real GUI
     gestures. Returns a dict matching the ``StateAdapter.mutate`` response
     contract: ``{status, app, entity_id, operator, old, new, field, trace}``.
@@ -332,6 +389,12 @@ def gui_write(*, app: str, sid: str, entity_id: str, operator: str, value: Any,
     ``attempt`` > 1 adds a retry-hint to the instruction (the caller retries on
     verification failure — GUI agents sometimes click Cancel instead of Confirm).
 
+    ``prev_screenshot`` / ``resume_url`` (Task2, E12): on a retry, the caller
+    passes the previous attempt's last screenshot (data URL) + a URL to resume
+    from (the edit-form URL, not the list URL) so the retry doesn't re-walk
+    View→Edit→…→Confirm from scratch. The trace's ``last_screenshot`` field is
+    the source for the next retry's ``prev_screenshot``.
+
     Raises ``GuiExecutorFailure`` on honest irreversibility (model outputs
     ``fail``); raises ``RuntimeError`` on max-steps exhaustion."""
     ex = get_executor()
@@ -341,7 +404,8 @@ def gui_write(*, app: str, sid: str, entity_id: str, operator: str, value: Any,
         app=app, entity_kind=entity_kind, entity_id=entity_id,
         field=field, value=value, operator=operator, undo=undo, attempt=attempt)
     page_url = f"{base_url}/{sid}"
-    trace = ex.execute(instruction, page_url)
+    trace = ex.execute(instruction, page_url,
+                       prev_screenshot=prev_screenshot, resume_url=resume_url)
     return {"status": "ok", "app": app, "entity_id": entity_id,
             "operator": operator, "field": field,
             "old": old_value, "new": value, "trace": trace}
