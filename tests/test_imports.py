@@ -259,5 +259,43 @@ def test_reconciliation_killtest_importable():
     assert callable(run_scenario) and callable(main)
 
 
+# ── EE.6: GroundingBackend ABC + hot-swap ───────────────────────────────────
+def test_grounding_backend_factory_and_names():
+    """make_grounding_backend builds the 3 named backends; GPT56Sol/GLM5V carry
+    the right default model ids."""
+    from taskvm.execution.grounding_backend import (make_grounding_backend,
+        GPT56SolBackend, GLM5VBackend, UITarsBackend, GroundingBackend)
+    b = make_grounding_backend("gpt56sol")
+    assert isinstance(b, GPT56SolBackend) and isinstance(b, GroundingBackend)
+    assert b.name == "gpt56sol"
+    g = make_grounding_backend("glm5v")
+    assert isinstance(g, GLM5VBackend) and g.name == "glm5v"
+    assert g.model == "glm-5v-turbo"   # 大纲附录 B.2 vision-capable backup
+    u = make_grounding_backend("uitars")
+    assert isinstance(u, UITarsBackend) and u.name == "uitars"
+
+
+def test_uitars_backend_is_stub():
+    """UITarsBackend must raise NotImplementedError (interface-only, no weights
+    downloaded — handoff EE.6: '不用真实跑 UITarsBackend ... stub 实现')."""
+    from taskvm.execution.grounding_backend import make_grounding_backend
+    u = make_grounding_backend("uitars")
+    try:
+        u.predict_action("data:url", "do thing", [])
+        assert False, "UITarsBackend stub must raise NotImplementedError"
+    except NotImplementedError:
+        pass  # correct — interface-only
+
+
+def test_get_executor_caches_by_backend_name():
+    """get_executor returns the same singleton for the same backend_name (EE.6
+    hot-swap: different backend_names get different executors)."""
+    from taskvm.execution.gui_executor import get_executor
+    e1 = get_executor(backend_name="gpt56sol")
+    e2 = get_executor(backend_name="gpt56sol")
+    assert e1 is e2, "same backend_name must return the cached singleton"
+    assert e1.backend.name == "gpt56sol"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-x", "-q"])

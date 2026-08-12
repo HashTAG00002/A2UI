@@ -116,7 +116,8 @@ class StateAdapter:
                     base_url=self.base_url, old_value=old_value,
                     screenshot_dir=self.gui_screenshot_dir, undo=undo,
                     attempt=attempt,
-                    prev_screenshot=prev_screenshot, resume_url=resume_url)
+                    prev_screenshot=prev_screenshot, resume_url=resume_url,
+                    backend_name=getattr(self, "grounding_backend", "gpt56sol"))
             except GuiExecutorFailure:
                 raise   # honest irreversibility — don't retry
             last_resp = resp
@@ -412,7 +413,8 @@ DEFAULT_PORTS = {"calendar": 3013, "taskboard": 3014, "drive": 3015,
 def make_adapter(app: str, port: int | None = None, host: str = "localhost",
                  base_url: str | None = None, *,
                  executor: str = "api",
-                 gui_screenshot_dir: str | None = None) -> StateAdapter:
+                 gui_screenshot_dir: str | None = None,
+                 grounding_backend: str | None = None) -> StateAdapter:
     """Factory. ``base_url`` overrides host/port if given (e.g. docker service name).
 
     ``executor`` (E10 rework P2): ``'api'`` (default, legacy requests.post to the
@@ -421,7 +423,13 @@ def make_adapter(app: str, port: int | None = None, host: str = "localhost",
     ``gui_agent``, the adapter's ``use_gui_executor`` flag is set + a
     ``gui_screenshot_dir`` for step evidence. Read/seed/reset always use the
     Flask app (the read path is allowed to use the internal API — only the
-    WRITE/ROLLBACK path must go through the browser)."""
+    WRITE/ROLLBACK path must go through the browser).
+
+    ``grounding_backend`` (EE.6): when ``executor='gui_agent'``, name the
+    hot-swappable vision model the GUI executor uses ('gpt56sol' default,
+    'glm5v', 'uitars'). The executor singleton is keyed by this name so a
+    model-ablation run can swap backends. None → 'gpt56sol' (pre-EE.6 baseline).
+    Resolved lazily in ``gui_executor.get_executor`` at first write."""
     if app not in _ADAPTER_CLASSES:
         raise ValueError(f"unknown app {app!r}; known: {list(_ADAPTER_CLASSES)}")
     if base_url is None:
@@ -431,6 +439,10 @@ def make_adapter(app: str, port: int | None = None, host: str = "localhost",
     if executor == "gui_agent":
         ad.use_gui_executor = True
         ad.gui_screenshot_dir = gui_screenshot_dir
+        # EE.6: record the requested backend name so _mutate_via_gui's
+        # get_executor() call builds the right backend. Stored on the adapter;
+        # gui_executor reads it via the module-level get_executor(backend_name=).
+        ad.grounding_backend = grounding_backend or "gpt56sol"
     elif executor != "api":
         raise ValueError(f"unknown executor {executor!r}; expected 'api' or 'gui_agent'")
     return ad

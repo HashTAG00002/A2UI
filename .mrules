@@ -1387,3 +1387,26 @@ recon workflow（10 agent，529K tokens）发现 HANDOFF_E17.md 在未验证实�
 2. **只测 release_reschedule（2 App）**——没测 launch_full 的 4-App reconciliation。launch_full 的 T2 也是 release_date 绑定，同样的冲突逻辑会生效，但未单独跑。handoff 要求"3 种合并策略均正确执行"，release_reschedule 已覆盖；4-App 场景的 reconciliation 留 final。
 3. **外部注入只改 T2.deadline**——没测多字段同时冲突、跨 app 冲突（如 calendar.E1 被外部改）。当前 `detect_conflicts` 检查每个 binding 的每个 entity，多冲突会全部检测，但 killtest 只验证单冲突场景。多冲突场景留 final。
 4. **`apply_merge_option` 的 response 字段从 JSON 里剔除了**（`{k:v for k,v in merge_result.items() if k != "response"}`）——response 含 app-internal detail（file/message dict），体积大且非验收关键。如需完整 response 可改。
+
+### EE.6 — GroundingBackend ABC + GPT56Sol/GLM5V/UITars 热拔插（model ablation 防御）
+
+**改了什么**（新建 `taskvm/execution/grounding_backend.py` + 重构 `gui_executor.py` + `substrate/base.py` + 新建 `run_model_ablation.py` + 3 L0 测试）：
+- `grounding_backend.py`：`GroundingBackend` ABC（`predict_action(screenshot, instruction, history, prev_screenshot) -> dict|None` + `name` property）+ `_OpenAIVisionBackend` 共享 impl（把 gui_executor._predict 的 model 调用逻辑搬来，含 E12 Task2 双图重试路径）+ `GPT56SolBackend`(默认 gpt-5.6-sol) / `GLM5VBackend`(glm-5v-turbo) / `UITarsBackend`(stub, NotImplementedError) + `make_grounding_backend(name)` 工厂。
+- `gui_executor.py`：GROUNDING_SYSTEM 移到 grounding_backend（gui_executor re-import 保持向后兼容）；`GuiExecutor.__init__` 加 `backend`/`backend_name` 参数（默认 gpt56sol = pre-EE.6 baseline 零回归）；`_predict` 改为一行委托 `self.backend.predict_action(self.bc.screenshot_data_url(), instruction, history, prev_screenshot)`；`get_executor` 改为按 backend_name 缓存（`_EXECUTORS: dict[str, GuiExecutor]`，不同 backend 各一个 resident executor + 浏览器页）；`gui_write` 加 `backend_name` 参数透传给 `get_executor`。
+- `substrate/base.py`：`make_adapter` 加 `grounding_backend` 参数，executor='gui_agent' 时设 `ad.grounding_backend`；`_mutate_via_gui` 调 `gui_write(backend_name=getattr(self, "grounding_backend", "gpt56sol"))`。
+- `run_model_ablation.py`：对 release_reschedule 用 gpt56sol/glm5v 各跑 N samples（gui_agent），报 binding_f1/round_trip/success_rate/avg_gui_steps 对比表 + uitars 记为 "pluggable, not run"（stub）。输出 `eval_results/model_ablation_<ts>.json`。
+
+**证据**（import + 单元验证，非 live 模型跑）：
+- `make_grounding_backend("gpt56sol").name == "gpt56sol"` ✓（默认）
+- `make_grounding_backend("glm5v").model == "glm-5v-turbo"` ✓（大纲附录 B.2 backup）
+- `make_grounding_backend("uitars").predict_action(...)` raises NotImplementedError ✓（stub，带 OSWorld mm_agents/uitars_agent.py 参考路径的 helpful message）
+- `get_executor(backend_name="gpt56sol")` 单例缓存：同一 backend_name 返回同一 executor ✓
+- L0: **27 passed**（24→27，新增 test_grounding_backend_factory_and_names + test_uitars_backend_is_stub + test_get_executor_caches_by_backend_name）✓ 超过 handoff 的 "25+" 目标
+- W1 mock 回归：**4/4 tasks PASS**（gui_executor 重构没破坏 api 路径——import chain 完好）✓
+- handoff 验收命令 `python -c "from taskvm.execution.grounding_backend import make_grounding_backend, GPT56SolBackend; b = make_grounding_backend(); print(b.name)"` → 输出 `gpt56sol` ✓
+
+**已知局限（不美化）**：
+1. **未 live 跑 model ablation**——gpt56sol vs glm5v 的真实对比数字（binding_f1/round_trip/success_rate）没产出 JSON。原因：需 gpt-5.6-sol + glm-5v-turbo API 调用 + QPM 间距（~90s/sample × 4 = 6min + 429 风险），本轮 token 预算 + QPM 限流下未跑。`run_model_ablation.py` 脚本完整可跑，留 final 阶段产出 `model_ablation_<ts>.json`。**不声称 glm5v 已验证**——只声称接口完整 + gpt56sol 路径零回归。
+2. **UITarsBackend 是 stub**——raise NotImplementedError，不跑真实 UI-TARS。handoff 明确"不用真实跑 UITarsBackend（它需要大模型权重），只需要 stub 实现，让接口完整即可"。ablation 报告里 uitars 记为 "pluggable, not run"，**不声称 uitars 结果**。
+3. **`_OpenAIVisionBackend` 共享 impl 假设 glm-5v-turbo 走同一 OpenAI-compatible 接口**——大纲附录 B.2 确认 `glm-5v-turbo` 支持 `image_url` + `data:image/...;base64,...` 标准 OpenAI 格式，所以 `complete_vision_json` 应直接可用。但未 live 验证 glm-5v-turbo 对 UITARS 风格 [0,1000] 坐标系的理解是否与 gpt-5.6-sol 等价——可能 glm-5v-turbo 输出的坐标格式不同，需适配。这是 live 跑时会暴露的问题。
+4. **`get_executor` 按 backend_name 缓存**——意味着同一进程内 gpt56sol + glm5v 各起一个 BrowserController（两个 Playwright 页）。内存翻倍但可接受。若同 backend_name 但不同 model override，会复用第一个 executor（model 被忽略）——当前无此用例，但若 future 需要 same-backend 不同 model，得改 cache key。

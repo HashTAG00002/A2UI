@@ -51,6 +51,8 @@ from typing import Any, Optional
 
 from taskvm.benchmark import model_client
 from taskvm.benchmark.cost_model import CostModel
+from taskvm.execution.grounding_backend import (GROUNDING_SYSTEM, GroundingBackend,
+                                                 make_grounding_backend)
 from taskvm.harness.browser_controller import BrowserController
 
 logger = logging.getLogger(__name__)
@@ -59,24 +61,8 @@ MODEL_ROLE = "compute_use"   # separate from compiler's 'compiler' role
 DEFAULT_MODEL = None         # None → model_client.TASKVM_DEFAULT_MODEL (gpt-5.6-sol)
 DEFAULT_MAX_STEPS = 18
 DEFAULT_VIEWPORT = (1100, 760)
+DEFAULT_BACKEND = "gpt56sol"   # EE.6: the pre-EE.6 behavior (E13/E15 baseline)
 
-# ── system prompt (UITARS-style, normalized [0,1000] coords) ─────────────────
-GROUNDING_SYSTEM = (
-    "You are a GUI agent operating a web browser. You are given a screenshot of "
-    "the current page and a task. Output the NEXT single action as a JSON object.\n\n"
-    "Coordinate system: NORMALIZED to the image dimensions on a 0–1000 scale. "
-    "(0,0) = top-left corner of the screenshot; (1000,1000) = bottom-right. "
-    "To click a UI element, output the coordinate of its center.\n\n"
-    "Action types (output exactly ONE):\n"
-    '  {"action":"click","coordinate":[x,y]}     — left-click at the normalized point\n'
-    '  {"action":"type","text":"..."}            — type text into the currently-focused input\n'
-    '  {"action":"press","key":"Enter"}          — press a key (Enter / Tab / Escape / Backspace / ArrowDown / ...)\n'
-    '  {"action":"scroll","coordinate":[x,y],"direction":"down"}  — scroll (down/up) at the point\n'
-    '  {"action":"wait"}                         — the page is loading; wait 1s and re-observe\n'
-    '  {"action":"done"}                         — the task is complete (the target change has happened)\n'
-    '  {"action":"fail","reason":"..."}          — the task cannot be done via the UI (honest failure)\n\n'
-    "Respond with ONLY the JSON object — no markdown fences, no prose."
-)
 
 
 def _build_instruction(*, app: str, entity_kind: str, entity_id: str,
@@ -128,12 +114,19 @@ class GuiExecutor:
                  viewport: tuple[int, int] = DEFAULT_VIEWPORT,
                  cost_model: CostModel | None = None,
                  screenshot_dir: str | None = None,
-                 headless: bool = True):
+                 headless: bool = True,
+                 backend: GroundingBackend | None = None,
+                 backend_name: str = DEFAULT_BACKEND):
         self.model = model
         self.max_steps = max_steps
         self.cost_model = cost_model
         self.screenshot_dir = screenshot_dir
         self.bc = BrowserController(viewport=viewport, headless=headless)
+        # EE.6: the grounding model is a hot-swappable backend. Default builds
+        # gpt56sol (the pre-EE.6 E13/E15 baseline → zero regression). Pass a
+        # backend_name ('glm5v'/'uitars') or a pre-built backend for ablation.
+        self.backend = backend or make_grounding_backend(
+            backend_name, model=model, cost_model=cost_model)
         self._shot_counter = 0   # monotonic (Date.now banned in this env)
         self._lock = __import__("threading").Lock()   # serialize GUI ops (one shared page)
 
@@ -158,52 +151,13 @@ class GuiExecutor:
         history alone — this cuts the retry's step count substantially (E12
         measured 16 calls/op avg because retries re-walked View→Edit→…→Confirm
         from scratch). None on the first attempt (no previous screenshot)."""
+        # EE.6: delegate to the hot-swappable GroundingBackend. The screenshot
+        # is captured here (BrowserController) and passed in; the backend owns
+        # the model call (single-image complete_vision_json or two-image retry
+        # path). Default backend = gpt56sol (pre-EE.6 E13/E15 baseline).
         data_url = self.bc.screenshot_data_url()
-        user = instruction
-        if history:
-            user += "\n\nAction history so far:\n" + "\n".join(
-                f"  step {i+1}: {h}" for i, h in enumerate(history))
-        if prev_screenshot:
-            user += ("\n\nThe SECOND image is where your PREVIOUS attempt got "
-                     "stuck (it did not complete). The FIRST image is the page "
-                     "RIGHT NOW. Continue from the current page — if a form / "
-                     "dialog is already open, do NOT re-navigate to it; just "
-                     "finish the remaining steps (change the field + confirm).")
-        user += "\n\nOutput the next action as JSON now."
-        try:
-            if prev_screenshot:
-                # two-image call: build the content blocks manually (current +
-                # previous) so complete_vision_json's single-image helper doesn't fit.
-                sys_prompt = GROUNDING_SYSTEM + "\n\nRespond with ONLY valid JSON - no markdown fences, no prose."
-                content = [
-                    {"type": "text", "text": sys_prompt + "\n\n" + user},
-                    {"type": "image_url",
-                     "image_url": {"url": data_url, "detail": "high"}},
-                    {"type": "text", "text": "Previous attempt's last screen (where it got stuck):"},
-                    {"type": "image_url",
-                     "image_url": {"url": prev_screenshot, "detail": "high"}},
-                ]
-                raw, resp = model_client.complete_vision(
-                    [{"role": "user", "content": content}],
-                    max_tokens=300, temperature=None, model=self.model)
-                parsed = model_client._parse_json(raw)
-            else:
-                parsed, raw, resp = model_client.complete_vision_json(
-                    GROUNDING_SYSTEM, user, data_url,
-                    max_tokens=300, temperature=None, model=self.model,
-                    repair_retries=1)
-        except Exception as e:
-            logger.warning(f"[gui_executor] vision call failed (likely 429 QPM): "
-                           f"{e!s:.120}; will back off + retry")
-            return None
-        if resp is not None and self.cost_model is not None:
-            model_client.record_usage(resp, self.cost_model,
-                                      tool="gui_executor", role=MODEL_ROLE,
-                                      model=self.model or model_client.TASKVM_DEFAULT_MODEL)
-        if not isinstance(parsed, dict):
-            logger.warning(f"[gui_executor] no dict parsed: {raw[:200]!r}")
-            return None
-        return parsed
+        return self.backend.predict_action(data_url, instruction, history,
+                                            prev_screenshot)
 
     def _execute_action(self, action: dict) -> str:
         """Translate one parsed action dict into a BrowserController call.
@@ -350,25 +304,35 @@ class GuiExecutorFailure(Exception):
 
 
 # ── module-level singleton (one resident GuiExecutor per process) ────────────
-_EXECUTOR: GuiExecutor | None = None
+# EE.6: keyed by backend_name so a model-ablation run can swap backends (each
+# gets its own resident executor + browser page). The default 'gpt56sol' key
+# preserves the pre-EE.6 singleton behavior.
+_EXECUTORS: dict[str, GuiExecutor] = {}
 _EXECUTOR_LOCK = __import__("threading").Lock()
 
 
 def get_executor(*, model: str | None = DEFAULT_MODEL,
                  cost_model: CostModel | None = None,
                  screenshot_dir: str | None = None,
-                 headless: bool = True) -> GuiExecutor:
-    """Lazy singleton: one resident GuiExecutor (one browser page) shared across
-    adapters in a process. The browser is launched on first use."""
-    global _EXECUTOR
-    if _EXECUTOR is not None:
-        return _EXECUTOR
+                 headless: bool = True,
+                 backend_name: str = DEFAULT_BACKEND,
+                 backend: GroundingBackend | None = None) -> GuiExecutor:
+    """Lazy singleton: one resident GuiExecutor per backend_name (one browser
+    page each), shared across adapters in a process. The browser is launched on
+    first use. Default backend_name='gpt56sol' preserves the pre-EE.6 behavior
+    (E13/E15 baseline). Pass backend_name='glm5v' (or a pre-built ``backend``)
+    for the model-ablation table (EE.6)."""
+    key = backend.name if backend is not None else backend_name
+    if key in _EXECUTORS:
+        return _EXECUTORS[key]
     with _EXECUTOR_LOCK:
-        if _EXECUTOR is None:
-            _EXECUTOR = GuiExecutor(model=model, cost_model=cost_model,
-                                    screenshot_dir=screenshot_dir, headless=headless)
-            logger.info("[gui_executor] resident executor ready")
-    return _EXECUTOR
+        if key not in _EXECUTORS:
+            _EXECUTORS[key] = GuiExecutor(
+                model=model, cost_model=cost_model,
+                screenshot_dir=screenshot_dir, headless=headless,
+                backend=backend, backend_name=backend_name)
+            logger.info(f"[gui_executor] resident executor ready (backend={key})")
+    return _EXECUTORS[key]
 
 
 def gui_write(*, app: str, sid: str, entity_id: str, operator: str, value: Any,
@@ -377,7 +341,8 @@ def gui_write(*, app: str, sid: str, entity_id: str, operator: str, value: Any,
               undo: bool = False, max_steps: int = DEFAULT_MAX_STEPS,
               attempt: int = 1,
               prev_screenshot: str | None = None,
-              resume_url: str | None = None) -> dict:
+              resume_url: str | None = None,
+              backend_name: str = DEFAULT_BACKEND) -> dict:
     """Drive the GUI executor to perform one write (or rollback) via real GUI
     gestures. Returns a dict matching the ``StateAdapter.mutate`` response
     contract: ``{status, app, entity_id, operator, old, new, field, trace}``.
@@ -397,7 +362,7 @@ def gui_write(*, app: str, sid: str, entity_id: str, operator: str, value: Any,
 
     Raises ``GuiExecutorFailure`` on honest irreversibility (model outputs
     ``fail``); raises ``RuntimeError`` on max-steps exhaustion."""
-    ex = get_executor()
+    ex = get_executor(backend_name=backend_name)
     ex.screenshot_dir = screenshot_dir   # per-call evidence dir (mutable)
     ex._shot_counter = 0                  # reset counter per call
     instruction = _build_instruction(
