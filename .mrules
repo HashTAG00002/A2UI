@@ -1436,3 +1436,26 @@ recon workflow（10 agent，529K tokens）发现 HANDOFF_E17.md 在未验证实�
 3. **undo Button 不带 app**——GenUI undo 走 generic `/<sid>/undo`（latest saga cross-app），不是 per-app。若用户想只撤销某 app 的写，需用 per-app `/<sid>/undo/<app>` 路由（f-string governance chrome 里的 per-app undo 按钮仍保留）。GenUI 的 undo 是"撤销整个用户动作"语义，符合 §9.2 "saga 是 governance undo 单位"。
 4. **ChoicePicker 用 native `<select>`**——.mrules taskvm-radio-button-gui-agent-finding 警示 GUI agent 操作不了 native select（OS 渲染）。GenUI 的 ChoicePicker 渲染成 `<select>`，gui_agent 模式下若要 GUI 操作它可能失败。但 EE.7 的 form-wiring 是人用（HTML form submit），不是 GUI agent 操作——GUI agent 走 app 自己的 edit form（radio button 版），不走 GenUI surface。两者解耦。
 5. **`_genui_rw_zone_html` 仍调模型**（每次 render 页面都调 gpt-5.6-sol）——默认 on 后，每次刷新页面都触发一次 GenUI 模型调用。QPM 限流下可能 429 → decode 失败 → 诚实 fallback 到 f-string（不假装成功）。可加缓存（同 VM-state 复用上次 decode）但本轮未做。
+
+### EE.8 — SSE /poll 路由（§0 性质 1 动态重投影）
+
+**改了什么**（`server.py`，3 处）：
+1. 顶部 import 加 `json` + `Response, stream_with_context`（from flask）。
+2. 新增 `/<sid>/poll` SSE 路由：每 5s re-read canonical + `resync_with_conflicts` diff vs `last_projection`；有冲突推 `event: conflict\ndata: {n_conflicts}`，无冲突推 `event: ok\ndata: {}`。`stream_with_context` + `mimetype=text/event-stream` + no-cache headers。client disconnect 时 stream 自动关闭。
+3. `_PAGE_TPL` 加 SSE client JS：`new EventSource(pathname + '/poll')`，`addEventListener('conflict', () => reload())`，error 时 close（不 spam console）。只在 session view 页面开启（跳过 /health /seed）。
+
+**为什么**：§0 性质 1 要求"投影随世界状态变化动态重投影"，此前 reconciliation 是 on-action 触发（用户操作时才重读），不是动态。SSE polling 让只读区在用户不操作时也能检测到外部并发修改并 AMBER 标红——"动态"这个词从假的变成真的。
+
+**证据**（live smoke test）：
+- 启动 server `--port 3099 --task release_reschedule --executor api --no-genui`，seed sid=release_reschedule_ui_75664 ✓
+- `curl -N --max-time 7 http://127.0.0.1:3099/<sid>/poll` → 输出 `event: ok\ndata: {}\n\n` ×2（5s 间隔）✓ SSE 流正常
+- `curl /<sid>` 页面 HTML 含 EventSource JS（grep -c = 2：script + EventSource 字符串）✓
+- poll 路由注册：`any(r.rule.endswith('/<sid>/poll'))` = True ✓
+- L0: 28 passed（零回归）✓
+
+**已知局限（不美化）**：
+1. **conflict-push 路径未 live 端到端测**——smoke test 只验证了 `event: ok` 流。conflict-push（注入外部修改 → SSE 推 `event: conflict` → 页面 reload 显示 AMBER）靠组合验证：SSE 流机制（本轮 live 测）+ `resync_with_conflicts` 冲突检测（EE.5 已验证 6/6 正确）。两者独立验证过，组合应工作，但未做"注入时 polling 中"的时序测试（需精确同步 inject + poll 窗口）。
+2. **5s 轮询间隔固定**——`POLL_INTERVAL_S=5` 硬编码。生产可配，但本轮固定值够 demo。每次 poll 调 `read_canonical` × N apps + `resync_with_conflicts`（dict diff），5s 间隔下开销可接受。
+3. **SSE 流是 infinite while True**——client disconnect 时 `stream_with_context` 应关闭 generator，但若 werkzeug dev server 行为异常，可能挂连接。`threaded=True`（main() 里）缓解（每连接一线程）。生产用 gunicorn/eventlet 更稳，但本轮 dev server 够。
+4. **reload 策略粗暴**——conflict 时 `window.location.reload()` 整页刷新。更优雅是局部更新只读区（fetch /<sid> 片段），但本轮最小化实现，reload 保证 AMBER 标记一定显示。
+5. **GenUI 模式下 reload 会再触发一次模型调用**——默认 GenUI on 后，每次 SSE-triggered reload 都调 gpt-5.6-sol decode。QPM 限流下可能 429 → f-string fallback。可加 "conflict 时只刷只读区不重 decode GenUI" 的优化，但本轮未做。

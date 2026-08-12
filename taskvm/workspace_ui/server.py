@@ -34,11 +34,13 @@ Routes:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from flask import Flask, jsonify, redirect, render_template_string, request
+from flask import (Flask, Response, jsonify, redirect, render_template_string,
+                   request, stream_with_context)
 
 from taskvm.execution.action_dispatcher import dispatch
 from taskvm.execution.patch_compiler import compile_patch
@@ -211,6 +213,30 @@ _PAGE_TPL = """\
     {% endif %}
   </main>
   <script src="/static/timeline.js" defer></script>
+  <script>
+    // EE.8: SSE-based dynamic reconciliation polling (§0 property 1 — live
+    // reprojection on world-state change, no user trigger needed). When an
+    // external concurrent change creates a conflict, the server pushes an
+    // `event: conflict` → the page reloads → the read-only zone AMBER-marks it.
+    (function () {
+      if (typeof EventSource === "undefined") return;  // browser without SSE
+      var path = window.location.pathname;
+      // only poll on a session view page (/<sid>, not /health or /seed)
+      if (path === "/health" || path === "/seed" || path === "/") return;
+      var es = new EventSource(path + "/poll");
+      es.addEventListener("conflict", function (e) {
+        // a concurrent external change happened — reload to show the AMBER mark
+        try { var d = JSON.parse(e.data); console.log("[TaskVM SSE] conflict:", d); }
+        catch (err) {}
+        window.location.reload();
+      });
+      es.addEventListener("error", function (e) {
+        // SSE errors are expected on disconnect/timeout — close + let the next
+        // page load re-open. Don't spam the console.
+        es.close();
+      });
+    })();
+  </script>
 </body></html>
 """
 
@@ -575,6 +601,50 @@ def checkpoint(sid: str):
     sess.checkpoints.append(snap)
     logger.info(f"[workspace_ui] checkpoint #{len(sess.checkpoints)} for sid={sid}")
     return redirect(f"/{sid}")
+
+
+@app.route("/<sid>/poll")
+def poll(sid: str):
+    """EE.8: Server-Sent Events — push conflict updates to the client WITHOUT a
+    user action. Implements §0 property 1 "随世界状态变化动态重投影" (the
+    projection re-projects on world-state change, not on user trigger). The
+    client JS (in _PAGE_TPL) opens an EventSource on this route and reloads the
+    page when a conflict is pushed, so the read-only zone AMBER-marks external
+    concurrent changes as they happen.
+
+    SSE stream: every ``POLL_INTERVAL_S`` seconds, re-read canonical + run
+    resync_with_conflicts (diff vs the cached projection). Push ``event:
+    conflict`` with the count if any; ``event: ok`` otherwise. The stream is
+    infinite (closed on client disconnect — stream_with_context handles that)."""
+    import time
+    POLL_INTERVAL_S = 5
+    sess = user_sessions.get(sid)
+    if sess is None:
+        return ("session not found", 404)
+
+    def generate():
+        while True:
+            try:
+                if sess.last_projection is None:
+                    sess.last_projection = resync_values(sess.binding, sess.adapters, sid)
+                _updated, recon = resync_with_conflicts(
+                    sess.binding, sess.last_projection, sess.adapters, sid)
+                if recon.has_conflicts:
+                    sess.last_conflicts = recon.conflicts
+                    yield (f"event: conflict\ndata: "
+                           f"{json.dumps({'n_conflicts': recon.n_conflicts})}\n\n")
+                else:
+                    yield "event: ok\ndata: {}\n\n"
+            except Exception as e:
+                logger.warning(f"[poll/{sid}] cycle error: {e}")
+                yield f"event: error\ndata: {json.dumps({'error': str(e)[:120]})}\n\n"
+            time.sleep(POLL_INTERVAL_S)
+
+    return Response(stream_with_context(generate()),
+                    mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache",
+                             "X-Accel-Buffering": "no",
+                             "Connection": "keep-alive"})
 
 
 @app.route("/<sid>/resolve", methods=["POST"])
