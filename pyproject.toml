@@ -7,11 +7,19 @@ name = "taskvm"
 version = "0.1.0-w1"
 description = "TaskVM — compile live state of multiple existing apps into an editable, executable, verifiable task interface. W1 kill-test."
 requires-python = ">=3.10"
+# Canonical conda env: taskvm (cloned from senseact, 2026-08-12)
+#   Path: /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/conda/envs/taskvm
+#   Activate: conda activate taskvm
+#   DO NOT use: mobilegym (no Flask/jsonschema), senseact (taskvm is a clone of it, prefer taskvm)
 dependencies = [
     "flask>=3.0",
+    "flask-socketio>=5.3",      # E17-B: HumanWebSocketDriver (L4 real-human path)
+    "simple-websocket>=1.0",    # WS transport backend for flask-socketio (no C extension needed)
     "openai>=1.40",
     "requests>=2.31",
     "pillow>=10.0",
+    "aiohttp>=3.9",             # MobileGym bridge async HTTP
+    "jsonschema>=4.20",         # A2UI v0.9 schema validation (a2ui_schema_manager)
     # playwright is installed separately (see README) because it needs `playwright install`
 ]
 
