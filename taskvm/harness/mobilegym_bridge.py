@@ -535,98 +535,69 @@ class MobileGymBridge:
             }
             verb, icon_desc, done_color = verb_map[operator]
 
-            # ── Task E fix (.mrules E15): read CURRENT toggle state BEFORE
-            # building the instruction, so a rollback call (post already
-            # liked -> tap again to UNLIKE) gets a "verify it goes back to
-            # OUTLINE" instruction instead of the write-path's "verify it
-            # turns FILLED" instruction. Bug this replaces: the instruction
-            # was hardcoded to always expect outline->filled, so on a
-            # rollback (filled->outline) the model's own success check was
-            # checking for the WRONG direction -- it would see the icon was
-            # (or briefly stayed) filled and either declare premature done
-            # without really un-toggling, or double-tap back to filled while
-            # "confirming". Root cause found via E15 Task E killtest: 9/9
-            # rollback attempts had write_ok=True, rollback_ok=False in one
-            # continuous run (systematic, not random) -- see
-            # eval_results/x_toggle_rollback_killtest_*.json.
-            _pre_state = await self.env.get_state(required_apps=APPS)
-            _pre_x = _pre_state.get("apps", {}).get("x", {}) or {}
-            _pre_user = _pre_x.get("user", {}) or {}
-            _field_map = {
-                "toggle_like": "likedPostIds",
-                "toggle_retweet": "retweetedPostIds",
-                "toggle_bookmark": "bookmarkedPostIds",
-            }
-            _currently_on = post_id in (_pre_user.get(_field_map[operator], []) or [])
-            if _currently_on:
-                # rollback direction: filled -> outline
-                direction_verb = f"un-{verb}" if verb != "retweet" else "un-retweet"
-                target_state_desc = "OUTLINE/uncolored (its ORIGINAL, un-toggled state)"
-                current_state_desc = f"currently {done_color} and FILLED"
-                fail_hint = "still colored/filled"
-            else:
-                # normal write direction: outline -> filled
-                direction_verb = verb
-                target_state_desc = f"{done_color} and FILLED"
-                current_state_desc = "currently outline/uncolored"
-                fail_hint = "still outline/uncolored"
-
-            # Fetch the target post's content from the base dataset JSON
-            # (posts.json). We can't use the DOM textContent because the
-            # post card's closest selector picks up sibling posts' text,
-            # producing a wrong content hint. The base dataset is the
-            # authoritative source of post content.
+            # ── E16 non-invasive fix (.mrules E16) ───────────────────────────
+            # Direction inference: derived PURELY from the `value` argument
+            # passed by the caller (TaskVM dispatcher), NOT from get_state().
             #
-            # Path resolution: bench_env is installed at
-            # ``<mobilegym_repo>/bench_env`` (a sibling of ``a2ui/``). We
-            # import bench_env at runtime (it's on PYTHONPATH when the bridge
-            # runs) and walk up from its package dir to find
-            # ``<mobilegym_repo>/apps/X/data/posts.json``. This is robust to
-            # where the repo is checked out (no hardcoded absolute path).
-            # ── E14-core ablation switches (Task A, .mrules) ─────────────────
-            # TASKVM_ABLATION_POSTS=old reproduces the PRE-E14 broken
-            # posts.json path (wrong dirname-walk depth: 3 levels up from
-            # a2ui/, which lands INSIDE a2ui/ itself, not the mobilegym repo
-            # sibling) — silently fails (caught by except Exception below,
-            # same as the real pre-fix bug) so content_hint stays "".
-            # TASKVM_ABLATION_INSTRUCTION=old reproduces the PRE-E14
-            # instruction (no "check the icon actually changed color" step —
-            # the model could prematurely output done after a single tap
-            # without verifying it landed).
-            ablation_posts = os.environ.get("TASKVM_ABLATION_POSTS", "new")
+            # Why get_state() was wrong here (E16 bug):
+            #   The previous code called ``env.get_state()`` to read whether
+            #   the post is currently in likedPostIds, then told the model
+            #   "it is currently FILLED/OUTLINE right now". This leaks the
+            #   backend store's contents into the model's prompt — the model
+            #   should infer the icon's current visual state from the SCREENSHOT,
+            #   not from a backdoor read of the zustand store.  In a real CUA
+            #   (OSWorld/real phone) there is no such API; the agent must look
+            #   at the screen.
+            #
+            # Convention (same as other adapters):
+            #   value=True  → target end-state is ACTIVE/FILLED  (write path)
+            #   value=False → target end-state is INACTIVE/OUTLINE (rollback)
+            # The caller (run_x_toggle_killtest / rollback_killtest) already
+            # encodes this: write uses value=True, rollback uses value=False.
+            _want_active = bool(value)  # True=filled, False=outline
+            if _want_active:
+                direction_verb = verb
+                target_state_desc = f"{done_color} and FILLED (active)"
+                fail_hint = "still OUTLINE/uncolored"
+            else:
+                direction_verb = f"un-{verb}" if verb != "retweet" else "un-retweet"
+                target_state_desc = "OUTLINE/uncolored (inactive)"
+                fail_hint = f"still {done_color} and FILLED"
+
+            # content_hint: read from the LIVE DOM (non-invasive — the X app
+            # is already open above).  We do NOT read posts.json here.
+            #
+            # Why posts.json was wrong here (E16 bug):
+            #   posts.json is MobileGym's internal data-seed file — the
+            #   simulated "remote database".  A real CUA cannot open a JSON
+            #   file on the server; it can only see what is rendered on screen.
+            #   Reading posts.json and injecting its content into the prompt
+            #   is equivalent to giving the model a cheat-sheet from the
+            #   "backend database" — it bypasses the visual grounding that CUA
+            #   is supposed to exercise.
+            #
+            # Alternative (E16): read content_hint from the DOM via
+            # page.evaluate('[data-post-id]' + textContent) — the same path
+            # that _flatten_x_posts_async uses.  This is purely observational
+            # (what is visible on screen) and is therefore non-invasive.
             ablation_instr = os.environ.get("TASKVM_ABLATION_INSTRUCTION", "new")
-            import json as _json
             content_hint = ""
             try:
-                import bench_env as _be
-                if ablation_posts == "old":
-                    # pre-E14 buggy path: 3 dirname() calls from THIS file
-                    # (taskvm/harness/mobilegym_bridge.py) — lands at
-                    # a2ui/ itself (a2ui/apps/X/data/posts.json), which does
-                    # not exist -> FileNotFoundError -> caught below -> "".
-                    _mobilegym_repo = os.path.dirname(os.path.dirname(
-                        os.path.dirname(os.path.abspath(__file__))))
-                else:
-                    _mobilegym_repo = os.path.dirname(
-                        os.path.dirname(os.path.abspath(_be.__file__)))
-                _posts_json_path = os.path.join(
-                    _mobilegym_repo, "apps", "X", "data", "posts.json")
-                with open(_posts_json_path) as f:
-                    _all_posts = _json.load(f)
-                for _p in _all_posts:
-                    if _p.get("id") == post_id:
-                        content_hint = str(_p.get("content", ""))[:100]
-                        break
+                dom_text = await self.env.page.evaluate(
+                    f"() => {{"
+                    f"  const card = document.querySelector('[data-post-id=\"{post_id}\"]');"
+                    f"  return card ? (card.textContent || '').substring(0, 120) : '';"
+                    f"}}")
+                content_hint = (dom_text or "").strip()[:100]
             except Exception as e:
-                logger.warning(f"[bridge] could not read posts.json: {e}")
-            logger.info(f"[bridge] mutate_x: post={post_id} "
-                        f"content_hint={content_hint[:60]!r} "
-                        f"ablation_posts={ablation_posts} ablation_instr={ablation_instr}")
+                logger.warning(f"[bridge] DOM content_hint read failed: {e}")
+            logger.info(f"[bridge] mutate_x: post={post_id} want_active={_want_active} "
+                        f"content_hint={content_hint[:60]!r} ablation_instr={ablation_instr}")
             if ablation_instr == "old":
-                # pre-E14 instruction: single tap, no post-tap verification
-                # step, no explicit action-bar icon ordering/count hint, and
-                # (like all pre-Task-E instructions) no current-state
-                # awareness -- kept verbatim for the E14-core ablation.
+                # E14-core ablation baseline: old single-tap instruction
+                # (no verification step, no icon ordering hint).
+                # Kept for ablation reproducibility only — not used in
+                # normal operation.
                 instruction = (
                     f"On this X (Twitter) app timeline, {verb} a specific post. "
                     f"The target post contains this text: \"{content_hint}\". "
@@ -636,22 +607,23 @@ class MobileGymBridge:
                     f"{{\"action\":\"fail\",\"reason\":\"...\"}}.")
             else:
                 instruction = (
-                    f"On this X (Twitter) app timeline, {direction_verb} a specific "
-                    f"post (it is {current_state_desc} right now). "
-                    f"The target post contains this text: \"{content_hint}\". "
+                    f"On this X (Twitter) app timeline, your goal is to make the "
+                    f"{icon_desc} on a specific post reach its TARGET STATE: "
+                    f"{target_state_desc}. "
+                    f"The target post contains this text (read from the screen): "
+                    f"\"{content_hint}\". "
                     f"Find that post on the timeline. Below the post text there is "
                     f"an action bar with a row of small icons. The icons from left "
                     f"to right are: comment (speech bubble), repost (green arrows), "
                     f"like (heart), views (chart), bookmark (ribbon). "
-                    f"You need to tap the {icon_desc} — it is the THIRD icon from "
-                    f"the left in that action bar row. Tap it once. "
-                    f"IMPORTANT: after tapping, take a moment to look at the {icon_desc} "
-                    f"again — if the {direction_verb} succeeded, it should now be "
-                    f"{target_state_desc}. If it is {fail_hint}, your tap may have "
-                    f"missed OR landed twice (toggling back) — check carefully and "
-                    f"tap again if needed to reach the target state. Only output "
-                    f"{{\"action\":\"done\"}} once you can clearly see the {icon_desc} "
-                    f"in the target state described above. "
+                    f"Look at the {icon_desc} (third icon from left) on that post. "
+                    f"If it is ALREADY in the target state ({target_state_desc}), "
+                    f"output {{\"action\":\"done\"}} immediately — no tap needed. "
+                    f"Otherwise tap it once, then verify the icon reached the target "
+                    f"state. If it is {fail_hint} after tapping, your tap may have "
+                    f"missed OR double-toggled — check carefully and tap again. "
+                    f"Only output {{\"action\":\"done\"}} once you can clearly see "
+                    f"the icon in {target_state_desc}. "
                     f"If the post is not visible, scroll to find it. "
                     f"If you cannot find the post after scrolling, output "
                     f"{{\"action\":\"fail\",\"reason\":\"...\"}}.")
@@ -696,19 +668,19 @@ class MobileGymBridge:
             }
             ids_list = user.get(field_map[operator], []) or []
             now_in_list = post_id in ids_list
-            expected_in_list = not _currently_on  # toggle flips the prior state
+            # _want_active: the target end-state (True=FILLED, False=OUTLINE)
+            # derived from `value` — no prior get_state() needed (E16 fix).
             logger.info(f"[bridge] {operator} via gui_act_async: "
                         f"post={post_id} now_in_list={now_in_list} "
-                        f"expected={expected_in_list} steps={trace['steps']}")
-            if now_in_list != expected_in_list:
+                        f"want_active={_want_active} steps={trace['steps']}")
+            if now_in_list != _want_active:
                 raise RuntimeError(
-                    f"{operator} on post {post_id} did not land as expected — "
-                    f"expected now_in_list={expected_in_list} (was "
-                    f"{_currently_on} before this call) but got "
-                    f"{now_in_list} after the GUI gesture loop. "
+                    f"{operator} on post {post_id} did not reach target state — "
+                    f"want_active={_want_active} but now_in_list={now_in_list} "
+                    f"after the GUI gesture loop. "
                     f"trace={trace['actions'][-3:]}")
             return {"status": "ok", "operator": operator,
-                    "old": _currently_on, "new": expected_in_list,
+                    "want_active": _want_active, "now_in_list": now_in_list,
                     "post_id": post_id, "trace": trace}
 
     async def _send_message(self, sid: str, chat_id: str, text: str) -> dict:

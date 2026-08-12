@@ -62,10 +62,19 @@ def _health_check(host: str) -> bool:
 
 
 def _do_toggle(host: str, sid: str, post_id: str, operator: str,
+               want_active: bool = True,
                timeout: int = 180) -> dict:
-    """One toggle call via the bridge. Returns the result record."""
+    """One toggle call via the bridge. Returns the result record.
+
+    ``want_active=True``  → write path  (target state = FILLED/active)
+    ``want_active=False`` → rollback path (target state = OUTLINE/inactive)
+
+    E16 fix: value is now forwarded to the bridge's ``mutate_x`` so it can
+    determine the target direction without reading the backend store.
+    Previously always sent value=True regardless of direction.
+    """
     url = f"http://{host}:{BRIDGE_PORT}/api/x/{sid}/{post_id}"
-    payload = {"operator": operator, "value": True}
+    payload = {"operator": operator, "value": want_active}
     t0 = time.time()
     try:
         r = requests.post(url, json=payload, timeout=timeout)
@@ -153,16 +162,16 @@ def _run_one_rollback(host: str, sid: str, post_id: str, operator: str) -> dict:
     state0 = _read_x_state(host, sid)
     initially_in = _check_post_in_list(state0, operator, post_id)
 
-    # 2. WRITE
-    write_result = _do_toggle(host, sid, post_id, operator)
+    # 2. WRITE: want_active=True → target = FILLED (post enters the list)
+    write_result = _do_toggle(host, sid, post_id, operator, want_active=True)
 
     # 3. verify write landed
     state1 = _read_x_state(host, sid)
     after_write_in = _check_post_in_list(state1, operator, post_id)
     write_verified = after_write_in and not initially_in
 
-    # 4. ROLLBACK (toggle again)
-    rollback_result = _do_toggle(host, sid, post_id, operator)
+    # 4. ROLLBACK: want_active=False → target = OUTLINE (post leaves the list)
+    rollback_result = _do_toggle(host, sid, post_id, operator, want_active=False)
 
     # 5. verify rollback landed
     state2 = _read_x_state(host, sid)
