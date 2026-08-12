@@ -2235,3 +2235,42 @@ tests/test_imports.py                      新增 FF.2/FF.4 相关 L0 测试
 2. **Loop 任务的 CUA 能力仍然受限**——E14-core 指出 MobileGym 移动端 grounding 在需要滚动时 5.6%。Loop 任务中如果目标元素需要滚动，成功率可能很低。如果测出 loop_success_rate < 50%，诚实报告，不要把这归因为"loop 机制本身的问题"（机制是对的，是执行能力边界）。
 3. **milestone 初始化 LLM 调用是建议，不是决定**——如果 LLM 建议的 milestone 不合理，这不是 bug，是预期内的"AI 建议需要人审核"的 governance 体现。论文里可以说"系统辅助用户设定里程碑，用户保持最终决定权"。
 4. **工作流 planner 目前是规则判断，不是模型决策**——`_classify_workflow` 用简单规则（binding 跨 app 数 + event_type）判断结构，不调 LLM。这是有意的（零延迟，确定性），不是局限。如果未来要支持更复杂的工作流结构检测，可以加 LLM planner，但当前 FF 阶段不需要。
+
+---
+
+## E21 — 全仓库级纠错：内部数据库 ID 渗入了渲染/观测/指令/执行四个模型可见层（E16 只清了 MobileGym 一条支线，主线自建 app 从未清过）；用户下达"内部信息零暴露"最后通牒，产出 GG 阶段终极开工文档
+
+**[session: 2026-08-13，FF.7 汇报后的三轮追问；本条由审计/规划 agent 落盘，GG 开工文档见 `docs/A2UI_GG阶段开工目标.md`]**
+
+### 错在哪（与 E10/E16 同源的第三次复现，但比前两次更底层）
+
+用户在 FF.7 "4/4 PASS" 汇报后追问 subgoal instruction 是怎么生成的，审计发现 `_build_edit_nl`（governance_interpreter.py:379-429）是硬编码 if/elif 模板、`entity_id`（E1/T1/F1）直接拼进给模型的字符串。用户随即下达全项目最严厉的一次指令（原话大意）："我在所有 .mrules、所有 prompt 里反复强调过——真实应用是什么样就让它看到什么样，禁止暴露内部数据库。为什么现在还有 entity ID？从现在开始删除所有内部数据库相关的代码、注释、prompt、if-else，我不要再看到任何和内部数据库相关的东西。"
+
+审计随后做了全仓库取证（file:line 级，全部落在 GG 开工文档 §1），确认泄露是**四层系统性**的，而不是某一个函数：
+
+1. **渲染层（总源头）**：5 个自建 app 的 HTML 模板把数据库主键渲染成了**可见列 + data-* 属性**——calendar `data-event-id="{{e.eid}}"`（calendar.html:14）+ 可见 EID 列、taskboard `data-task-id` + TID 列（taskboard.html:14-15）、drive `data-file-id` + FID 列、mail 可见 MID 列、outlook_cal 可见 AID 列。真实软件的屏幕上永远没有"数据库 ID"这一列——这一层不删，截图/a11y/DOM 三种观测全部被污染。
+2. **观测层**：`replay_engine.py:146-153` `synthesize_a11y` 把 `[bid={eid}]` 直接写进喂给 compiler 的 a11y 文本；`_A11Y_FIELDS` 含 `peer_wxid`。
+3. **指令层**：`gui_executor.py:84` `_build_instruction` 拼 `"the event with id 'E1'"`；`_build_edit_nl` 全部 operator if/elif + `{eid}` + wxid 泄露 + 未见 operator 的 generic fallback（零泛化）。
+4. **执行层**：`substrate/base.py:131,157` `_edit_form_url(sid, entity_id)` 拼深链 URL 直接 `goto` 编辑表单（gui_executor.py:242）；bridge.py:~821 `openApp('wechat', '/chat/{wxid}')` 深链。真实用户做不到的事，harness 在做。
+
+**为什么 E16 没拦住**：E16 只清了 MobileGym 支线的 posts.json/get_state 泄露，没人主动问"同类问题在主线自建 app 上是否存在"——这正是 E10 元原则（"被问到 A 时主动检查 B/C/D"）的又一次违反，且代价最大：FF.7 的 4/4 PASS 数字是在"模型被喂了内部 ID + 页面上渲染着内部 ID"的条件下跑出来的，对开放场景的证明力为零。
+
+### 用户怎么发现的
+
+不是通过跑分异常，而是用户问了一个架构问题："换一个任务的话，对应的就不是这些 instruction 了，你要遍历所有 prompt 写法吗？这种实现绝对不可能出现在真实场景里。"——一句话戳穿了 if/elif 模板的零泛化本质；随后追问"目前跑出来的真实结果根本不能代表 VM moment 的涌现"，坐实了**已有 benchmark 数字对"开放场景可用性"这个核心 claim 没有证明力**。
+
+### 纠正后变成什么（GG 阶段，开工文档已交付）
+
+`docs/A2UI_GG阶段开工目标.md`，核心内容：
+- **§0 红线（新判定标准，与大纲 §5.1 手势标准同级）**：一条信息若不能被"看着渲染屏幕的真人"肉眼看到，就禁止进入任何模型输入。entity_id/data-*/get_state 产物/深链 URL 全禁；title/name/可见文本/颜色/位置合法。
+- **三层权限模型**：模型可见层（只有肉眼可见内容）/ Harness 控制层（canonical state 合法但产物永不进模型）/ 翻译层（server 侧把 entity_id 翻译成可见 title 后才允许进模型——这是"既保留 server 侧解析能力、又不泄露"的唯一合法机制）。
+- **§1 删除清单**（file:line 级，四层）；**§3 GG.1-GG.6 任务包**：渲染清洗→观测清洗→翻译层+LLM SubgoalGenerator（废除全部 if/elif，TTS 限 2-3 次）→执行层去深链→工作流运行时闭环（初始化/自治执行/强制暂停/拖拽回退/诚实卡死，三种 workflow）→开放场景 killtest（用一个 harness 从未硬编码过的新 operator 验证泛化 + no-leak 静态门）。
+- **豁免**：verifier/seed/rollback_log 的 canonical 读取保留但加 CONTROL-PLANE 注释划界；`.mrules` 历史不删。
+
+### 对已有数字的定性（必须复述给任何引用者）
+
+**FF.7 的 4/4 gui_agent PASS 数字，其证明范围是"在渲染了内部 ID 的自建页面上、用含内部 ID 的 instruction，模型能完成写操作"——对'开放场景 VM 范式可用性'这个论文核心 claim 证明力为零。** 性质与 E10"旧数字全部作废"同级：GG.6 重跑出新数字之前，不得在论文/demo/汇报中引用 FF.7 数字作为"VM moment 涌现"的证据（可以作为"链路打通"的过程性证据，并必须附带本限定语）。
+
+### 为什么这次纠错重要
+
+E7 讲的是"写路径不能走后门"，E16 讲的是"prompt 里不能塞后门信息"，**E21 讲的是：泄露的总源头在渲染层——你自建的 app 长什么样，决定了观测天然带不带毒**。前两次都在"信息进入模型的最后一环"堵，这次发现毒是从第一环（页面模板把主键渲染成可见列）就带上的。教训：**非侵入式原则要贯彻到"我们自建的测试环境本身长什么样"——harness 的 fixture/substrate 也必须符合真实软件的形态约束，否则在最上游就污染了整个评估的生态效度（ecological validity）**。这是 CHI 审稿人视角下最致命的一类问题，也是用户从 E5（existing applications）起就一直在不同侧面反复敲打的同一个母题。
