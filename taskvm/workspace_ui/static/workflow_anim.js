@@ -118,15 +118,21 @@
         "stroke-width": 3, "stroke-linecap": "round" }));
       tick.setAttribute("stroke", i < done ? "#10b981" : "#d1d5db");
     }
-    // the traveling ball — animated only while running
+    // the traveling ball — animated only while running. SMIL <animateMotion>
+    // needs a <mpath> CHILD (not an attribute on animateMotion) referencing a
+    // <path> by id. The path id is made unique so multiple loop viz on one page
+    // don't collide. <animateMotion> is a CHILD of the element it animates (ball).
     var ball = svg.appendChild(svgEl("circle", { r: 7, fill: "#3b82f6" }));
     if (running) {
-      var anim = svg.appendChild(svgEl("animateMotion", { dur: "3s", repeatCount: "indefinite" }));
-      var mpath = "M " + (cx) + "," + (cy - R) + " A " + R + "," + R + " 0 1 1 " + (cx - 0.01) + "," + (cy - R);
-      // (full loop path — starts at 12 o'clock, goes clockwise via the long arc)
-      var p = svg.appendChild(svgEl("path", { d: mpath, id: "wf-loop-path", fill: "none", stroke: "none" }));
-      anim.setAttribute("mpath", "#wf-loop-path"); // xlink:href form varies; this is the SMIL mpath ref
-      try { anim.setAttributeNS("http://www.w3.org/1999/xlink", "href", "#wf-loop-path"); } catch (e) {}
+      var pathId = "wf-loop-path-" + Math.floor(Math.random() * 1e9);
+      var d = "M " + cx + "," + (cy - R) + " A " + R + "," + R + " 0 1 1 " +
+              (cx - 0.01) + "," + (cy - R);
+      svg.appendChild(svgEl("path", { d: d, id: pathId, fill: "none", stroke: "none" }));
+      var anim = svgEl("animateMotion", { dur: "3s", repeatCount: "indefinite" });
+      var mpathEl = svgEl("mpath", {});
+      mpathEl.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", "#" + pathId);
+      mpathEl.setAttribute("href", "#" + pathId);   // modern (non-xlink) form
+      anim.appendChild(mpathEl);
       ball.appendChild(anim);
     } else if (done >= total && total) {
       // park the ball at 12 o'clock + center ✓

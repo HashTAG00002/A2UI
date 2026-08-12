@@ -348,7 +348,7 @@ button .spinner { display: inline-block; width: 12px; height: 12px;
   20% { transform: translateX(-4px); }
   40% { transform: translateX(4px); }
   60% { transform: translateX(-4px); }
-  80% { translateX(2px); }
+  80% { transform: translateX(2px); }
   100% { transform: translateX(0); }
 }
 .saga-timeline.full .handle { display: none; }   /* nothing locked → no stop needed */
