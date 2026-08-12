@@ -34,7 +34,8 @@ import logging
 from typing import Any, TYPE_CHECKING
 
 from taskvm.execution.patch_compiler import PatchOp, compile_patch
-from taskvm.governance.subgoal import SubgoalInstruction
+from taskvm.governance.subgoal import (SubgoalInstruction, WorkflowNode,
+                                       WorkflowNodeType, WorkflowPlan)
 from taskvm.governance.user_behavior_driver import UserBehaviorEvent
 from taskvm.governance.vm_state import VMStateSnapshot
 from taskvm.governance.checkpoint_graph import CheckpointGraph, CheckpointDirection
@@ -72,6 +73,11 @@ class GovernanceInterpreter:
         both pass through here transparently."""
         if event.event_type == "edit_field":
             return self._interpret_edit_field(event, vm_state, task)
+        if event.event_type == "loop_field":
+            # FF.4 §5.3: a loop_field event's template subgoal (the per-event
+            # path returns the template; interpret_as_workflow wraps it in a
+            # LOOP WorkflowNode for the executor).
+            return self._interpret_loop_field(event, vm_state, task)
         if event.event_type in ("set_milestone",):
             return self._interpret_set_milestone(event, vm_state, task)
         if event.event_type == "rollback_to":
@@ -111,6 +117,107 @@ class GovernanceInterpreter:
         if not subgoals:
             logger.warning("edit_field produced no patch ops for var_id=%s", var_id)
         return subgoals
+
+    # ── FF.4 §5.3: workflow planner (Sequential / Parallel / Loop) ────────
+    def interpret_as_workflow(self, events: list[UserBehaviorEvent],
+                              vm_state: VMStateSnapshot,
+                              *, task: "CanonicalTaskGraph | None" = None,
+                              ) -> WorkflowPlan:
+        """Build a WorkflowPlan from a batch of events. Classifies the structure
+        (rules, no LLM, zero latency) + wraps subgoals in the right WorkflowNode
+        type. The WorkflowExecutor walks the plan's nodes; the existing
+        per-event ``interpret()`` is unchanged (for sequential-only tasks)."""
+        wf_type = self._classify_workflow(events, task)
+        nodes: list[WorkflowNode] = []
+        if wf_type == WorkflowNodeType.LOOP:
+            for ev in events:
+                if ev.event_type == "loop_field":
+                    template_sgs = self._interpret_loop_field(ev, vm_state, task)
+                    values = list(ev.payload.get("values", []))
+                    nodes.append(WorkflowNode(
+                        node_type=WorkflowNodeType.LOOP,
+                        subgoals=template_sgs, loop_count=len(values),
+                        loop_values=values,
+                        display_name=str(ev.payload.get("loop_label", "loop")),
+                        barrier_label="loop done",
+                    ))
+                else:
+                    sgs = self.interpret(ev, vm_state, task=task)
+                    if sgs:
+                        nodes.append(WorkflowNode(
+                            node_type=WorkflowNodeType.SEQUENTIAL, subgoals=sgs))
+        elif wf_type == WorkflowNodeType.PARALLEL:
+            # one PARALLEL node: all edit_field subgoals issued concurrently,
+            # barrier at the verifier (§5.6 launch_fanout_parallel).
+            all_sgs: list[SubgoalInstruction] = []
+            for ev in events:
+                if ev.event_type == "edit_field":
+                    all_sgs.extend(self._interpret_edit_field(ev, vm_state, task))
+            if all_sgs:
+                nodes.append(WorkflowNode(
+                    node_type=WorkflowNodeType.PARALLEL, subgoals=all_sgs,
+                    display_name="parallel fanout", barrier_label="verifier"))
+        else:   # SEQUENTIAL
+            for ev in events:
+                sgs = self.interpret(ev, vm_state, task=task)
+                if sgs:
+                    nodes.append(WorkflowNode(
+                        node_type=WorkflowNodeType.SEQUENTIAL, subgoals=sgs))
+        types = {n.node_type for n in nodes}
+        wf_str = (wf_type.value if len(types) <= 1 else "mixed")
+        return WorkflowPlan(
+            task_id=(task.task_id if task else ""), nodes=nodes,
+            workflow_type=wf_str, generated_by="deterministic")
+
+    def _classify_workflow(self, events: list[UserBehaviorEvent],
+                           task: "CanonicalTaskGraph | None",
+                           ) -> WorkflowNodeType:
+        """FF.4 §5.3 rules (deterministic, zero LLM, zero latency):
+          - any ``loop_field`` event → LOOP
+          - exactly 1 ``edit_field`` whose binding fans out to ≥2 apps → PARALLEL
+          - else SEQUENTIAL
+        Mirrors structured-program shape detection (handoff §5.1)."""
+        if any(ev.event_type == "loop_field" for ev in events):
+            return WorkflowNodeType.LOOP
+        edit_events = [ev for ev in events if ev.event_type == "edit_field"]
+        if len(edit_events) == 1 and task is not None:
+            var_id = edit_events[0].payload.get("var_id", "")
+            apps = {b.app for b in task.bindings if b.var_id == var_id}
+            if len(apps) >= 2:
+                return WorkflowNodeType.PARALLEL
+        return WorkflowNodeType.SEQUENTIAL
+
+    def _interpret_loop_field(self, event: UserBehaviorEvent,
+                              vm_state: VMStateSnapshot,
+                              task: "CanonicalTaskGraph | None",
+                              ) -> list[SubgoalInstruction]:
+        """FF.4 §5.3: build the TEMPLATE subgoal for a loop_field event. The
+        template's patch_op carries the binding's (first) entity_id as the
+        placeholder; the WorkflowExecutor instantiates it per ``loop_values[i]``
+        (substituting entity_id). The write value (e.g. "Bob") comes from
+        payload['new_value'] or the task's user_edit['new']. The verification
+        criterion is the task's full expected_diff (all loop entities — E11:
+        each iteration is independently checked by the verifier)."""
+        payload = event.payload
+        var_id = payload.get("var_id", "")
+        if not var_id:
+            raise ValueError("loop_field event requires payload['var_id']")
+        new_value = payload.get("new_value")
+        if new_value is None and task is not None:
+            new_value = task.user_edit.get("new")
+        if new_value is None:
+            new_value = ""
+        values = list(payload.get("values", []))
+        edit = {"var_id": var_id, "old": payload.get("old_value", ""),
+                "new": new_value}
+        ops = compile_patch(edit, vm_state.binding)
+        criterion = task.expected_diff if task else {}
+        return [SubgoalInstruction(
+            natural_language=(f"Loop template — for each entity in {values}, "
+                              f"set {var_id} to {new_value!r} (batch op)."),
+            patch_ops=ops, verification_criterion=criterion,
+            source_event_type="loop_field",
+            meta={"loop_values": values, "loop_count": len(values)})]
 
     # ── set_milestone (advance toward a checkpoint) ───────────────────────
     def _interpret_set_milestone(self, event: UserBehaviorEvent,

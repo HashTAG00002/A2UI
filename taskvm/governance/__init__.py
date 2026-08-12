@@ -17,7 +17,8 @@ from taskvm.governance.user_behavior_driver import (
     UserBehaviorDriver, UserBehaviorEvent, EVENT_TYPES,
 )
 from taskvm.governance.vm_state import VMStateSnapshot
-from taskvm.governance.subgoal import SubgoalInstruction
+from taskvm.governance.subgoal import (SubgoalInstruction, WorkflowNode,
+                                        WorkflowNodeType, WorkflowPlan)
 from taskvm.governance.checkpoint_graph import CheckpointGraph, CheckpointDirection
 from taskvm.governance.scripted_driver import (
     ScriptedUserDriver, make_scripted_driver, get_task_event_sequence,
@@ -31,7 +32,7 @@ from taskvm.governance.governance_interpreter import GovernanceInterpreter
 __all__ = [
     "UserBehaviorDriver", "UserBehaviorEvent", "EVENT_TYPES",
     "VMStateSnapshot",
-    "SubgoalInstruction",
+    "SubgoalInstruction", "WorkflowNode", "WorkflowNodeType", "WorkflowPlan",
     "CheckpointGraph", "CheckpointDirection",
     "ScriptedUserDriver", "make_scripted_driver", "get_task_event_sequence",
     "UISimDriver",

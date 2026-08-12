@@ -29,9 +29,66 @@ NEVER fed to the CUA prompt — same boundary as ``expected_diff``).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 from taskvm.execution.patch_compiler import PatchOp
+
+
+class WorkflowNodeType(Enum):
+    """FF.4 §5.2: the three structured-program shapes a workflow node can take.
+    SEQUENTIAL = the existing linear one-subgoal-after-another execution;
+    PARALLEL = N subgoals issued concurrently, barrier at the end; LOOP = one
+    template subgoal repeated ``loop_count`` times with ``loop_values[i]``
+    substituted per iteration (each iteration independently verified — E11)."""
+    SEQUENTIAL = "sequential"
+    PARALLEL = "parallel"
+    LOOP = "loop"
+
+
+@dataclass
+class WorkflowNode:
+    """FF.4 §5.2: one execution node. ``subgoals`` is a list of
+    SubgoalInstruction — for PARALLEL it's the N concurrent subgoals (one per
+    app lane); for LOOP it's a 1-element list (the template, instantiated
+    ``loop_count`` times with ``loop_values[i]``); for SEQUENTIAL it's the
+    ordered subgoals."""
+    node_type: WorkflowNodeType = WorkflowNodeType.SEQUENTIAL
+    subgoals: list["SubgoalInstruction"] = field(default_factory=list)
+    loop_count: int = 1
+    loop_values: list[Any] = field(default_factory=list)
+    display_name: str = ""
+    barrier_label: str = ""    # PARALLEL convergence point display name
+
+    def to_dict(self) -> dict:
+        return {
+            "node_type": self.node_type.value,
+            "subgoals": [s.to_dict() for s in self.subgoals],
+            "loop_count": self.loop_count,
+            "loop_values": list(self.loop_values),
+            "display_name": self.display_name,
+            "barrier_label": self.barrier_label,
+        }
+
+
+@dataclass
+class WorkflowPlan:
+    """FF.4 §5.2: the full workflow execution plan (replaces the flat
+    list[SubgoalInstruction] for tasks with parallel/loop structure). The
+    WorkflowExecutor walks ``nodes`` in order; each node is
+    SEQUENTIAL/PARALLEL/LOOP."""
+    task_id: str
+    nodes: list[WorkflowNode] = field(default_factory=list)
+    workflow_type: str = "sequential"   # "sequential" / "parallel" / "loop" / "mixed"
+    generated_by: str = "deterministic"   # "deterministic" (rules) / "llm_planner"
+
+    def to_dict(self) -> dict:
+        return {
+            "task_id": self.task_id,
+            "nodes": [n.to_dict() for n in self.nodes],
+            "workflow_type": self.workflow_type,
+            "generated_by": self.generated_by,
+        }
 
 
 @dataclass

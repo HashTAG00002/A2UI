@@ -76,6 +76,11 @@ class CanonicalTaskGraph:
     expected_diff: dict                # {app: {entity_id: {field: expected_value}}}
     description: str = ""
     checkpoints: list[Checkpoint] = field(default_factory=list)  # E17 governance milestones (empty = single-step task)
+    # FF.4 §5.6: for LOOP workflow tasks — the per-iteration entity-id
+    # substitution set (e.g. ["T1","T2","T3"] for batch_task_assign). Empty for
+    # non-loop tasks. The WorkflowExecutor instantiates the template subgoal
+    # loop_count times, substituting entity_id = loop_values[i].
+    loop_values: list = field(default_factory=list)
 
 
 # ── Task 1: release_reschedule (the canonical doc example) ───────────────────
@@ -288,11 +293,140 @@ TASKS: dict[str, CanonicalTaskGraph] = {
 }
 
 
+# ── FF.4 §5.6: workflow tasks (Parallel / Loop) ───────────────────────────────
+# These live in a SEPARATE registry (WORKFLOW_TASKS) so run_w1_killtest --mock
+# stays 4/4 (the regression gate) — batch_task_assign can't pass the sequential
+# dispatch path (only T1 is written, not T2/T3; the LOOP executor writes all 3).
+# They're exercised via GovernanceInterpreter.interpret_as_workflow +
+# WorkflowExecutor (FF.4 §11 dry-run), NOT run_w1_killtest.
+
+# Task 5: launch_fanout_parallel — the launch_full 4-App fanout executed as a
+# PARALLEL workflow (§5.6: "实际上就是已有的 launch_full 任务，只是在执行器侧
+# 改用 PARALLEL 工作流"). Same 5 bindings; the classifier detects PARALLEL
+# (1 edit_field + bindings across ≥2 apps). The WorkflowExecutor issues 4 app
+# lanes concurrently (calendar/taskboard/drive/mail), barrier at the verifier.
+LAUNCH_FANOUT_PARALLEL = CanonicalTaskGraph(
+    task_id="launch_fanout_parallel",
+    goal="把项目发布日期从8/14推迟到8/18：4 个 app（calendar/taskboard/drive/mail）"
+         "并行写回，barrier 在 verifier 处收束。",
+    seed_state={
+        "calendar": {"events": [
+            {"eid": "E1", "title": "项目发布会议", "date": "2026-08-14",
+             "time": "14:00-15:00", "calendar": "work", "rsvp": "accepted"},
+            {"eid": "E2", "title": "周会", "date": "2026-08-12",
+             "time": "10:00-10:30", "calendar": "work", "rsvp": "accepted"},
+        ]},
+        "taskboard": {"tasks": [
+            {"tid": "T1", "title": "最终检查演示文档", "status": "todo",
+             "assignee": "Alex", "deadline": "2026-08-14", "depends_on": ["release_date"]},
+            {"tid": "T2", "title": "确认发布公告", "status": "todo",
+             "assignee": "Bo", "deadline": "2026-08-14", "depends_on": ["release_date"]},
+            {"tid": "T3", "title": "整理会议纪要", "status": "done",
+             "assignee": "Cara", "deadline": "2026-08-10", "depends_on": []},
+        ]},
+        "drive": {"files": [
+            {"fid": "F1", "name": "发布计划.doc", "content": "v1", "parent": "shared",
+             "owner": "Alex", "modified": "2026-08-12", "type": "doc",
+             "publish_date": "2026-08-14"},
+            {"fid": "F2", "name": "设计稿.png", "content": "", "parent": "shared",
+             "owner": "Bo", "modified": "2026-08-10", "type": "image",
+             "publish_date": None},
+        ]},
+        "mail": {"messages": [
+            {"mid": "M1", "subject": "项目发布公告", "from_addr": "pm@x.com",
+             "to_addr": "team@x.com", "state": "draft", "received": "2026-08-12",
+             "priority": "high", "send_date": "2026-08-14"},
+            {"mid": "M2", "subject": "周报", "from_addr": "bo@x.com",
+             "to_addr": "team@x.com", "state": "draft", "received": "2026-08-11",
+             "priority": "normal", "send_date": None},
+        ]},
+    },
+    user_edit={"var_id": "release_date", "old": "2026-08-14", "new": "2026-08-18"},
+    bindings=[
+        CanonicalBinding("release_date", "calendar",  "E1", "date",         "move_event",       "2026-08-18"),
+        CanonicalBinding("release_date", "taskboard", "T1", "deadline",     "set_deadline",     "2026-08-18"),
+        CanonicalBinding("release_date", "taskboard", "T2", "deadline",     "set_deadline",     "2026-08-18"),
+        CanonicalBinding("release_date", "drive",     "F1", "publish_date", "set_publish_date", "2026-08-18"),
+        CanonicalBinding("release_date", "mail",      "M1", "send_date",    "set_send_date",    "2026-08-18"),
+    ],
+    non_interference_set=[("calendar", "E2"), ("taskboard", "T3"),
+                          ("drive", "F2"), ("mail", "M2")],
+    expected_diff={
+        "calendar":  {"E1": {"date": "2026-08-18"}},
+        "taskboard": {"T1": {"deadline": "2026-08-18"},
+                      "T2": {"deadline": "2026-08-18"}},
+        "drive":     {"F1": {"publish_date": "2026-08-18"}},
+        "mail":      {"M1": {"send_date": "2026-08-18"}},
+    },
+    description="FF.4 Parallel: launch_full's 5 bindings executed as 4 parallel "
+                "app lanes (calendar/taskboard/drive/mail), barrier at verifier. "
+                "VM property 2 (bidirectional binding) via a PARALLEL workflow.",
+)
+
+
+# Task 6: batch_task_assign — a LOOP workflow. One template binding
+# (taskboard.T1.set_assignee=Bob) instantiated 3 times with entity_id substituted
+# T1→T2→T3 (§5.6). The driver emits a loop_field event (NOT edit_field) so the
+# classifier detects LOOP. The WorkflowExecutor writes Bob to T1, T2, T3 — each
+# iteration independently verified (E11).
+BATCH_TASK_ASSIGN = CanonicalTaskGraph(
+    task_id="batch_task_assign",
+    goal="把 taskboard 里的 T1/T2/T3 三个任务都指派给 Bob（批量操作，循环 3 次）。",
+    seed_state={
+        "taskboard": {"tasks": [
+            {"tid": "T1", "title": "最终检查演示文档", "status": "todo",
+             "assignee": "Alex", "deadline": "2026-08-14", "depends_on": ["release_date"]},
+            {"tid": "T2", "title": "确认发布公告", "status": "todo",
+             "assignee": "Bo", "deadline": "2026-08-14", "depends_on": ["release_date"]},
+            {"tid": "T3", "title": "整理会议纪要", "status": "done",
+             "assignee": "Cara", "deadline": "2026-08-10", "depends_on": []},
+            {"tid": "T4", "title": "不可变任务", "status": "todo",
+             "assignee": "Dana", "deadline": "2026-08-20", "depends_on": []},
+        ]},
+    },
+    # user_edit carries the WRITE VALUE (Bob); loop_values (below) carries the
+    # ENTITY-IDS to substitute per iteration. The binding is the TEMPLATE (T1).
+    user_edit={"var_id": "task_assignee", "old": "", "new": "Bob"},
+    bindings=[
+        CanonicalBinding("task_assignee", "taskboard", "T1", "assignee",
+                         "set_assignee", "Bob"),
+    ],
+    non_interference_set=[("taskboard", "T4")],
+    expected_diff={
+        "taskboard": {"T1": {"assignee": "Bob"},
+                      "T2": {"assignee": "Bob"},
+                      "T3": {"assignee": "Bob"}},
+    },
+    loop_values=["T1", "T2", "T3"],   # FF.4: per-iteration entity-id substitution
+    description="FF.4 Loop: 1 template binding (taskboard.T1.set_assignee=Bob) "
+                "instantiated 3× with entity_id T1→T2→T3. Each iteration "
+                "independently verified (E11). T4 (non-interference) must not change.",
+)
+
+
+WORKFLOW_TASKS: dict[str, CanonicalTaskGraph] = {
+    LAUNCH_FANOUT_PARALLEL.task_id: LAUNCH_FANOUT_PARALLEL,
+    BATCH_TASK_ASSIGN.task_id: BATCH_TASK_ASSIGN,
+}
+
+
 def get_task(task_id: str) -> CanonicalTaskGraph:
-    if task_id not in TASKS:
-        raise KeyError(f"unknown task {task_id!r}; known: {list(TASKS)}")
-    return TASKS[task_id]
+    if task_id in TASKS:
+        return TASKS[task_id]
+    if task_id in WORKFLOW_TASKS:
+        return WORKFLOW_TASKS[task_id]
+    raise KeyError(f"unknown task {task_id!r}; known: {list(TASKS) + list(WORKFLOW_TASKS)}")
 
 
 def all_tasks() -> list[CanonicalTaskGraph]:
     return list(TASKS.values())
+
+
+def get_workflow_task(task_id: str) -> CanonicalTaskGraph:
+    if task_id not in WORKFLOW_TASKS:
+        raise KeyError(f"unknown workflow task {task_id!r}; known: {list(WORKFLOW_TASKS)}")
+    return WORKFLOW_TASKS[task_id]
+
+
+def all_workflow_tasks() -> list[CanonicalTaskGraph]:
+    return list(WORKFLOW_TASKS.values())

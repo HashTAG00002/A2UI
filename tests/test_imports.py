@@ -450,5 +450,78 @@ def test_suggest_milestones_wiring_and_degrade():
     assert milestone_suggest_html([], []) == ""   # graceful: no render
 
 
+# ── FF.4: workflow planner (Sequential / Parallel / Loop) ─────────────────────
+def test_workflow_types_importable():
+    """FF.4 §5.2: WorkflowNodeType/WorkflowNode/WorkflowPlan importable + the
+    enum has the 3 shapes + to_dict round-trips."""
+    from taskvm.governance import (WorkflowNodeType, WorkflowNode, WorkflowPlan,
+                                    SubgoalInstruction)
+    assert {t.value for t in WorkflowNodeType} == {"sequential", "parallel", "loop"}
+    # WorkflowNode + WorkflowPlan to_dict
+    n = WorkflowNode(node_type=WorkflowNodeType.LOOP, loop_count=3,
+                     loop_values=["T1", "T2", "T3"], display_name="batch")
+    assert n.to_dict()["node_type"] == "loop" and n.to_dict()["loop_count"] == 3
+    p = WorkflowPlan(task_id="t", nodes=[n], workflow_type="loop")
+    assert p.to_dict()["workflow_type"] == "loop" and len(p.to_dict()["nodes"]) == 1
+    # EVENT_TYPES has loop_field
+    from taskvm.governance import EVENT_TYPES
+    assert "loop_field" in EVENT_TYPES
+    # WorkflowExecutor importable + the loop instantiator substitutes entity_id
+    from taskvm.execution.workflow_executor import (WorkflowExecutor,
+        _instantiate_loop_subgoal, WorkflowResult, NodeResult, SubgoalResult)
+    from taskvm.execution.patch_compiler import PatchOp
+    tmpl = SubgoalInstruction(natural_language="x",
+        patch_ops=[PatchOp(app="taskboard", entity_id="T1", field="assignee",
+                           operator="set_assignee", value="Bob")])
+    sg_i = _instantiate_loop_subgoal(tmpl, 1, "T2")
+    assert sg_i.patch_ops[0].entity_id == "T2"   # substituted
+    assert sg_i.patch_ops[0].app == "taskboard" and sg_i.patch_ops[0].value == "Bob"
+
+
+def test_classify_workflow_parallel_loop_sequential():
+    """FF.4 §5.3 _classify_workflow rules: loop_field → LOOP; 1 edit_field +
+    bindings ≥2 apps → PARALLEL; else (single-app) → SEQUENTIAL. Build events
+    via ScriptedUserDriver + classify (no live dispatch)."""
+    from taskvm.governance import GovernanceInterpreter, make_scripted_driver, VMStateSnapshot
+    from taskvm.governance.scripted_driver import _build_minimal_binding
+    from taskvm.execution.rollback import RollbackLog
+    from taskvm.benchmark.fixtures import get_task
+    interp = GovernanceInterpreter(enable_llm_rollback_nl=False)
+
+    def classify(task_id):
+        drv = make_scripted_driver(task_id)
+        binding = _build_minimal_binding(drv.task)
+        vm_state = VMStateSnapshot(sid="t", binding=binding, adapters={},
+                                    rollback_log=RollbackLog(),
+                                    checkpoints=drv.task.checkpoints)
+        events = []
+        while True:
+            ev = drv.next_event()
+            if ev is None: break
+            events.append(ev)
+        return interp._classify_workflow(events, drv.task)
+
+    # launch_fanout_parallel: 1 edit_field + 4-app bindings → PARALLEL
+    assert classify("launch_fanout_parallel").value == "parallel"
+    # batch_task_assign: loop_field → LOOP
+    assert classify("batch_task_assign").value == "loop"
+    # doc_handoff: 1 edit_field + 1-app → SEQUENTIAL
+    assert classify("doc_handoff").value == "sequential"
+    # interpret_as_workflow on batch_task_assign → a LOOP node with loop_values
+    drv = make_scripted_driver("batch_task_assign")
+    binding = _build_minimal_binding(drv.task)
+    vm_state = VMStateSnapshot(sid="t", binding=binding, adapters={},
+                               rollback_log=RollbackLog(), checkpoints=drv.task.checkpoints)
+    events = []
+    while True:
+        ev = drv.next_event()
+        if ev is None: break
+        events.append(ev)
+    plan = interp.interpret_as_workflow(events, vm_state, task=drv.task)
+    assert plan.workflow_type == "loop"
+    assert len(plan.nodes) == 1 and plan.nodes[0].node_type.value == "loop"
+    assert plan.nodes[0].loop_values == ["T1", "T2", "T3"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-x", "-q"])

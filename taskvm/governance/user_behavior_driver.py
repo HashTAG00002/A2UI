@@ -40,12 +40,16 @@ if TYPE_CHECKING:  # avoid runtime import cycle (vm_state imports nothing heavy)
 
 # The canonical event-type enum. ``undo`` is the existing per-app verb;
 # ``rollback_to`` / ``set_milestone`` are the new checkpoint-addressed verbs.
+# FF.4 §5.3: ``loop_field`` is the new event for LOOP workflows (payload:
+# {var_id, values: [v1,v2,...], loop_label}) — the interpreter builds a
+# WorkflowNode(LOOP) with ``values`` as the per-iteration substitution set.
 EVENT_TYPES = (
     "edit_field",      # user edited a GenUI field
     "rollback_to",     # user dragged progress bar back to a checkpoint
     "set_milestone",   # user set a new target depth (advance toward checkpoint)
     "checkpoint",      # user pressed the checkpoint button (snapshot)
     "undo",            # user pressed an app's undo button (per-app, existing)
+    "loop_field",      # FF.4: user invoked a loop (batch op on N entities)
 )
 
 

@@ -113,6 +113,19 @@ def mg2_event_sequence() -> list[tuple[str, dict[str, Any]]]:
     ]
 
 
+def batch_task_assign_event_sequence() -> list[tuple[str, dict[str, Any]]]:
+    """FF.4 §5.6 batch_task_assign: emit a loop_field event (NOT edit_field) so
+    the classifier detects LOOP. The payload carries the var_id + the per-
+    iteration entity-id substitution set (values) + the write value (new_value).
+    The template binding (taskboard.T1.set_assignee) is in the fixture; the
+    WorkflowExecutor instantiates it 3× with entity_id T1→T2→T3."""
+    return [
+        ("loop_field", {"var_id": "task_assignee", "new_value": "Bob",
+                        "values": ["T1", "T2", "T3"],
+                        "loop_label": "batch assign to Bob"}),
+    ]
+
+
 def get_task_event_sequence(task_id: str) -> list[tuple[str, dict[str, Any]]] | None:
     """Return the canonical governance event sequence for a task, or None if
     the task has no special sequence (use AUTO single-edit)."""
@@ -120,6 +133,8 @@ def get_task_event_sequence(task_id: str) -> list[tuple[str, dict[str, Any]]] | 
         return mg1_event_sequence()
     if task_id == "expense_and_notify":
         return mg2_event_sequence()
+    if task_id == "batch_task_assign":
+        return batch_task_assign_event_sequence()
     return None
 
 
@@ -177,6 +192,30 @@ def _dry_run(task_id: str) -> int:
     print(f"\n=== dry-run done: {len(out)} subgoals produced ===")
     print(json.dumps({"task_id": task_id, "subgoals": out},
                      ensure_ascii=False, indent=2))
+    # FF.4 §11: also classify the workflow structure + print the WorkflowPlan's
+    # nodes (so a "dry-run for loop/parallel tasks" outputs a parallel/loop
+    # node). Re-runs the event sequence through interpret_as_workflow.
+    try:
+        driver.reset()
+        events = []
+        while True:
+            ev = driver.next_event()
+            if ev is None:
+                break
+            events.append(ev)
+        plan = interp.interpret_as_workflow(events, vm_state, task=driver.task)
+        print(f"\n=== FF.4 workflow plan (interpret_as_workflow) ===")
+        print(f"workflow_type: {plan.workflow_type}  nodes: {len(plan.nodes)}")
+        for i, n in enumerate(plan.nodes):
+            extra = (f" loop_count={n.loop_count} loop_values={n.loop_values}"
+                     if n.node_type.value == "loop" else
+                     f" subgoals={len(n.subgoals)} barrier={n.barrier_label}"
+                     if n.node_type.value == "parallel" else "")
+            print(f"  node {i}: {n.node_type.value}{extra}")
+        print(json.dumps({"workflow_plan": plan.to_dict()},
+                         ensure_ascii=False, indent=2))
+    except Exception as e:
+        print(f"[workflow dry-run error: {type(e).__name__}: {e}]")
     return 0
 
 
