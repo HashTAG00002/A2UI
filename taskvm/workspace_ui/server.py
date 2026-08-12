@@ -80,6 +80,41 @@ socketio = None
 _governance_namespace = "/governance"
 # inbound human events (per-sid). The governance driver loop reads from here.
 human_event_queues: dict[str, "queue.Queue"] = {}
+# FF.5 §6.3: per-sid workflow_progress pubsub. The /<sid>/edit route (workflow
+# path) pushes node-status events here as the WorkflowExecutor walks the plan;
+# the /<sid>/poll SSE stream drains them + pushes to the client. workflow_anim.js
+# renders the Sequential/Parallel/Loop viz from these events. A list of queues
+# (one per subscriber) so multiple poll streams can listen.
+_workflow_progress_queues: dict[str, "list[queue.Queue]"] = {}
+
+
+def subscribe_workflow_progress(sid: str) -> "queue.Queue":
+    """Register a new SSE subscriber for workflow_progress events on ``sid``.
+    The /<sid>/poll stream calls this once + drains the returned queue."""
+    import queue as _queue
+    q: "queue.Queue" = _queue.Queue()
+    _workflow_progress_queues.setdefault(sid, []).append(q)
+    return q
+
+
+def unsubscribe_workflow_progress(sid: str, q: "queue.Queue") -> None:
+    subs = _workflow_progress_queues.get(sid)
+    if subs and q in subs:
+        subs.remove(q)
+        if not subs:
+            _workflow_progress_queues.pop(sid, None)
+
+
+def push_workflow_progress(sid: str, event: dict) -> None:
+    """Push a workflow_progress event to ALL subscribers on ``sid`` (the /poll
+    streams). Best-effort: a full queue (slow client) drops the event rather
+    than blocking the executor — the next event refreshes the viz anyway."""
+    subs = _workflow_progress_queues.get(sid, [])
+    for q in list(subs):
+        try:
+            q.put_nowait(event)
+        except Exception:
+            pass   # full queue → drop (best-effort; the viz refreshes on next)
 
 
 def init_socketio(server_app) -> bool:
@@ -202,6 +237,11 @@ _PAGE_TPL = """\
     {% if sim_url %}<span class="sim-link">sim: <a href="{{ sim_url }}" target="_blank">{{ sim_url }}</a></span>{% endif %}
   </header>
   <main class="{{ 'split' if sim_url else 'no-split' }}">
+    <section class="workflow-viz empty" id="workflow-viz">
+      <!-- FF.5 §6.1: workflow visualization region. Rendered by workflow_anim.js
+           from SSE `workflow_progress` events pushed by the /<sid>/poll stream
+           as the WorkflowExecutor walks the plan (Sequential/Parallel/Loop). -->
+    </section>
     <div class="zones">
       <section class="zone ro">
         <h2>只读区 · projected app state (read-only)</h2>
@@ -658,6 +698,66 @@ def readonly_partial(sid: str):
     return Response(ro_html, mimetype="text/html")
 
 
+def _wf_progress_event(plan_type: str, lanes: list[dict], barrier: str) -> dict:
+    """FF.5 §6.3: build a workflow_progress SSE event. ``lanes`` = list of
+    {idx, app, status} (status: running|done|waiting|locked); ``barrier`` =
+    the barrier node's status (waiting|done)."""
+    return {"plan_type": plan_type,
+            "nodes": [{"idx": i, "type": plan_type, "app": l["app"],
+                       "status": l["status"]} for i, l in enumerate(lanes)],
+            "barrier_status": barrier}
+
+
+def _dispatch_edit_workflow(sess: WorkspaceSession, ops, sid: str) -> dict:
+    """FF.5 §5.5: when the edit's ops span ≥2 apps, auto-upgrade to a PARALLEL
+    workflow (WorkflowExecutor) + push workflow_progress SSE events (lanes
+    running → per-lane done → barrier converged). Single-app edits use the
+    existing sequential ``dispatch`` (no workflow overhead). Returns the
+    dispatch report dict (n_ops, n_applied, + workflow trace for JSON callers).
+    """
+    apps_in_ops = {op.app for op in ops}
+    if len(apps_in_ops) < 2 or len(ops) < 2:
+        # single-app / single-op → sequential (no PARALLEL upgrade)
+        rep = dispatch(ops, sess.adapters, sid, broken=None,
+                       rollback_log=sess.rollback_log)
+        return rep.to_dict()
+    from taskvm.execution.workflow_executor import WorkflowExecutor
+    from taskvm.governance.subgoal import (SubgoalInstruction, WorkflowNode,
+                                            WorkflowNodeType, WorkflowPlan)
+    subgoals = [SubgoalInstruction(
+        natural_language=f"set {op.app}.{op.entity_id}.{op.field} → {op.value}",
+        patch_ops=[op]) for op in ops]
+    plan = WorkflowPlan(
+        task_id=sess.task_id,
+        nodes=[WorkflowNode(node_type=WorkflowNodeType.PARALLEL, subgoals=subgoals,
+                            display_name="parallel fanout", barrier_label="verifier")],
+        workflow_type="parallel")
+    lanes = [{"app": op.app, "status": "running"} for op in ops]
+    # 1. push "lanes running, barrier waiting"
+    push_workflow_progress(sid, _wf_progress_event("parallel", lanes, "waiting"))
+    done_idx = []
+    def _on_subgoal(r):
+        # mark this lane done — find its index by subgoal identity
+        for i, sg in enumerate(subgoals):
+            if r.subgoal is sg:
+                done_idx.append(i); break
+        for i in range(len(lanes)):
+            lanes[i]["status"] = "done" if i in done_idx else "running"
+        push_workflow_progress(sid, _wf_progress_event("parallel", lanes, "waiting"))
+    wexec = WorkflowExecutor()
+    wres = wexec.execute(plan, sess.adapters, sid, rollback_log=sess.rollback_log,
+                         on_subgoal_complete=_on_subgoal)
+    # 2. push "lanes done, barrier converged"
+    for l in lanes: l["status"] = "done"
+    push_workflow_progress(sid, _wf_progress_event("parallel", lanes, "done"))
+    n_applied = (sum(r.n_applied for r in wres.nodes[0].subgoal_results)
+                 if wres.nodes else 0)
+    return {"n_ops": len(ops), "n_applied": n_applied,
+            "n_applied_ops": n_applied,
+            "workflow": {"type": "parallel", "overall_pass": wres.overall_pass,
+                          "nodes": wres.to_dict()["nodes"]}}
+
+
 @app.route("/<sid>/edit", methods=["POST"])
 def edit(sid: str):
     sess = user_sessions.get(sid)
@@ -668,8 +768,10 @@ def edit(sid: str):
     if not var_id or new_value is None:
         return ("var_id + new_value required", 400)
     ops = compile_patch({"var_id": var_id, "new": new_value}, sess.binding)
-    rep = dispatch(ops, sess.adapters, sid, broken=None, rollback_log=sess.rollback_log)
-    sess.last_dispatch = rep.to_dict()
+    # FF.5 §5.5: multi-app edit → PARALLEL workflow (WorkflowExecutor + SSE
+    # workflow_progress). Single-app → sequential dispatch (unchanged).
+    rep_dict = _dispatch_edit_workflow(sess, ops, sid)
+    sess.last_dispatch = rep_dict
     sess.last_undo = None
     sess.last_undo_saga = None
     sess.last_resolve = None
@@ -682,11 +784,13 @@ def edit(sid: str):
     # the user's own action reconciles → refresh the projection cache so the next
     # render's Y = the new post-edit state (only EXTERNAL changes then conflict)
     sess.last_projection = resync_values(sess.binding, sess.adapters, sid)
-    logger.info(f"[workspace_ui] edit {var_id}={new_value!r} → {rep.n_applied}/{len(ops)} applied")
+    n_applied = rep_dict.get("n_applied", rep_dict.get("n_applied_ops", 0))
+    logger.info(f"[workspace_ui] edit {var_id}={new_value!r} → "
+                f"{n_applied}/{len(ops)} applied")
     if _wants_json():
         return jsonify({
             "ok": True, "sid": sid, "var_id": var_id, "new_value": new_value,
-            "n_ops": len(ops), "n_applied": rep.n_applied,
+            "n_ops": len(ops), "n_applied": n_applied,
             "changed_vars": [{"app": a, "entity_id": e, "field": f}
                              for a, e, f in changed_tuples],
         })
@@ -867,22 +971,42 @@ def poll(sid: str):
         return ("session not found", 404)
 
     def generate():
-        while True:
-            try:
-                if sess.last_projection is None:
-                    sess.last_projection = resync_values(sess.binding, sess.adapters, sid)
-                _updated, recon = resync_with_conflicts(
-                    sess.binding, sess.last_projection, sess.adapters, sid)
-                if recon.has_conflicts:
-                    sess.last_conflicts = recon.conflicts
-                    yield (f"event: conflict\ndata: "
-                           f"{json.dumps({'n_conflicts': recon.n_conflicts})}\n\n")
-                else:
-                    yield "event: ok\ndata: {}\n\n"
-            except Exception as e:
-                logger.warning(f"[poll/{sid}] cycle error: {e}")
-                yield f"event: error\ndata: {json.dumps({'error': str(e)[:120]})}\n\n"
-            time.sleep(POLL_INTERVAL_S)
+        # FF.5: subscribe to the per-sid workflow_progress pubsub so events
+        # pushed by /edit's WorkflowExecutor (lanes running → done → barrier)
+        # are drained + forwarded to the client. Unsubscribe on disconnect.
+        wf_q = subscribe_workflow_progress(sid)
+        try:
+            while True:
+                # 1. drain any workflow_progress events (non-blocking) + push them
+                drained = False
+                while True:
+                    try:
+                        ev = wf_q.get_nowait()
+                        drained = True
+                        yield (f"event: workflow_progress\ndata: "
+                               f"{json.dumps(ev, ensure_ascii=False)}\n\n")
+                    except Exception:
+                        break   # queue empty
+                # 2. the regular conflict check (EE.8 — §0 property 1)
+                try:
+                    if sess.last_projection is None:
+                        sess.last_projection = resync_values(sess.binding, sess.adapters, sid)
+                    _updated, recon = resync_with_conflicts(
+                        sess.binding, sess.last_projection, sess.adapters, sid)
+                    if recon.has_conflicts:
+                        sess.last_conflicts = recon.conflicts
+                        yield (f"event: conflict\ndata: "
+                               f"{json.dumps({'n_conflicts': recon.n_conflicts})}\n\n")
+                    elif not drained:
+                        yield "event: ok\ndata: {}\n\n"
+                except Exception as e:
+                    logger.warning(f"[poll/{sid}] cycle error: {e}")
+                    yield f"event: error\ndata: {json.dumps({'error': str(e)[:120]})}\n\n"
+                # if we just drained workflow events, poll again promptly (near
+                # real-time per-lane progress); else the regular 5s heartbeat.
+                time.sleep(0.2 if drained else POLL_INTERVAL_S)
+        finally:
+            unsubscribe_workflow_progress(sid, wf_q)
 
     return Response(stream_with_context(generate()),
                     mimetype="text/event-stream",

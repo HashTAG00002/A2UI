@@ -523,5 +523,34 @@ def test_classify_workflow_parallel_loop_sequential():
     assert plan.nodes[0].loop_values == ["T1", "T2", "T3"]
 
 
+# ── FF.5: workflow_progress SSE pubsub + _wf_progress_event builder ─────────
+def test_workflow_progress_pubsub_and_event():
+    """FF.5 §6.3-6.4: the per-sid workflow_progress pubsub (subscribe/push/drain)
+    + the event builder shape. Pure (no live execution)."""
+    import taskvm.workspace_ui.server as s
+    # event builder: {plan_type, nodes:[{idx,type,app,status}], barrier_status}
+    ev = s._wf_progress_event("parallel",
+        [{"app": "calendar", "status": "running"},
+         {"app": "taskboard", "status": "done"}], "waiting")
+    assert ev["plan_type"] == "parallel"
+    assert ev["nodes"][0]["app"] == "calendar" and ev["nodes"][0]["status"] == "running"
+    assert ev["nodes"][1]["status"] == "done"
+    assert ev["barrier_status"] == "waiting"
+    # pubsub: subscribe → push → drain → unsubscribe
+    sid = "test_ff5_pubsub"
+    q1 = s.subscribe_workflow_progress(sid)
+    q2 = s.subscribe_workflow_progress(sid)
+    assert sid in s._workflow_progress_queues
+    s.push_workflow_progress(sid, ev)
+    drained1 = q1.get_nowait()
+    drained2 = q2.get_nowait()
+    assert drained1 == ev and drained2 == ev   # both subscribers got it
+    s.unsubscribe_workflow_progress(sid, q1)
+    s.unsubscribe_workflow_progress(sid, q2)
+    assert sid not in s._workflow_progress_queues
+    # push to a sid with no subscribers is a no-op (no crash)
+    s.push_workflow_progress("no-such-sid", ev)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-x", "-q"])

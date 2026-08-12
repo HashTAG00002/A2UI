@@ -123,15 +123,24 @@ class WorkflowExecutor:
     def execute(self, plan: WorkflowPlan, adapters: dict, sid: str, *,
                 rollback_log=None,
                 on_node_complete: Callable[[int, NodeResult], None] | None = None,
+                on_subgoal_complete: Callable[[int, SubgoalResult, WorkflowNode], None] | None = None,
                 ) -> WorkflowResult:
+        """Walk ``plan.nodes``; dispatch each node's subgoals. ``on_node_complete``
+        fires after each node (the SSE workflow_progress barrier-update hook);
+        ``on_subgoal_complete`` fires after each subgoal (per-lane real-time
+        progress — FF.5 §6.3). Both are best-effort (errors logged, never
+        abort the execution)."""
         results: list[NodeResult] = []
         for i, node in enumerate(plan.nodes):
             if node.node_type == WorkflowNodeType.SEQUENTIAL:
-                r = self._exec_sequential(node, adapters, sid, rollback_log)
+                r = self._exec_sequential(node, adapters, sid, rollback_log,
+                                          on_subgoal_complete)
             elif node.node_type == WorkflowNodeType.PARALLEL:
-                r = self._exec_parallel(node, adapters, sid, rollback_log)
+                r = self._exec_parallel(node, adapters, sid, rollback_log,
+                                        on_subgoal_complete)
             elif node.node_type == WorkflowNodeType.LOOP:
-                r = self._exec_loop(node, adapters, sid, rollback_log)
+                r = self._exec_loop(node, adapters, sid, rollback_log,
+                                    on_subgoal_complete)
             else:   # pragma: no cover — unknown node type
                 r = NodeResult(node_type=str(node.node_type), pass_=False,
                                meta={"error": f"unknown node type {node.node_type}"})
@@ -144,7 +153,9 @@ class WorkflowExecutor:
 
     # ── per-subgoal dispatch + E11 verify ─────────────────────────────────
     def _exec_one_subgoal(self, sg: SubgoalInstruction, adapters: dict,
-                          sid: str, rollback_log) -> SubgoalResult:
+                          sid: str, rollback_log,
+                          on_done: Callable[[SubgoalResult], None] | None = None,
+                          ) -> SubgoalResult:
         n_ops = len(sg.patch_ops)
         try:
             rep = dispatch(sg.patch_ops, adapters, sid, broken=None,
@@ -152,15 +163,19 @@ class WorkflowExecutor:
             verified = True
             if self.verify_each_op:
                 verified = self._verify_ops_landed(sg.patch_ops, adapters, sid)
-            return SubgoalResult(
+            r = SubgoalResult(
                 subgoal=sg, dispatch=rep.to_dict(), n_ops=n_ops,
                 n_applied=rep.n_applied, verified=verified,
                 pass_=(rep.n_applied == n_ops and verified))
         except Exception as e:
             logger.warning("[workflow] subgoal failed: %s", e)
-            return SubgoalResult(
+            r = SubgoalResult(
                 subgoal=sg, dispatch={}, n_ops=n_ops, n_applied=0,
                 verified=False, pass_=False, error=f"{type(e).__name__}: {e}")
+        if on_done is not None:
+            try: on_done(r)
+            except Exception as e: logger.warning("[workflow] on_subgoal_complete: %s", e)
+        return r
 
     def _verify_ops_landed(self, ops: list[PatchOp], adapters: dict,
                            sid: str) -> bool:
@@ -183,15 +198,19 @@ class WorkflowExecutor:
 
     # ── SEQUENTIAL ────────────────────────────────────────────────────────
     def _exec_sequential(self, node: WorkflowNode, adapters: dict, sid: str,
-                          rollback_log) -> NodeResult:
-        results = [self._exec_one_subgoal(sg, adapters, sid, rollback_log)
-                   for sg in node.subgoals]
+                          rollback_log,
+                          on_subgoal_complete=None) -> NodeResult:
+        results = []
+        for sg in node.subgoals:
+            r = self._exec_one_subgoal(sg, adapters, sid, rollback_log,
+                                        on_done=on_subgoal_complete)
+            results.append(r)
         return NodeResult(node_type="sequential", subgoal_results=results,
                           pass_=all(r.pass_ for r in results))
 
     # ── PARALLEL (E7: each lane uses adapter.mutate, NOT set_state) ──────
     def _exec_parallel(self, node: WorkflowNode, adapters: dict, sid: str,
-                        rollback_log) -> NodeResult:
+                        rollback_log, on_subgoal_complete=None) -> NodeResult:
         use_gui = any(getattr(a, "use_gui_executor", False) for a in adapters.values())
         results: list[SubgoalResult] = []
         if not node.subgoals:
@@ -203,13 +222,15 @@ class WorkflowExecutor:
             # before the next node), but gui_agent lanes run in sequence.
             # §13.1: true max(N) latency needs N browsers (future work).
             for sg in node.subgoals:
-                results.append(self._exec_one_subgoal(sg, adapters, sid, rollback_log))
+                results.append(self._exec_one_subgoal(sg, adapters, sid, rollback_log,
+                                                        on_done=on_subgoal_complete))
         else:
             # api executor: HTTP requests to different apps are safely
             # concurrent (same-app different-entity writes are independent).
             with ThreadPoolExecutor(max_workers=len(node.subgoals)) as pool:
                 futs = {pool.submit(self._exec_one_subgoal, sg, adapters, sid,
-                                    rollback_log): sg for sg in node.subgoals}
+                                    rollback_log, on_subgoal_complete): sg
+                        for sg in node.subgoals}
                 for f in as_completed(futs):
                     results.append(f.result())
         # preserve the plan's lane order in the result (as_completed scrambles)
@@ -221,7 +242,7 @@ class WorkflowExecutor:
 
     # ── LOOP (E11: each iteration independently verified) ────────────────
     def _exec_loop(self, node: WorkflowNode, adapters: dict, sid: str,
-                    rollback_log) -> NodeResult:
+                    rollback_log, on_subgoal_complete=None) -> NodeResult:
         if not node.subgoals:
             return NodeResult(node_type="loop", pass_=False,
                                meta={"error": "loop node has no template subgoal"})
@@ -229,7 +250,8 @@ class WorkflowExecutor:
         results: list[SubgoalResult] = []
         for i, val in enumerate(node.loop_values[:node.loop_count]):
             sg_i = _instantiate_loop_subgoal(template, i, val)
-            r = self._exec_one_subgoal(sg_i, adapters, sid, rollback_log)
+            r = self._exec_one_subgoal(sg_i, adapters, sid, rollback_log,
+                                        on_done=on_subgoal_complete)
             results.append(r)
             # E11: each iteration independently verified (the SubgoalResult
             # already carries verified= from _verify_ops_landed). If an
