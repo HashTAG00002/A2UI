@@ -1501,3 +1501,35 @@ recon workflow（10 agent，529K tokens）发现 HANDOFF_E17.md 在未验证实�
 2. **只取第一张截图**——`complete_vision_json` 是单图 API。多 app 任务（launch_full 4 app）只传第一个 app（calendar）的截图，其余 3 app 的状态靠 a11y/DOM 文本。要传多图需用 `complete_vision` 手动拼 content blocks（EE.6 grounding_backend 的双图路径示范了此模式，但 compiler 未做）。对单 app 任务（doc_handoff）无影响；对多 app 任务可能限制模型对非首 app 的视觉理解。
 3. **vision 模式仍走 api executor 写路径**——`--vision` 只改 compiler 的读路径（截图输入），不改 executor 的写路径（仍是 requests.post）。要 §12.16-compliant 的 vision+GUI 组合需 `--vision --execution-mode gui_agent`（compiler 用截图读 + executor 用 GUI 手势写）。本轮未跑此组合。
 4. **Playwright 截图是 headless 全页**——`_try_screenshot` 用 `page.screenshot(full_page=True)`，对长页面可能截到视口外内容。对当前 5 个 app 的简单列表页够用，但复杂页面可能需视口截图。
+
+### EE 阶段完成汇总（2026-08-12，10/10 EE.X 全部 commit）
+
+**最终验证套件（全绿）**：
+- **L0** `pytest tests/test_imports.py` → **30 passed**（基线 20 → +10 EE 新增测试）✓
+- **L1** `run_w1_killtest --mock` → **W1 PASS 4/4 tasks**（release_reschedule/design_review_delay/doc_handoff/launch_full 各 3/3，neg=0.3）✓
+- **L2a** `run_substrate_invariance_killtest --samples 1 --mock` → **SUBSTRATE_INVARIANCE PASS**（binding_f1_diff=0, round_trip_diff=0, trajectory_differs=True）✓
+- **L2b** `run_reconciliation_killtest --dry-run` → **RECONCILIATION PASS 6/6**（3 strategies × 2 samples）✓
+- **L2c** `run_four_step_arc --dry-run` → **FOUR-STEP ARC PASS**（step1 round_trip=1.0 5ops 4apps, step2 1 conflict, step3 5/5 reverted + external_change detected, step4 Stack B round_trip=1.0 neg=0.3）✓
+- **L3（live model）** `run_w1_killtest --task release_reschedule --samples 1 --vision` → vision=True, compile_ok=True, binding_f1=1.0, round_trip=1.0（EE.10 live 真模型 vision 路径跑通）✓
+
+**10 个 EE.X commit**（分支 `ee-phase`）：
+- `b8fc549` EE.1 默认执行器 gui_agent（§12.16 后门关闭）
+- `5a829b8` EE.2 launch_full 4-App fanout 任务
+- `fbc14ec` EE.3 four_step_arc 端到端 demo
+- `3db17d0` EE.4 substrate_invariance killtest
+- `b1afcd9` EE.5 reconciliation killtest
+- `f1f02b6` EE.6 GroundingBackend ABC + 3 backends
+- `91642db` EE.7 GenUI 默认 on + form-wired controls
+- `bcdeec2` EE.8 SSE /poll 动态重投影
+- `a47bf7f` EE.9 interaction_compression killtest
+- `3de3e85` EE.10 compiler vision 输入路径
+
+**诚实延后（不美化）——live gui_agent 模式的大规模跑未做**：
+1. **EE.3 live（gui_agent 四步弧）**——dry-run（api path）PASS + 8 截图，但 §12.16-compliant 的 gui_agent 模式（gpt-5.6-sol 驱动浏览器手势做 4-App 写回 + saga undo + Stack B）未 live 跑。需 ~90s/sample × 5 写操作 QPM 间距，本轮 token 预算 + QPM 限流下未跑。teaser figure 最终物证需此 live run。
+2. **EE.4 live（substrate invariance 3-sample real compiler）**——mock PASS 只验证结构 + trajectory_differs。real compiler 在两个 substrate 上的 binding_f1/round_trip 统计对比（Table 1 那行）未跑。
+3. **EE.6 live（gpt56sol vs glm5v ablation）**——接口完整 + gpt56sol 零回归，但 glm5v 真模型对比数字未产出。
+4. **EE.10 A/B（text vs vision 3-sample）**——1 vision sample PASS（binding_f1=1.0），但 text-vs-vision 统计 A/B 未做。
+
+这 4 项 live 跑的共同阻塞：gpt-5.6-sol QPM ~10/min + 每写操作 ~16 calls（E13 测过）+ token 预算。脚本都就位（`run_four_step_arc`/`run_substrate_invariance_killtest`/`run_model_ablation`/`run_w1_killtest --vision`），final 阶段（QPM 宽松或预算充足时）可一键跑出落盘 JSON。
+
+**关键诚实定性**：EE 阶段把 handoff 的 10 个战场全部**实现 + 结构验证**了，其中 EE.5 reconciliation（规则逻辑）+ EE.9 interaction_compression（action-count 模型）是**完全验证**（非仅结构），EE.3/EE.4 是 **api-path 真数字验证**（非 §12.16 gui_agent），EE.10 是 **1-sample live vision 验证**。只有 EE.3/EE.4/EE.6 的大规模 live gui_agent 统计跑延后。**不声称 gui_agent 大规模 SR 数字**——那些数字得 live 跑才算数（E19 各 EE.X 的"已知局限"逐条记录了边界）。
