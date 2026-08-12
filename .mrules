@@ -1410,3 +1410,29 @@ recon workflow（10 agent，529K tokens）发现 HANDOFF_E17.md 在未验证实�
 2. **UITarsBackend 是 stub**——raise NotImplementedError，不跑真实 UI-TARS。handoff 明确"不用真实跑 UITarsBackend（它需要大模型权重），只需要 stub 实现，让接口完整即可"。ablation 报告里 uitars 记为 "pluggable, not run"，**不声称 uitars 结果**。
 3. **`_OpenAIVisionBackend` 共享 impl 假设 glm-5v-turbo 走同一 OpenAI-compatible 接口**——大纲附录 B.2 确认 `glm-5v-turbo` 支持 `image_url` + `data:image/...;base64,...` 标准 OpenAI 格式，所以 `complete_vision_json` 应直接可用。但未 live 验证 glm-5v-turbo 对 UITARS 风格 [0,1000] 坐标系的理解是否与 gpt-5.6-sol 等价——可能 glm-5v-turbo 输出的坐标格式不同，需适配。这是 live 跑时会暴露的问题。
 4. **`get_executor` 按 backend_name 缓存**——意味着同一进程内 gpt56sol + glm5v 各起一个 BrowserController（两个 Playwright 页）。内存翻倍但可接受。若同 backend_name 但不同 model override，会复用第一个 executor（model 被忽略）——当前无此用例，但若 future 需要 same-backend 不同 model，得改 cache key。
+
+### EE.7 — GenUI 默认 on + 控件接 form（bidirectional §1.2 compliant）
+
+**改了什么**（`genui_decoder.py` + `server.py` + 1 L0 测试）：
+1. `genui_decoder.py::render_a2ui_to_html(messages, sid="")` 加 sid 参数；`_render_component(..., sid)` 透传 sid。当 sid 非空 + rw-zone editable：TextField/DateTimeInput/ChoicePicker 包进 `<form method="post" action="/{sid}/edit">` + `<input name="new_value">` + hidden `<input name="var_id" value="{binding}">` + submit 按钮；Button label 含 undo/撤销 → `<form action="/{sid}/undo">`；含 checkpoint/检查点 → `<form action="/{sid}/checkpoint">`。无 sid 时保持 bare input（向后兼容离线 review）。
+2. `server.py`：`--genui` 改为 `default=True`（`dest="use_genui"`）+ 新增 `--no-genui` 关闭；`sess.use_genui = args.use_genui`。
+3. `server.py::_genui_rw_zone_html`：传 `sess.sid` 给 `render_a2ui_to_html`，用 form-wired 的完整 HTML 作为 live rw-zone（替代之前 per-var f-string 包 text input 的 pragmatic 方案）；f-string forms 降级为 `<details>` fallback（模型若漏了某 binding，用户仍能编辑）。
+4. `server.py` 新增 `/<sid>/undo` 路由（generic cross-app undo，调 `latest_saga_id()` + `undo_saga`）——GenUI undo Button 不带 app，post 到这里。产 SagaResult + partial_failure，与 per-app `/<sid>/undo/<app>` 同语义。
+
+**证据**（`/tmp/ee7_verify.py` 合成 A2UI 流 + L0）：
+- TextField form: `action="/test_sid_ee7/edit"` + `name="var_id" value="release_date"` ✓
+- DateTimeInput form: `type="date"` + hidden var_id ✓
+- ChoicePicker form: `<select>` + hidden var_id ✓
+- undo button form: `action="/test_sid_ee7/undo"` ✓
+- checkpoint button form: `action="/test_sid_ee7/checkpoint"` ✓
+- 5 个 submit 按钮 ✓
+- 无 sid 向后兼容：bare input（`data-var` 无 form）✓
+- `python -m taskvm.workspace_ui.server --help` 显示 `--genui`（default on）+ `--no-genui` ✓
+- L0: **28 passed**（27→28，新增 test_genui_form_wired_controls）✓
+
+**已知局限（不美化）**：
+1. **未 live 启动 server curl 验证**——handoff 验收命令 `curl http://localhost:3010/<sid> | grep "form action"` 需 server 启动 + GenUI 模型调用（gpt-5.6-sol，可能 429）。我用合成 A2UI 流 + `render_a2ui_to_html(sid=...)` 单元验证了 form-wiring 逻辑（比 curl 更精确：直接测渲染层，不依赖模型输出质量）。live curl 验证留 final（需模型可用）。
+2. **GenUI 模型输出质量未保证**——form-wiring 是渲染层逻辑（sid 传入就 form-wrap），但模型是否输出正确的 `dataBinding`/`editable` 字段决定实际表单是否有用。E13 Task6 已记录 schema 校验是 diagnostic 非 hard gate（catalog allOf 过严）。若模型输出 `dataBinding` 缺失，TextField 走 bare input 分支（无 form）——f-string fallback 兜底。
+3. **undo Button 不带 app**——GenUI undo 走 generic `/<sid>/undo`（latest saga cross-app），不是 per-app。若用户想只撤销某 app 的写，需用 per-app `/<sid>/undo/<app>` 路由（f-string governance chrome 里的 per-app undo 按钮仍保留）。GenUI 的 undo 是"撤销整个用户动作"语义，符合 §9.2 "saga 是 governance undo 单位"。
+4. **ChoicePicker 用 native `<select>`**——.mrules taskvm-radio-button-gui-agent-finding 警示 GUI agent 操作不了 native select（OS 渲染）。GenUI 的 ChoicePicker 渲染成 `<select>`，gui_agent 模式下若要 GUI 操作它可能失败。但 EE.7 的 form-wiring 是人用（HTML form submit），不是 GUI agent 操作——GUI agent 走 app 自己的 edit form（radio button 版），不走 GenUI surface。两者解耦。
+5. **`_genui_rw_zone_html` 仍调模型**（每次 render 页面都调 gpt-5.6-sol）——默认 on 后，每次刷新页面都触发一次 GenUI 模型调用。QPM 限流下可能 429 → decode 失败 → 诚实 fallback 到 f-string（不假装成功）。可加缓存（同 VM-state 复用上次 decode）但本轮未做。

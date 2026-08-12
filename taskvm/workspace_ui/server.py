@@ -240,6 +240,7 @@ def _genui_rw_zone_html(sess: WorkspaceSession,
     traceability (sess.last_genui)."""
     from taskvm.workspace_ui.genui_decoder import decode_genui, render_a2ui_to_html
     from taskvm.benchmark.cost_model import CostModel
+    sid = sess.sid   # EE.7: thread sid so the model-decoded controls are form-wired
     # build a TaskBinding-shaped dict for the decoder (only editable vars)
     editable_vars = [
         {"var_id": vid, "label": info.get("label", vid),
@@ -263,15 +264,14 @@ def _genui_rw_zone_html(sess: WorkspaceSession,
         # graceful fallback: if the decoder fails, use the f-string path (honest —
         # don't pretend GenUI worked). The caller sees last_genui.error.
         return ("", result)
-    full_html = render_a2ui_to_html(result["messages"])
-    # the rendered HTML is a full page; extract just the rw-zone controls. For
-    # simplicity + governance-form-contract safety, RE-WRAP each editable var in
-    # a form with hidden var_id — using the model's control type where possible.
-    # Pragmatic approach: emit one form per editable var with a text input
-    # (the model decided the *concept* of editability; the harness ensures the
-    # submit). A richer integration would parse the model's component tree and
-    # inject form-action into each control — deferred (this wires the decoder
-    # into the live path; the control-type fidelity is a follow-on).
+    full_html = render_a2ui_to_html(result["messages"], sid=sid)
+    # EE.7: the model-decoded components are now form-wired (sid passed), so the
+    # rendered surface IS the live rw-zone — its TextField/DateTimeInput/
+    # ChoicePicker post to /<sid>/edit, its undo/checkpoint Buttons post to
+    # /<sid>/undo / /<sid>/checkpoint. Use it directly as the rw-zone HTML.
+    # Keep a per-var f-string fallback block too (governance-form-contract
+    # safety: if the model omitted a binding the user expects, the f-string
+    # forms still let them edit it; + a reviewer can see the model's full output).
     forms = []
     for v in editable_vars:
         vid = v["var_id"]; label = v["label"]; val = v["value"]
@@ -282,12 +282,10 @@ def _genui_rw_zone_html(sess: WorkspaceSession,
             f'  <input type="hidden" name="var_id" value="{vid}">'
             f'  <button type="submit">apply</button>'
             f'</form>')
-    rw_html = "".join(forms) or '<p class="meta">no editable variables</p>'
-    # attach the full GenUI-rendered surface as a hidden traceability block (so
-    # a reviewer can see what the model actually generated, even though the live
-    # governance forms use the safer per-var wrapper for now).
-    rw_html += (f'<details class="meta"><summary>GenUI decoder output (model-'
-                f'decoded A2UI surface, for review)</summary>{full_html}</details>')
+    fallback = "".join(forms) or '<p class="meta">no editable variables</p>'
+    rw_html = full_html + (f'<details class="meta"><summary>f-string fallback '
+                f'edit forms (if the model omitted a binding)</summary>'
+                f'{fallback}</details>')
     result["cost"] = cm.summary()
     return (rw_html, result)
 
@@ -487,6 +485,43 @@ def edit(sid: str):
     return redirect(f"/{sid}")
 
 
+@app.route("/<sid>/undo", methods=["POST"])
+def undo_latest(sid: str):
+    """EE.7: generic cross-app undo — undoes the LATEST saga (one user action
+    across all apps), no app specified. The GenUI decoder's 'undo' Button posts
+    here (it doesn't carry an app). Routes through ``undo_saga`` (SagaResult with
+    partial_failure) just like the per-app ``/<sid>/undo/<app>`` route."""
+    sess = user_sessions.get(sid)
+    if sess is None:
+        return ("session not found", 404)
+    saga_id = sess.rollback_log.latest_saga_id()
+    if saga_id is None:
+        empty = SagaResult(saga_id="(none)", n_targets=0, n_reverted=0,
+                          fully_reverted=True, partial_failure=False)
+        sess.last_undo_saga = empty
+        sess.last_dispatch = None
+        sess.last_resolve = None
+        sess.last_projection = resync_values(sess.binding, sess.adapters, sid)
+        logger.info(f"[workspace_ui] undo (latest): no saga records")
+        return redirect(f"/{sid}")
+    sres = sess.rollback_log.undo_saga(saga_id, sid, sess.adapters)
+    sess.last_undo_saga = sres
+    first = (sres.steps[0] if sres.steps else None)
+    if first is not None:
+        sess.last_undo = {"app": first.app, "entity_id": first.entity_id,
+                          "field": first.field, "before": first.before,
+                          "after": first.after,
+                          "resp": {"n_reverted": sres.n_reverted,
+                                   "partial_failure": sres.partial_failure}}
+    sess.last_dispatch = None
+    sess.last_resolve = None
+    sess.last_projection = resync_values(sess.binding, sess.adapters, sid)
+    logger.info(f"[workspace_ui] undo latest saga {saga_id} → "
+                f"{sres.n_reverted}/{sres.n_targets} reverted, "
+                f"partial_failure={sres.partial_failure}")
+    return redirect(f"/{sid}")
+
+
 @app.route("/<sid>/undo/<app>", methods=["POST"])
 def undo(sid: str, app: str):
     sess = user_sessions.get(sid)
@@ -594,12 +629,15 @@ def main(argv=None):
     parser.add_argument("--sim-url", default="",
                         help="MobileGym sim URL for the split-screen phone iframe "
                              "(mobilegym demo only; e.g. http://localhost:3000)")
-    parser.add_argument("--genui", action="store_true",
-                        help="Task5 (E10 rework): render the rw-zone editable fields "
-                             "via the GenUI decoder (real model call → A2UI v0.9 → thin "
-                             "renderer) instead of the f-string editable_field_html. "
-                             "Default off (f-string) for backward compat + to avoid a "
-                             "model call per page render unless explicitly opted in.")
+    parser.add_argument("--genui", dest="use_genui", action="store_true",
+                        default=True,
+                        help="EE.7: render the rw-zone editable fields via the GenUI "
+                             "decoder (real model call → A2UI v0.9 → form-wired thin "
+                             "renderer). DEFAULT ON — the model-decoded component IS "
+                             "the live governance control (bidirectional §1.2). Use "
+                             "--no-genui for the legacy f-string path (mock/debug).")
+    parser.add_argument("--no-genui", dest="use_genui", action="store_false",
+                        help="disable GenUI; use the legacy f-string editable_field_html.")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--ws", action="store_true",
                         help="E17-B: enable the WebSocket endpoint (namespace "
@@ -633,7 +671,7 @@ def main(argv=None):
                            f"(start the apps first: python -m taskvm.apps.{name}.app "
                            f"or the mobilegym bridge on :3019)")
     sess = seed_session(fixture, adapters, host=args.app_host)
-    sess.use_genui = args.genui   # Task5: wire GenUI decoder into the live render
+    sess.use_genui = args.use_genui   # EE.7: default on (--no-genui to disable)
     if args.ws:
         # create the per-sid inbound event queue for HumanWebSocketDriver
         import queue as _queue

@@ -269,8 +269,15 @@ def _data_model(messages: list[dict]) -> dict:
 
 
 def _render_component(cid: str, comps: dict[str, dict], data: dict,
-                      zone: str) -> str:
-    """Recursively render one component to HTML. ``zone`` = 'ro' | 'rw' | ''."""
+                      zone: str, sid: str = "") -> str:
+    """Recursively render one component to HTML. ``zone`` = 'ro' | 'rw' | ''.
+
+    EE.7: when ``sid`` is given, rw-zone editable controls (TextField /
+    DateTimeInput / ChoicePicker) are wrapped in ``<form action="/<sid>/edit">``
+    with hidden ``var_id`` + ``new_value`` so the model-decoded component is the
+    LIVE governance control (not just a review block). undo/checkpoint Buttons
+    post to ``/<sid>/undo`` / ``/<sid>/checkpoint``. Without ``sid`` the renderer
+    stays backward-compatible (bare inputs, for offline review)."""
     c = comps.get(cid)
     if c is None:
         return f'<div class="genui-text">(?missing {cid})</div>'
@@ -283,14 +290,14 @@ def _render_component(cid: str, comps: dict[str, dict], data: dict,
         zone = "rw"
     editable = c.get("editable", c.get("dataBinding") is not None)
     if ctype == "Column":
-        inner = "".join(_render_component(ch, comps, data, zone) for ch in children)
+        inner = "".join(_render_component(ch, comps, data, zone, sid) for ch in children)
         return f'<div class="genui-col">{inner}</div>'
     if ctype == "Row":
-        inner = "".join(_render_component(ch, comps, data, zone) for ch in children)
+        inner = "".join(_render_component(ch, comps, data, zone, sid) for ch in children)
         return f'<div class="genui-row">{inner}</div>'
     if ctype == "Card":
         title = c.get("title") or cid
-        inner = "".join(_render_component(ch, comps, data, zone) for ch in children)
+        inner = "".join(_render_component(ch, comps, data, zone, sid) for ch in children)
         return f'<div class="genui-card"><h3>{_esc(title)}</h3>{inner}</div>'
     if ctype == "Text":
         text = c.get("text") or c.get("content") or ""
@@ -305,6 +312,13 @@ def _render_component(cid: str, comps: dict[str, dict], data: dict,
         if zone == "ro" or editable is False:
             return (f'<div class="genui-field"><label>{_esc(label)}</label>'
                     f'<div class="genui-readonly">{_esc(val)}</div></div>')
+        # EE.7: form-wire the editable control (model-decoded = live governance)
+        if sid and binding:
+            return (f'<form class="genui-field" method="post" action="/{sid}/edit">'
+                    f'<label>{_esc(label)}</label>'
+                    f'<input type="text" name="new_value" value="{_esc(val)}" data-var="{_esc(binding)}">'
+                    f'<input type="hidden" name="var_id" value="{_esc(binding)}">'
+                    f'<button type="submit" class="genui-button">apply</button></form>')
         return (f'<div class="genui-field"><label>{_esc(label)}</label>'
                 f'<input type="text" value="{_esc(val)}" data-var="{_esc(binding)}"></div>')
     if ctype == "DateTimeInput":
@@ -314,6 +328,12 @@ def _render_component(cid: str, comps: dict[str, dict], data: dict,
         if zone == "ro" or editable is False:
             return (f'<div class="genui-field"><label>{_esc(label)}</label>'
                     f'<div class="genui-readonly">{_esc(val)}</div></div>')
+        if sid and binding:
+            return (f'<form class="genui-field" method="post" action="/{sid}/edit">'
+                    f'<label>{_esc(label)}</label>'
+                    f'<input type="date" name="new_value" value="{_esc(val)}" data-var="{_esc(binding)}">'
+                    f'<input type="hidden" name="var_id" value="{_esc(binding)}">'
+                    f'<button type="submit" class="genui-button">apply</button></form>')
         return (f'<div class="genui-field"><label>{_esc(label)}</label>'
                 f'<input type="date" value="{_esc(val)}" data-var="{_esc(binding)}"></div>')
     if ctype == "ChoicePicker":
@@ -327,18 +347,33 @@ def _render_component(cid: str, comps: dict[str, dict], data: dict,
         opt_html = "".join(f'<option value="{_esc(o)}" '
                            f'{"selected" if str(o)==str(val) else ""}>{_esc(o)}</option>'
                            for o in opts)
+        if sid and binding:
+            return (f'<form class="genui-field" method="post" action="/{sid}/edit">'
+                    f'<label>{_esc(label)}</label>'
+                    f'<select name="new_value" data-var="{_esc(binding)}">{opt_html}</select>'
+                    f'<input type="hidden" name="var_id" value="{_esc(binding)}">'
+                    f'<button type="submit" class="genui-button">apply</button></form>')
         return (f'<div class="genui-field"><label>{_esc(label)}</label>'
                 f'<select data-var="{_esc(binding)}">{opt_html}</select></div>')
     if ctype == "Button":
         label = c.get("label") or c.get("text") or "button"
-        cls = "secondary" if "undo" in str(label).lower() or "checkpoint" in str(label).lower() else ""
+        low = str(label).lower()
+        cls = "secondary" if ("undo" in low or "撤销" in str(label) or
+                              "checkpoint" in low or "检查点" in str(label)) else ""
+        # EE.7: form-wire undo / checkpoint buttons (governance affordances)
+        if sid and ("undo" in low or "撤销" in str(label)):
+            return (f'<form method="post" action="/{sid}/undo" style="display:inline">'
+                    f'<button type="submit" class="genui-button {cls}">{_esc(label)}</button></form>')
+        if sid and ("checkpoint" in low or "检查点" in str(label)):
+            return (f'<form method="post" action="/{sid}/checkpoint" style="display:inline">'
+                    f'<button type="submit" class="genui-button {cls}">{_esc(label)}</button></form>')
         return f'<button class="genui-button {cls}">{_esc(label)}</button>'
     if ctype == "Divider":
         return '<hr class="genui-divider">'
     if ctype == "List":
         items = c.get("items") or children
         inner = "".join(_render_component(ch if isinstance(ch, str) else ch.get("id",""),
-                                          comps, data, zone)
+                                          comps, data, zone, sid)
                         for ch in items)
         return f'<div class="genui-col">{inner}</div>'
     # fallback: render as text with the component type (honest — no silent skip)
@@ -349,17 +384,22 @@ def _esc(s: Any) -> str:
     return (str(s) if s is not None else "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
 
 
-def render_a2ui_to_html(messages: list[dict]) -> str:
+def render_a2ui_to_html(messages: list[dict], sid: str = "") -> str:
     """Translate A2UI v0.9 messages to a full HTML page (the THIN renderer).
     Walks the component tree from 'root', maps each component type to HTML.
     No hardcoded field→control logic — the model decided the tree; this only
-    renders it."""
+    renders it.
+
+    EE.7: ``sid`` wires the rw-zone editable controls + undo/checkpoint buttons
+    into live ``<form>``s posting to ``/<sid>/edit`` / ``/<sid>/undo`` /
+    ``/<sid>/checkpoint`` — the model-decoded component IS the governance control
+    (bidirectional §1.2 compliant). Empty ``sid`` = offline review (bare inputs)."""
     comps = _components_by_id(messages)
     data = _data_model(messages)
     root = comps.get("root")
     if root is None:
         return "<!DOCTYPE html><html><body><p>(no root component)</p></body></html>"
-    body = _render_component("root", comps, data, "")
+    body = _render_component("root", comps, data, "", sid)
     return ("<!DOCTYPE html><html lang='zh'><head><meta charset='utf-8'>"
             "<title>TaskVM · GenUI decoder surface</title>" + _CSS +
             "</head><body><div class='genui-surface'>" + body +

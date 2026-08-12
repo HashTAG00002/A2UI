@@ -297,5 +297,34 @@ def test_get_executor_caches_by_backend_name():
     assert e1.backend.name == "gpt56sol"
 
 
+# ── EE.7: GenUI form-wired controls ─────────────────────────────────────────
+def test_genui_form_wired_controls():
+    """render_a2ui_to_html with sid form-wires rw-zone editable controls +
+    undo/checkpoint buttons (EE.7: model-decoded component = live governance)."""
+    from taskvm.workspace_ui.genui_decoder import render_a2ui_to_html
+    messages = [
+        {"createSurface": {"surface": {"id": "s1", "version": "v0.9"}}},
+        {"updateComponents": {"components": [
+            {"id": "root", "component": "Column", "children": ["rw_zone"]},
+            {"id": "rw_zone", "component": "Column", "children": ["f1", "b1", "b2"]},
+            {"id": "f1", "component": "TextField", "label": "发布日期",
+             "dataBinding": "release_date", "editable": True},
+            {"id": "b1", "component": "Button", "label": "撤销"},
+            {"id": "b2", "component": "Button", "label": "设检查点"},
+        ]}},
+        {"updateDataModel": {"value": {"release_date": "2026-08-14"}}},
+    ]
+    sid = "t_ee7"
+    html = render_a2ui_to_html(messages, sid=sid)
+    assert f'action="/{sid}/edit"' in html, "TextField must form-post to /<sid>/edit"
+    assert 'name="var_id" value="release_date"' in html, "hidden var_id must carry the binding"
+    assert f'action="/{sid}/undo"' in html, "undo Button must form-post to /<sid>/undo"
+    assert f'action="/{sid}/checkpoint"' in html, "checkpoint Button must form-post to /<sid>/checkpoint"
+    # backward compat: no sid → bare inputs (no forms)
+    html_nosid = render_a2ui_to_html(messages, sid="")
+    assert f'action="/{sid}/edit"' not in html_nosid
+    assert 'data-var="release_date"' in html_nosid, "no-sid still renders the bare input"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-x", "-q"])
