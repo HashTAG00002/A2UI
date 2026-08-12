@@ -599,74 +599,27 @@ class MobileGymBridge:
                 target_state_desc = "OUTLINE/uncolored (inactive)"
                 fail_hint = f"still {done_color} and FILLED"
 
-            # ── E16-complete (.mrules E16, 2026-08-12) ──────────────────────
-            # Pure-vision CUA: NO content_hint of any kind. The first E16 round
-            # (commit 8959463) replaced the posts.json read with a DOM
-            # ``page.evaluate('[data-post-id]' + textContent)`` read — but that
-            # was only half the fix: reading the rendered DOM is STILL a
-            # backdoor, because a real native-app CUA has no DOM (it sees only
-            # the rendered pixels). MobileGym is a web sim, so the DOM exists
-            # here, but exploiting it would be using the sim's web-implementation
-            # privilege — not a capability a real CUA has. GPT-5.6-sol's vision
-            # is strong enough to read post text + icon color straight off the
-            # screenshot, so the hint is unnecessary AND dishonest.
-            #
-            # The instruction below names NO post_id, NO post text, NO current
-            # toggle state — the model must find an un-toggled post by looking
-            # at the screenshot, tap its action-bar icon, and verify the color
-            # change. This is the real CUA task (with its real difficulty: on a
-            # 3-post timeline the model cannot tell WHICH un-toggled post the
-            # task is about — that difficulty is honest and must not be masked).
-            ablation_instr = os.environ.get("TASKVM_ABLATION_INSTRUCTION", "new")
-            content_hint = ""   # E16-complete: always empty (kept only so the
-                                # old ablation path below references it without
-                                # a NameError; both paths lose the backdoor)
+            # ── GG.3/§1.3: the bridge no longer has its own instruction template ──
+            # The CUA instruction MUST come from the governance layer
+            # (GovernanceInterpreter → SubgoalInstruction.natural_language) via
+            # ``instruction_override``. The old inline f-string templates (the
+            # E14 "old" ablation branch + the E16 "new" inline branch) are
+            # DELETED — they were hardcoded bridge templates (GG §1.3 condemns
+            # "bridge 内不再有自己的 instruction 模板"). The E16 content_hint /
+            # posts.json / DOM-textContent backdoor history is preserved in
+            # .mrules E16; the code no longer carries it. If no override is
+            # supplied, the bridge honest-fails (it cannot fabricate a goal
+            # instruction — that is the governance layer's job).
             logger.info(f"[bridge] mutate_x: post={post_id} want_active={_want_active} "
-                        f"ablation_instr={ablation_instr} verify_mode={verify_mode} "
-                        f"instruction_override={'yes' if instruction_override else 'no'} "
-                        f"(pure-vision, no content_hint)")
-            # ── E17-B: governance-supplied instruction (de-segmentation) ─────
-            # If ``instruction_override`` is set, the caller (GovernanceInterpreter
-            # via the killtest) already built the CUA instruction from the user-
-            # behavior event + VM state — use it INSTEAD of the inline f-string.
-            # This is the "完整链路" fix (handoff §0-A): the instruction no longer
-            # comes from a hardcoded bridge f-string, but from the governance
-            # layer's interpretation of the user's GenUI action. When None, the
-            # inline f-string path runs unchanged (zero regression).
-            if instruction_override:
-                instruction = instruction_override
-            elif ablation_instr == "old":
-                # E14-core ablation baseline: old single-tap instruction
-                # (no verification step, no icon ordering hint).
-                # Kept for ablation reproducibility only — not used in
-                # normal operation. content_hint is "" under E16-complete, so
-                # this path no longer carries a text hint either (both paths
-                # lose the backdoor equally; the ablation now isolates
-                # instruction STYLE only, not hint presence).
-                instruction = (
-                    f"On this X (Twitter) app timeline, {verb} a specific post. "
-                    f"The target post contains this text: \"{content_hint}\". "
-                    f"Find that post and tap the {icon_desc} in its action bar. "
-                    f"Output {{\"action\":\"done\"}} when you have tapped it. "
-                    f"If you cannot find the post, output "
-                    f"{{\"action\":\"fail\",\"reason\":\"...\"}}.")
-            else:
-                instruction = (
-                    f"On this X (Twitter) app timeline, your goal is to make the "
-                    f"{icon_desc} on a specific post reach its TARGET STATE: "
-                    f"{target_state_desc}. "
-                    f"The post you need to find is one of the posts currently visible "
-                    f"on the timeline. Look at the action bar below each post — it has "
-                    f"icons: comment (speech bubble), repost (green arrows), "
-                    f"like (heart), views (chart), bookmark (ribbon). "
-                    f"Find the post whose {icon_desc} is NOT yet in the target state "
-                    f"({target_state_desc}) and tap it. "
-                    f"After tapping, verify the icon reached {target_state_desc}. "
-                    f"If it is {fail_hint} after tapping, tap again carefully. "
-                    f"Only output {{\"action\":\"done\"}} once you can clearly see "
-                    f"the icon in {target_state_desc}. "
-                    f"If you cannot identify the correct post, output "
-                    f"{{\"action\":\"fail\",\"reason\":\"...\"}}.")
+                        f"verify_mode={verify_mode} "
+                        f"instruction_override={'yes' if instruction_override else 'no'}")
+            if not instruction_override:
+                return {"status": "error", "app": "x",
+                        "error": ("GG.3: mutate_x requires instruction_override "
+                                  "(the governance layer's SubgoalInstruction NL). "
+                                  "The bridge no longer fabricates a goal instruction."),
+                        "post_id": post_id, "operator": operator}
+            instruction = instruction_override
 
             from taskvm.execution.gui_executor_async import (
                 gui_act_async, GuiExecutorFailure)
@@ -773,106 +726,16 @@ class MobileGymBridge:
                     "post_id": post_id, "verify_mode": verify_mode,
                     "trace": trace}
 
-    async def _send_message(self, sid: str, chat_id: str, text: str) -> dict:
-        """Send a message via the app's OWN write pipeline — NO set_state on
-        the write path (handoff fix 2026-08-10; the prior set_state(deep=True)
-        patch bypassed the app's gesture/business layer — see memory
-        taskvm-non-invasive-write-rollback-boundary).
+    # GG.4: the dead ``_send_message`` method (7-step hardcoded sequence with
+    # the ``openApp('wechat','/chat/{chat_id}')`` deep-link + a programmatic
+    # ``textarea.focus()`` backdoor) is DELETED. It was superseded by
+    # ``gui_executor_async.gui_write_async`` (the real grounding loop) — the
+    # earlier exploration confirmed zero live callers. The deep-link was a
+    # wxid backdoor (a real user can't deep-link to a chat by an internal id);
+    # the live path now opens wechat + lets the grounding model tap the contact
+    # by visible peer_name (gui_write_async._resolve_peer_name). History in
+    # .mrules E10/E15.
 
-        Sequence (the WRITE itself goes through ``__SIM_INPUT__`` gestures →
-        the app's own ``handleKeyDown`` → ``handleSend`` → ``sendMessage``
-        store mutation — MobileGym runtime-api.md L134: "the same gestures the
-        benchmark dispatches when an agent emits actions"):
-          1. ``env.open_app("wechat")`` — the OS launcher
-             (``window.__OS__.openApp`` = tapping the app icon). Warms wechat.
-          2. Deep-link to the chat: ``window.__OS__.openApp('wechat',
-             '/chat/<id>')`` — the OS launcher with an initialRoute (like an
-             Android Intent deep link). The app's OWN router mounts ChatDetail
-             + resolves the peer. NOT a state-injection backdoor. (The 2-arg
-             form requires wechat to be warmed first — step 1 — else it
-             no-ops; verified 2026-08-10.)
-          3. Wait for ChatDetail's composer ``<textarea>`` to mount.
-          4. Focus the textarea. ⚠️ HONESTY CAVEAT: the composer is rendered
-             BELOW the 800px CSS viewport in this sim's layout (rect y≈858,
-             verified — a coordinate ``Action.click`` cannot reach it and
-             ``scrollIntoView`` does not move it, likely a reserved keyboard
-             area). So focus is done programmatically via
-             ``page.evaluate(el => el.focus())`` — a GROUNDING step (like the
-             DOM rect read), NOT a state mutation. A real mobile agent would
-             tap the input box; the bridge cannot tap an off-screen element, so
-             it focuses directly. The WRITE itself is still a gesture.
-          5. ``Action.type_text(text)`` (no point — types into the focused
-             textarea via ``__SIM_INPUT__.type``). GESTURE.
-          6. ``Action(ActionType.ENTER, {})`` — synthetic Enter keydown via
-             ``__SIM_INPUT__.enter``; WeChat's ``handleKeyDown`` catches Enter
-             (no Shift) → ``handleSend`` → ``sendMessage``. GESTURE. (Using
-             Enter instead of tapping the 发送 button because the button has
-             no stable selector and shifts with the keyboard.)
-          7. Verify via ``get_state()`` (the trusted read path) that the
-             message really landed in ``chats[<id>].messages``.
-        """
-        import asyncio
-        from bench_env.env.base import Action, ActionType
-        # 1. open wechat (OS launcher) — warms the app
-        await self.env.open_app("wechat", wait_stable=True)
-        await self._screenshot("open_app_wechat")
-        # 2. deep-link to the chat (OS navigation, NOT a state backdoor)
-        await self.env.page.evaluate(
-            f"window.__OS__?.openApp?.('wechat', '/chat/{chat_id}')")
-        await self._screenshot("deep_link_to_chat")
-        # 3. wait for ChatDetail's composer textarea to mount (retry ~4s)
-        found = False
-        for _ in range(8):
-            await asyncio.sleep(0.5)
-            found = await self.env.page.evaluate(
-                "() => !!document.querySelector('textarea')")
-            if found:
-                break
-        if not found:
-            await self._screenshot("FAIL_composer_not_found")
-            raise RuntimeError(
-                f"wechat ChatDetail composer textarea not found after "
-                f"deep-link to /chat/{chat_id} — is the wxid a seeded "
-                f"contact/chat (add_contacts + add_chats)?")
-        # 4. focus the textarea (programmatic — see HONESTY CAVEAT above; the
-        # composer is below the viewport so a coordinate tap can't reach it)
-        await self.env.page.evaluate(
-            "document.querySelector('textarea')?.focus()")
-        await asyncio.sleep(0.3)
-        await self._screenshot("focus_composer")
-        # 5. type the text (GESTURE via __SIM_INPUT__.type → activeElement)
-        await self.env.step(Action.type_text(text))
-        await self._screenshot("type_text")
-        # 6. send via Enter (GESTURE via __SIM_INPUT__.enter → handleKeyDown → handleSend)
-        await self.env.step(Action(ActionType.ENTER, {}))
-        await self._screenshot("enter_send")
-        # 7. verify the message really landed in the live sim
-        state = await self.env.get_state(required_apps=APPS)
-        self._sid_live[sid] = state
-        chats = state.get("apps", {}).get("wechat", {}).get("chats", []) or []
-        target = next((c for c in chats if c.get("id") == chat_id), None)
-        if target is None:
-            raise RuntimeError(
-                f"chat {chat_id} not found after send — sendMessage likely "
-                f"no-op'd (wxid is neither a contact nor a seeded chat)")
-        msgs = target.get("messages") or []
-        new_msg = next((m for m in reversed(msgs)
-                        if m.get("type") == "text" and m.get("content") == text), None)
-        if not new_msg:
-            raise RuntimeError(
-                f"sent text not found in chat {chat_id} after the gesture "
-                f"sequence — the type/enter gestures may not have reached "
-                f"the composer (verify focus + __SIM_INPUT__ delivery)")
-        logger.info(f"[bridge] send_message via app pipeline (no set_state): "
-                    f"chat={chat_id} msg_id={new_msg.get('id')!r} n_msgs={len(msgs)}")
-        await self._screenshot("verify_message_landed")
-        # ``old`` = "msg:<id>" so a future real-gesture delete (if the app
-        # gains one) could target it; ``new`` = the text. Until then the
-        # msg: rollback branch honestly reports irreversibility (above).
-        return {"status": "ok", "operator": "send_message",
-                "old": f"msg:{new_msg.get('id')}", "new": text,
-                "chat_id": chat_id, "n_messages": len(msgs),
-                "message_id": new_msg.get("id")}
 
     # ── minimal HTML view (data-*-id DOM for replay_engine.capture_obs) ─────
     def html_view(self, sid: str) -> str:

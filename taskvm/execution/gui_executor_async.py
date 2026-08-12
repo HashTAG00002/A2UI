@@ -330,52 +330,64 @@ async def gui_act_async(*, env, page, instruction: str,
     return trace
 
 
-def _build_wechat_instruction(chat_id: str, text: str, undo: bool) -> str:
-    """Wechat-specific goal instruction (Task C fix, .mrules E15).
+def _build_wechat_instruction(peer_name: str, text: str, undo: bool) -> str:
+    """Wechat-specific goal instruction (Task C fix, .mrules E15; GG.4 updated).
 
-    Bug this replaces: ``gui_write_async`` used the SHARED
-    ``gui_executor._build_instruction`` template, which is written for the
-    DESKTOP apps' edit-form pattern ("click into the {entity} (e.g. a
-    View/Detail link), open its edit form, ... click 'Review changes' and in
-    the confirm dialog click the 'Confirm move' / submit button"). Wechat has
-    NO view/detail link, NO edit form, and NO confirm dialog — it's already
-    the chat detail page (the bridge's ``_navigate_wechat`` deep-links there
-    BEFORE the grounding loop starts), and sending a message is just
-    type-into-composer + Enter. Observed failure mode (E15, screenshot
-    evidence in ``eval_results/mobilegym_wechat_postcss_*``): the model,
-    faced with an instruction describing a UI pattern that doesn't exist,
-    searched for a "way to open an edit form" (repeatedly tapping a
-    search-like icon) and ended up typing the entity_id string itself into a
-    search/contact box, never reaching the actual composer — a goal-level
-    instruction MISMATCH bug, not a coordinate/viewport bug (the composer WAS
-    reachable after Task C's CSS fix)."""
+    GG.4: the instruction addresses the target chat by its VISIBLE contact name
+    (``peer_name`` — what a user sees in the chat list), NOT by chat_id. The old
+    ``_navigate_wechat`` deep-linked to ``/chat/{chat_id}`` (a wxid backdoor a
+    real user can't produce); GG.4 removed it, so the model must now navigate:
+    open wechat → tap the contact by visible name in the chat list → type + send.
+    The instruction never embeds chat_id (it tells the model "do NOT type any id").
+
+    History (Task C / E15): ``gui_write_async`` originally used the shared
+    ``gui_executor._build_instruction`` desktop-edit-form template, which caused
+    the model to search for a nonexistent "edit form". The wechat-specific
+    instruction fixed that. GG.4 extends it to visible-name navigation."""
+    who = peer_name or "the target contact"
     if undo:
         return (
-            "On this wechat chat page (already open — do NOT navigate away), "
-            "try to UNDO the most recently sent message. Look for a long-press "
-            "menu, a delete/recall option, or any other real UI affordance on "
-            "the last message bubble that lets you remove or recall it. "
-            "If you find one, use it, then output {\"action\":\"done\"}. "
-            "If wechat's chat UI offers NO way to delete/recall a sent "
-            "message (no long-press menu, no recall button), output "
-            "{\"action\":\"fail\",\"reason\":\"...\"} — do NOT type into any "
-            "search box or navigate to a different chat.")
+            f"In the WeChat app, open the chat with {who} (tap that contact's "
+            f"name in the chat list — do NOT type any id or search for a chat "
+            f"id). On the chat detail page, try to UNDO the most recently sent "
+            f"message: long-press the last message bubble and look for a "
+            f"delete/recall option. If you find one, use it, then output "
+            f"{{\"action\":\"done\"}}. If WeChat offers NO way to delete/recall "
+            f"a sent message, output {{\"action\":\"fail\",\"reason\":\"...\"}} "
+            f"— do NOT type into any search box.")
     return (
-        "You are ALREADY on the correct wechat chat detail page (the one "
-        "chat this task is about) — do NOT search for a contact, do NOT "
-        "navigate to a different chat, and do NOT type the chat id anywhere. "
-        "At the bottom of the screen there is a message composer text box "
-        "(an empty white input field) next to a '+' icon and a smiley icon. "
-        f"1) Tap directly on that composer text box to focus it. "
+        f"In the WeChat app, open the chat with {who}: tap that contact's "
+        f"visible name in the chat list (do NOT type any chat id or search for "
+        f"an id). Once on the chat detail page, find the message composer text "
+        f"box at the bottom (an empty input next to a '+' and a smiley icon). "
+        f"1) Tap the composer to focus it. "
         f"2) Type EXACTLY this message text: {text!r} "
-        f"3) Press Enter to send it (or tap the send button that appears). "
-        f"4) After sending, verify the message bubble now appears in the chat "
-        f"history above the composer. "
-        f"Output {{\"action\":\"done\"}} only once you can see the sent "
-        f"message bubble in the chat. If the composer is not visible, it may "
-        f"be at the very bottom of the screen — look there first before "
-        f"trying anything else. If sending is truly impossible via this "
-        f"page's UI, output {{\"action\":\"fail\",\"reason\":\"...\"}}.")
+        f"3) Press Enter (or tap the send button) to send. "
+        f"4) Verify the message bubble appears in the chat history above the "
+        f"composer. "
+        f"Output {{\"action\":\"done\"}} once you see the sent message bubble. "
+        f"If the chat with {who} is not in the list, or sending is impossible, "
+        f"output {{\"action\":\"fail\",\"reason\":\"...\"}}.")
+
+
+async def _resolve_peer_name(env, chat_id: str) -> str:
+    """GG.4: resolve a wechat chat_id → the contact's VISIBLE peer_name, by
+    reading the env's wechat state (the chat list). peer_name is screen-visible
+    (the contact's display name in the chat list) → not a GT leak. Returns ""
+    if the chat isn't found (the instruction then says "the target contact"
+    + the model will honest-fail if it can't find it)."""
+    try:
+        st = await env.get_state(required_apps=["wechat"])
+    except Exception:
+        return ""
+    wechat = (st or {}).get("wechat", {}) if isinstance(st, dict) else {}
+    # get_state may return the wechat slice directly or nested
+    chats = wechat.get("chats") or (st or {}).get("chats") or []
+    for c in chats or []:
+        if str(c.get("id")) == str(chat_id):
+            user = c.get("user") or {}
+            return user.get("name") or user.get("peer_name") or ""
+    return ""
 
 
 async def gui_write_async(*, env, page, sid: str, chat_id: str, text: str,
@@ -385,24 +397,24 @@ async def gui_write_async(*, env, page, sid: str, chat_id: str, text: str,
                           screenshot_dir: str | None = None) -> dict:
     """Drive the MobileGym wechat chat via a real grounding loop (Task3).
 
-    Thin wechat-specific wrapper over the generic ``gui_act_async``: builds
-    the wechat send_message instruction + the navigate/wait_ready hooks,
-    then delegates to ``gui_act_async``. Kept for backward compatibility with
-    ``mobilegym_bridge.mutate_wechat`` (which still calls this signature).
+    GG.4: NO deep-link. The chat is addressed by its VISIBLE contact name
+    (peer_name, resolved from chat_id via the env state — screen-visible, not a
+    GT leak). ``_navigate_wechat`` only opens the wechat app (a legit
+    ``open_app`` gesture = tapping the app icon); the grounding model then taps
+    the contact by visible name in the chat list. The old
+    ``openApp('wechat','/chat/{chat_id}')`` deep-link (a wxid backdoor) is
+    DELETED.
 
-    Instruction: uses ``_build_wechat_instruction`` (Task C / E15 fix), NOT
-    the shared desktop-app-style ``gui_executor._build_instruction`` — see
-    that function's docstring for why the generic template caused the model
-    to search for a nonexistent "edit form" instead of just typing into the
-    already-visible composer."""
-    instruction = _build_wechat_instruction(chat_id, text, undo)
+    Instruction: ``_build_wechat_instruction`` (peer_name + text), zero chat_id."""
+    peer_name = await _resolve_peer_name(env, chat_id)
+    instruction = _build_wechat_instruction(peer_name, text, undo)
 
     async def _navigate_wechat():
-        # warm wechat + deep-link to the chat (the app's own OS navigation —
-        # NOT a state backdoor). Same as the old _send_message steps 1-2.
+        # GG.4: ONLY open the wechat app (tapping the app icon — a real gesture).
+        # NO deep-link to /chat/{chat_id} (that was a wxid backdoor). The model
+        # taps the contact by visible peer_name in the chat list per the
+        # instruction; if it can't find the contact, it honest-fails.
         await env.open_app("wechat", wait_stable=True)
-        await page.evaluate(
-            f"window.__OS__?.openApp?.('wechat', '/chat/{chat_id}')")
 
     async def _wait_wechat_ready():
         return await page.evaluate(

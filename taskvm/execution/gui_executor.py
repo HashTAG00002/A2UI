@@ -193,10 +193,12 @@ class GuiExecutor:
         irreversibility). Raises ``RuntimeError`` if max_steps exceeded without
         ``done`` (cost/timeout protection — handoff §3.3).
 
-        ``prev_screenshot`` / ``resume_url`` (Task2, E12): on a RETRY, the caller
-        passes the previous attempt's last screenshot + a URL to resume from
-        (e.g. the edit-form URL, not the list URL) so the retry doesn't re-walk
-        View→Edit→… from scratch. None on the first attempt."""
+        ``prev_screenshot`` (E12): on a RETRY, the caller passes the previous
+        attempt's last screenshot (an observation — title-agnostic) so the model
+        sees where the prior try got stuck. ``resume_url`` is GG.4-deprecated:
+        it is always None now (the old edit-form deep-link was removed — the
+        retry re-navigates from the list page, grounding on the visible title).
+        Kept in the signature for backward-compat; ignored."""
         with self._lock:   # one GUI op at a time (shared resident page)
             return self._execute_locked(instruction, page_url,
                                          prev_screenshot=prev_screenshot,
@@ -205,9 +207,12 @@ class GuiExecutor:
     def _execute_locked(self, instruction: str, page_url: str, *,
                         prev_screenshot: str | None = None,
                         resume_url: str | None = None) -> dict:
-        # Task2 (E12): on retry, resume from the deeper URL (edit form / detail)
-        # instead of re-navigating to the list page + re-clicking View/Edit.
-        self.bc.goto(resume_url or page_url)
+        # GG.4: always navigate from the list page (page_url) — the old
+        # ``goto(resume_url or page_url)`` deep-linked to a synthesized
+        # ``/<sid>/<kind>/<eid>/edit`` URL (an entity_id backdoor a real user
+        # can't produce). resume_url is now always None (kept for signature
+        # compat); the model grounds on the visible title from the list.
+        self.bc.goto(page_url)
         self.bc.wait_load()
         history: list[str] = []
         trace = {"steps": 0, "actions": [], "final_url": None, "done": False,
