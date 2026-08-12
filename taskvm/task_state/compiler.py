@@ -61,7 +61,8 @@ def build_user_prompt(trace: TraceFixture, observed_entity_ids: dict[str, set[st
 def compile_binding(trace: TraceFixture, observed_entity_ids: dict[str, set[str]],
                     *, model: str | None = None, temperature: float | None = None,
                     max_tokens: int = 3072, cost_model: CostModel | None = None,
-                    binding_only: bool = True) -> dict:
+                    binding_only: bool = True,
+                    screenshots: dict[str, str] | None = None) -> dict:
     """Call the frontier model and return:
         {"text_response", "a2ui", "task_binding", "raw", "parsed", "ok", "error"}
     ``task_binding`` is the gate-critical output (None on parse/structure failure).
@@ -72,23 +73,43 @@ def compile_binding(trace: TraceFixture, observed_entity_ids: dict[str, set[str]
     FIRST and treat a2ui as optional/minimal — the documented W1 fallback when
     the model over-spends tokens on the A2UI surface and starves the binding
     (doc §10 de-prioritizes fancy UI). Pass False for the full-A2UI check.
-    """
+
+    ``screenshots`` (EE.10, §7.1): ``{app: data_url}`` base64 screenshots of each
+    app's rendered page. When non-empty, the compiler calls
+    ``complete_vision_json`` (screenshot + a11y + DOM — the §7.1 "screenshot+a11y
+    encoder") instead of the text-only ``complete_json``. The FIRST app's
+    screenshot is the image input (one-image API limit; the a11y/DOM for ALL apps
+    stays in the text prompt so the model sees every app's state). None/empty →
+    the text-only path (backward compat, the W1 baseline)."""
     sys_prompt = compiler_system_prompt(binding_only=binding_only)
     user_prompt = build_user_prompt(trace, observed_entity_ids)
 
-    parsed, raw, resp = model_client.complete_json(
-        sys_prompt, user_prompt, max_tokens=max_tokens,
-        temperature=temperature, model=model)
+    if screenshots:
+        # EE.10: vision path — pick the first app's screenshot as the image input
+        # (complete_vision_json is single-image; all apps' a11y/DOM stay in text).
+        first_app = next(iter(trace.final_obs))
+        img_url = screenshots.get(first_app) or next(iter(screenshots.values()))
+        parsed, raw, resp = model_client.complete_vision_json(
+            sys_prompt, user_prompt, img_url, max_tokens=max_tokens,
+            temperature=temperature, model=model, repair_retries=1)
+        vision_used = True
+    else:
+        parsed, raw, resp = model_client.complete_json(
+            sys_prompt, user_prompt, max_tokens=max_tokens,
+            temperature=temperature, model=model)
+        vision_used = False
 
     # record cost (real token usage) if a cost model is attached
     if cost_model is not None and resp is not None:
         model_client.record_usage(
-            resp, cost_model, tool="compile_binding", role=MODEL_ROLE,
+            resp, cost_model,
+            tool="compile_binding" + (":vision" if vision_used else ""),
+            role=MODEL_ROLE,
             model=model or model_client.TASKVM_DEFAULT_MODEL)
 
     out: dict[str, Any] = {"raw": raw, "parsed": parsed, "ok": False,
                            "text_response": None, "a2ui": None, "task_binding": None,
-                           "error": None}
+                           "error": None, "vision": vision_used}
     if parsed is None:
         out["error"] = "json_parse_failure"
         return out

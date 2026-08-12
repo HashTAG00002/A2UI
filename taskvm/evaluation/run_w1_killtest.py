@@ -67,8 +67,14 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
                    model: str | None, temperature: float, sample_i: int,
                    mock: bool = False, with_screenshot: bool = False,
                    cost_model: CostModel | None = None,
-                   full_a2ui: bool = False) -> dict:
-    """Run one compiler sample end-to-end. Returns the result record."""
+                   full_a2ui: bool = False,
+                   vision: bool = False) -> dict:
+    """Run one compiler sample end-to-end. Returns the result record.
+
+    ``vision`` (EE.10, §7.1): when True, capture a screenshot per app + pass to
+    ``compile_binding`` so the compiler uses the screenshot+a11y vision path
+    (``complete_vision_json``) instead of text-only. Requires ``with_screenshot``
+    machinery (Playwright); forces ``with_screenshot=True``."""
     sid = f"{fixture.task_id}_s{sample_i}_{int(time.time()*1000) % 100000}"
     # reset (idempotent) + seed
     for ad in adapters.values():
@@ -76,11 +82,24 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
     replay.seed_apps(fixture, adapters, sid)
 
     # capture observations (read-path-GUI) + assert they match real state
-    obs = replay.capture_obs(adapters, sid, with_screenshot=with_screenshot)
+    # EE.10: vision forces screenshot capture (the compiler's image input)
+    obs = replay.capture_obs(adapters, sid, with_screenshot=(with_screenshot or vision))
     replay.assert_obs_matches_state(adapters, sid, obs)
     trace = TraceFixture(task_id=fixture.task_id, goal=fixture.goal, final_obs=obs)
     observed_ids = {app: set(replay.parse_dom_entities(o.dom_html).keys())
                     for app, o in obs.items()}
+
+    # EE.10: build the screenshots dict (app → data_url) for the vision path
+    screenshots = None
+    if vision:
+        screenshots = {}
+        for app, o in obs.items():
+            if o.screenshot_path:
+                screenshots[app] = _png_to_data_url(o.screenshot_path)
+        if not screenshots:
+            logger.warning(f"[killtest] vision=True but no screenshots captured "
+                           f"(Playwright unavailable?); falling back to text-only")
+            vision = False   # honest fallback
 
     # compile the binding (gate-critical model step) — or use GT in mock mode
     if mock:
@@ -88,7 +107,8 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
     else:
         compiled = compile_binding(trace, observed_ids, model=model,
                                    temperature=temperature, cost_model=cost_model,
-                                   binding_only=not full_a2ui)
+                                   binding_only=not full_a2ui,
+                                   screenshots=screenshots)
 
     raw = compiled.get("raw")
     parsed = compiled.get("parsed")
@@ -154,6 +174,7 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
         "sample": sample_i,
         "model": model or model_client.TASKVM_DEFAULT_MODEL,
         "mock": mock,
+        "vision": vision,   # EE.10: True iff the compiler used the screenshot+a11y path
         "compile_ok": compiled["ok"],
         "compile_error": compiled.get("error"),
         "binding_valid": valid,
@@ -237,6 +258,15 @@ def _to_task_binding(binding: dict, fixture: CanonicalTaskGraph) -> TaskBinding:
         })
     return TaskBinding(task_id=binding.get("task_id") or fixture.task_id,
                        variables=variables)
+
+
+def _png_to_data_url(path: str) -> str:
+    """EE.10: read a PNG file + return a base64 data URL (the format
+    ``complete_vision_json`` expects for ``image_url``)."""
+    import base64
+    with open(path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("ascii")
+    return f"data:image/png;base64,{b64}"
 
 
 def _mock_compiler_output(fixture: CanonicalTaskGraph,
@@ -352,6 +382,11 @@ def main(argv=None):
                         help="capture a screenshot per app (visual grounding; needs playwright)")
     parser.add_argument("--full-a2ui", action="store_true",
                         help="require a full A2UI surface (W1 default: binding-only, doc §10)")
+    parser.add_argument("--vision", action="store_true",
+                        help="EE.10 (§7.1): capture a screenshot per app + pass to the "
+                             "compiler so it uses complete_vision_json (screenshot+a11y) "
+                             "instead of text-only complete_json. Produces eval_results/"
+                             "w1_vision_<ts>.json for A/B vs the text path. Needs Playwright.")
     parser.add_argument("--execution-mode", choices=["api", "gui_agent"],
                         default="api",
                         help="E10 rework (P5): 'api' (legacy requests.post to the app's "
@@ -432,7 +467,8 @@ def main(argv=None):
             s = run_one_sample(fx, adapters, model=args.model,
                                temperature=args.temperature, sample_i=i,
                                mock=args.mock, with_screenshot=args.with_screenshot,
-                               cost_model=cost_model, full_a2ui=args.full_a2ui)
+                               cost_model=cost_model, full_a2ui=args.full_a2ui,
+                               vision=args.vision)
             logger.info(f"sample {i+1}: score={s['round_trip']['score']} "
                         f"binding_f1={s['binding_accuracy']['f1']} "
                         f"broke={s['which_link_broke']}")

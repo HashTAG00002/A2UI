@@ -339,5 +339,29 @@ def test_interaction_compression_baseline_model():
     assert b["total"] >= 4, "4-App task must compress ≥4x"
 
 
+# ── EE.10: compiler vision input path ───────────────────────────────────────
+def test_compiler_vision_signature():
+    """compile_binding accepts a screenshots param (EE.10 §7.1 screenshot+a11y
+    encoder); run_one_sample accepts a vision flag + _png_to_data_url works."""
+    import inspect
+    from taskvm.task_state.compiler import compile_binding
+    from taskvm.evaluation.run_w1_killtest import run_one_sample, _png_to_data_url
+    sig = inspect.signature(compile_binding)
+    assert "screenshots" in sig.parameters, "compile_binding must accept screenshots"
+    assert sig.parameters["screenshots"].default is None, "default None = text path"
+    sig2 = inspect.signature(run_one_sample)
+    assert "vision" in sig2.parameters, "run_one_sample must accept vision"
+    # _png_to_data_url: tiny PNG → data:image/png;base64,...
+    import tempfile, os
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 20
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        f.write(png); p = f.name
+    try:
+        url = _png_to_data_url(p)
+        assert url.startswith("data:image/png;base64,"), url[:40]
+    finally:
+        os.remove(p)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-x", "-q"])

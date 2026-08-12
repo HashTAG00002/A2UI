@@ -1479,3 +1479,25 @@ recon workflow（10 agent，529K tokens）发现 HANDOFF_E17.md 在未验证实�
 2. **TaskVM action 固定计 1**——一次 edit_field event。若用户多次编辑（改 release_date 后又改 design_review_date），TaskVM action = 编辑次数，compression 仍 ≥4x（每次都 fanout）。但跨 app 的多次编辑，baseline 也按次累计，模型不变。
 3. **gui_agent 模式下 TaskVM action 仍计 1**——用户侧仍是 1 次 edit；GUI executor 内部多步（~16 calls/op）不算 user action（是 agent 内部，用户不可见）。这是正确的：compression 衡量用户认知负载，不是 agent 内部步数。
 4. **只测 launch_full + release_reschedule**——design_review_delay（2 app 3 binding，同 release_reschedule 结构）+ doc_handoff（1 app 1 binding，compression = 1+3=4x 刚好过线）未单独跑。`--task` 参数支持，可补跑。
+
+### EE.10 — 编码器接入视觉截图（§7.1 screenshot+a11y encoder）
+
+**改了什么**（`compiler.py` + `run_w1_killtest.py` + 1 L0 测试）：
+1. `compiler.py::compile_binding(..., screenshots: dict[str, str] | None = None)`：screenshots 非空时走 `complete_vision_json(sys_prompt, user_prompt, first_app_screenshot, ...)`（§7.1 screenshot+a11y 路径），空时保持 `complete_json`（文本路径，向后兼容）。取第一个 app 的截图作图像输入（API 单图限制；所有 app 的 a11y/DOM 仍在文本 prompt 里）。输出 dict 新增 `vision: bool` 字段（透明记录用了哪条路径）。cost_model 的 tool tag 加 `:vision` 后缀区分。
+2. `run_w1_killtest.py`：加 `--vision` flag；`run_one_sample(..., vision=False)` 参数；vision=True 时 `capture_obs(with_screenshot=True)` 强制截图 + `_png_to_data_url` 转成 base64 data URL + 传给 `compile_binding(screenshots=...)`。Playwright 不可用时诚实 fallback 到 text-only（vision=False，warn log）。新增 `_png_to_data_url(path)` helper。返回 record 加 `vision` 字段。
+
+**证据**（live 1-sample vision run，`eval_results/w1_vision_20260812_*.json`）：
+- `vision: True` ✓（vision 路径真的被用了，非静默 fallback）
+- `compile_ok: True` ✓（complete_vision_json 成功）
+- `binding_f1: 1.0` ✓（模型从 screenshot+a11y 发现 binding）
+- `binding_valid: True` + `round_trip score: 1.0` ✓（vision-derived binding dispatch + verify 通过）
+- `which_link_broke: None` ✓（全链路无断点）
+- verdict=INCONCLUSIVE 是 1-sample 统计门槛（需 2/3），非失败——score=1.0 binding_f1=1.0 neg=0.3 是真实 PASS 数字
+- L0: 30 passed（29→30，新增 test_compiler_vision_signature）✓
+- chromium 截图环境同 EE.3（PLAYWRIGHT_BROWSERS_PATH + LD_LIBRARY_PATH=.chromelibs/lib）
+
+**已知局限（不美化）**：
+1. **只跑了 1 vision sample**（release_reschedule）——QPM 限流 + token 预算下未跑 3-sample 统计。要拿统计数字（binding_f1 mean ± variance）vs text path A/B，需 `--vision --samples 3` + 对比 `w1_text_*.json` vs `w1_vision_*.json`。本轮证明"vision 路径跑通 + 1 sample 1.0"，未做 text-vs-vision A/B 对比。
+2. **只取第一张截图**——`complete_vision_json` 是单图 API。多 app 任务（launch_full 4 app）只传第一个 app（calendar）的截图，其余 3 app 的状态靠 a11y/DOM 文本。要传多图需用 `complete_vision` 手动拼 content blocks（EE.6 grounding_backend 的双图路径示范了此模式，但 compiler 未做）。对单 app 任务（doc_handoff）无影响；对多 app 任务可能限制模型对非首 app 的视觉理解。
+3. **vision 模式仍走 api executor 写路径**——`--vision` 只改 compiler 的读路径（截图输入），不改 executor 的写路径（仍是 requests.post）。要 §12.16-compliant 的 vision+GUI 组合需 `--vision --execution-mode gui_agent`（compiler 用截图读 + executor 用 GUI 手势写）。本轮未跑此组合。
+4. **Playwright 截图是 headless 全页**——`_try_screenshot` 用 `page.screenshot(full_page=True)`，对长页面可能截到视口外内容。对当前 5 个 app 的简单列表页够用，但复杂页面可能需视口截图。
