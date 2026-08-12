@@ -552,5 +552,54 @@ def test_workflow_progress_pubsub_and_event():
     s.push_workflow_progress("no-such-sid", ev)
 
 
+# ── FF.6: checkpoint celebration trigger (confetti + milestone_reached) ──────
+def test_checkpoint_celebration_trigger():
+    """FF.6 §7.2: the celebration fires when the /<sid>/checkpoint + /<sid>/
+    adopt_milestone routes return ``milestone_reached: {id, name}`` (the JSON
+    caller path) OR redirect with ``?celebrate=<name>`` (the browser form flow,
+    which timeline.js reads + fires confetti + the badge). This test asserts
+    BOTH response shapes + that the celebrate assets are served (confetti.min.js
+    local, timeline.js defines celebrateCheckpoint)."""
+    import taskvm.workspace_ui.server as s
+    from taskvm.benchmark.fixtures import get_task
+    from taskvm.harness.state_adapter import make_adapters
+    JSON_HDR = {"Accept": "application/json"}
+    fixture = get_task("release_reschedule")
+    adapters = make_adapters(apps=["calendar", "taskboard"], host="localhost",
+                             executor="api")
+    sess = s.seed_session(fixture, adapters, host="localhost")
+    sid = sess.sid
+    client = s.app.test_client()
+    # 1. checkpoint JSON → checkpoint_reached + milestone_reached
+    r = client.post(f"/{sid}/checkpoint", data={"format": "json"}, headers=JSON_HDR)
+    d = r.get_json() or {}
+    assert d.get("checkpoint_reached") is True
+    assert isinstance(d.get("milestone_reached"), dict)
+    assert d["milestone_reached"].get("id") and d["milestone_reached"].get("name")
+    # 2. checkpoint HTML flow → 302 redirect with ?celebrate=<name>
+    r2 = client.post(f"/{sid}/checkpoint")
+    assert r2.status_code == 302
+    assert "celebrate=" in (r2.headers.get("Location") or "")
+    # 3. adopt_milestone → milestone_reached (if a suggestion exists)
+    sess.suggested_milestones = [{"id": "C1", "name": "会议+任务同步",
+                                   "description": "sync"}]
+    r3 = client.post(f"/{sid}/adopt_milestone", data={"milestone_id": "C1"},
+                     headers=JSON_HDR)
+    d3 = r3.get_json() or {}
+    assert d3.get("adopted") is True
+    assert d3.get("milestone_reached", {}).get("id") == "C1"
+    # 4. the celebrate assets are served + the page wires them
+    page = client.get(f"/{sid}").get_data(as_text=True)
+    assert "/static/confetti.min.js" in page   # local, no CDN
+    assert "/static/timeline.js" in page
+    # confetti.min.js is non-empty + defines window.confetti
+    cj = client.get("/static/confetti.min.js").get_data(as_text=True)
+    assert "window.confetti" in cj and "particleCount" in cj
+    tj = client.get("/static/timeline.js").get_data(as_text=True)
+    assert "celebrateCheckpoint" in tj and "confetti(" in tj
+    for ad in adapters.values():
+        ad.reset(sid)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-x", "-q"])
