@@ -232,5 +232,19 @@ def test_four_step_arc_apps_for_launch_full():
         f"launch_full should need 4 apps in order; got {apps}")
 
 
+# ── EE.4: substrate_invariance killtest ─────────────────────────────────────
+def test_substrate_invariance_importable():
+    """run_substrate_invariance_killtest importable + DEFAULT_PAIR is the
+    calendar vs outlook_cal reskin pair (the JVM-moment task pair)."""
+    from taskvm.evaluation.run_substrate_invariance_killtest import (
+        run_stack, genui_semantic_sim, main, DEFAULT_PAIR,
+        BINDING_F1_MAX_DIFF, ROUND_TRIP_MAX_DIFF)
+    assert DEFAULT_PAIR == ("release_reschedule", "outlook_release_reschedule")
+    assert BINDING_F1_MAX_DIFF == 0.2
+    assert ROUND_TRIP_MAX_DIFF == 0.15
+    for fn in (run_stack, genui_semantic_sim, main):
+        assert callable(fn)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-x", "-q"])

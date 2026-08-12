@@ -1339,3 +1339,25 @@ recon workflow（10 agent，529K tokens）发现 HANDOFF_E17.md 在未验证实�
 2. **默认（gui_agent）模式未 live 跑**——需 gpt-5.6-sol + QPM 间距（5 个写操作 ~90s spacing，E13 测过 16 calls/op）。live 跑会落盘 `four_step_arc_<ts>.json`（gui_agent mode），是 teaser figure 的最终物证。本轮未跑因 token 预算 + QPM 限流，留 final 阶段。
 3. **Step4 GenUI surface 对比是 slot 级非视觉级**——`surface_slots_match` 只比 var_id+field 结构（两边都有 release_date 字段），不比 HTML pixel。handoff 要求"slot 结构相同"即此。要做视觉对比需 EE.7 GenUI 默认 on 后截两边 GenUI 页面 LLM-judge。
 4. **Step3 partial_failure=False**——机械全成功（5/5 mutate 调用成功）。handoff 原设想 partial_failure=True 是基于初版 inject_task 的 404 bug。修正 inject 后机械成功，但 `external_changes_before_undo` 诚实记录了 T2 被外部改过——这是比 partial_failure 更精确的诚实信号。如需 partial_failure=True 的演示，可注入一个真正不可逆的操作（如 wechat send_message 的 409），但那会改变 Step1 任务，超出 launch_full 范围。
+
+### EE.4 — substrate_invariance killtest（JVM moment 量化，VM 性质 3）
+
+**改了什么**（新建 `taskvm/evaluation/run_substrate_invariance_killtest.py` + 1 L0 测试）：
+- 专用 killtest 量化"同 VM 操作跨 Stack A/B 的 binding_f1 + round_trip 等价 + 轨迹不同"。复用 `run_w1_killtest.run_one_sample` per stack（控制变量：唯一变量是 fixture+adapter set = substrate）。
+- Stack A=`release_reschedule`(calendar+taskboard, move_event) vs Stack B=`outlook_release_reschedule`(outlook_cal+taskboard, reschedule_appointment)。`--task-pair` 可配。
+- 指标：binding_f1_mean / round_trip_mean / apps_written / operators（trajectory_diff）/ genui_surface_semantic_sim（optional `--genui`，结构 var_id 匹配，LLM-judge deferred）。
+- `SUBSTRATE_INVARIANCE_PASS` = |binding_f1_diff|<0.2 AND |round_trip_diff|<0.15 AND trajectory_differs。
+- `--mock` 结构验证（GT binding→两边都 1.0→diff 0→PASS，验证 trajectory_differs 检测到 calendar≠outlook_cal）；默认 real compiler 模式（需模型）。
+
+**证据**（`eval_results/substrate_invariance_killtest_20260812_190017.json`，mock mode，1 sample/stack）：
+- **SUBSTRATE_INVARIANCE_PASS: True** ✓
+- Stack A: binding_f1=1.0 round_trip=1.0 apps=[calendar,taskboard] ops=[move_event,set_deadline]
+- Stack B: binding_f1=1.0 round_trip=1.0 apps=[outlook_cal,taskboard] ops=[reschedule_appointment,set_deadline]
+- binding_f1_diff=0.0 (<0.2) ✓ round_trip_diff=0.0 (<0.15) ✓ trajectory_differs=True ✓（calendar≠outlook_cal, move_event≠reschedule_appointment）
+- L0: 23 passed（22→23，新增 test_substrate_invariance_importable）✓
+
+**已知局限（不美化）**：
+1. **mock PASS 只验证结构 + trajectory_differs**——binding_f1/round_trip 两边都 1.0（GT binding + api path），diff=0 是 trivially 满足，**不证明模型 substrate-independence**。论文 Table 1 那行必须 `--mock off --samples 3` real compiler 跑（gpt-5.6-sol 在两个 substrate 上的 binding 发现 + GUI 写回成功率）。本轮未 live 跑（token 预算 + QPM），留 final 阶段。
+2. **genui_surface_semantic_sim 是结构匹配非 LLM-judge**——`structural_match` 比 var_id 集合（两边都有 release_date），不比 HTML/视觉。`llm_judge=False`。要做真 LLM-judge 需 EE.7 GenUI 默认 on 后截两边 GenUI 页面喂 gpt-5.6-sol 问"slot 语义是否一致"。handoff 允许 GenUI sim 为 Optional。
+3. **trajectory_differs 用 apps_written + operators 集合差**——Stack A/B 都有 taskboard+set_deadline（共同部分），但 calendar/outlook_cal + move_event/reschedule_appointment 不同 → differs=True。若两个 stack 的 app/op 集合完全相同（不该发生，因 substrate 不同），differs 会误判 False；当前 task pair 设计保证不同。
+4. **`run_stack` 的 fixture 解析用 task_id 前缀启发式**（`startswith("outlook_"/"send_"/"set_mail")` → ood_fixtures，否则 fixtures）——脆弱但覆盖当前 5 个 OOD task 前缀。新增 OOD task 若不以这些前缀开头会误走 builtin fixtures。
