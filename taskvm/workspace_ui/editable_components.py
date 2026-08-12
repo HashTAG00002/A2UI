@@ -217,6 +217,43 @@ def saga_undo_timeline_html(saga: dict) -> str:
     )
 
 
+def milestone_suggest_html(suggested: list[dict],
+                           adopted_ids: list[str]) -> str:
+    """FF.3 §4: render the LLM-suggested milestones as a "系统建议的里程碑"
+    block at the rw-zone top. Each suggestion has an 采纳 button (POST to
+    ``/<sid>/adopt_milestone``); adopted ones flip to a disabled ✓ state.
+
+    Returns "" when ``suggested`` is empty — the block simply doesn't render
+    (graceful degrade: if the LLM call failed at seed time, the user sees no
+    suggestion block; the session works normally — §13.3: "milestone 初始化 LLM
+    调用是建议，不是决定"). The milestone is a governance INTENT marker, NOT a
+    verifier criterion (the LLM produces no expected_diff)."""
+    if not suggested:
+        return ""
+    cards = []
+    for m in suggested:
+        mid = str(m.get("id", "") or "")
+        name = str(m.get("name", mid) or mid)
+        desc = str(m.get("description", "") or "")
+        if mid in adopted_ids:
+            cards.append(
+                f'<div class="milestone-card adopted">'
+                f'<span class="ms-id">{_esc(mid)}</span>'
+                f'<div class="ms-body"><div class="ms-name">{_esc(name)}</div>'
+                f'<div class="ms-desc">{_esc(desc)}</div></div>'
+                f'<button type="button" disabled>✓ 已采纳</button></div>')
+        else:
+            cards.append(
+                f'<form class="milestone-card" method="post" action="adopt_milestone">'
+                f'<span class="ms-id">{_esc(mid)}</span>'
+                f'<div class="ms-body"><div class="ms-name">{_esc(name)}</div>'
+                f'<div class="ms-desc">{_esc(desc)}</div></div>'
+                f'<input type="hidden" name="milestone_id" value="{_esc(mid)}">'
+                f'<button type="submit" class="ckpt">采纳</button></form>')
+    return (f'<div class="milestone-suggest"><h3>系统建议的里程碑 · 可采纳</h3>'
+            f'{"".join(cards)}</div>')
+
+
 def conflict_row_html(var_id: str, label: str, conflict: dict) -> str:
     """An AMBER conflict row for the read-only zone (W3 reconciliation, handoff
     §5 inv 4-5). Shows BOTH the projected value (Y, what the user is looking at)

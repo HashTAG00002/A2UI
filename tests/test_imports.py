@@ -407,5 +407,48 @@ def test_full_loop_killtest_importable():
     assert sm["full_loop_pass"], f"full_loop_pass False: {sm}"
 
 
+# ── FF.3: milestone suggestion (LLM at seed time + adopt_milestone route) ────
+def test_suggest_milestones_wiring_and_degrade():
+    """FF.3 §4: _suggest_milestones is callable, normalizes the LLM output to
+    {id,name,description}, AND graceful-degrades to [] on any failure (429/
+    timeout/parse). milestone_suggest_html renders the 采纳 button + adopted
+    ✓ state. The adopt_milestone route is registered."""
+    import taskvm.workspace_ui.server as s
+    from taskvm.workspace_ui.editable_components import milestone_suggest_html
+    # 1. fields on WorkspaceSession
+    assert "suggested_milestones" in s.WorkspaceSession.__dataclass_fields__
+    assert "adopted_milestones" in s.WorkspaceSession.__dataclass_fields__
+    # 2. route registered
+    assert any(r.rule.endswith("/<sid>/adopt_milestone")
+               for r in s.app.url_map.iter_rules())
+    # 3. graceful degrade: monkeypatch complete_json to raise → []
+    from taskvm.benchmark import model_client
+    orig = model_client.complete_json
+    model_client.complete_json = lambda *a, **k: (_ for _ in ()).throw(
+        RuntimeError("simulated 429"))
+    try:
+        out = s._suggest_milestones("some goal")
+        assert out == [], f"graceful degrade must return [] on failure; got {out}"
+    finally:
+        model_client.complete_json = orig
+    # 4. normal path: LLM returns a list → normalized
+    model_client.complete_json = lambda *a, **k: (
+        [{"id": "C1", "name": "会议定", "description": "会议+任务同步"}], "", None)
+    try:
+        out = s._suggest_milestones("发布准备")
+        assert out and out[0]["id"] == "C1" and out[0]["name"] == "会议定"
+    finally:
+        model_client.complete_json = orig
+    # 5. HTML: 采纳 button + adopted ✓ state
+    html = milestone_suggest_html(
+        [{"id": "C1", "name": "会议定", "description": "同步"}], adopted_ids=[])
+    assert 'action="adopt_milestone"' in html
+    assert 'name="milestone_id" value="C1"' in html
+    html_adopted = milestone_suggest_html(
+        [{"id": "C1", "name": "会议定", "description": "同步"}], adopted_ids=["C1"])
+    assert "已采纳" in html_adopted and "disabled" in html_adopted
+    assert milestone_suggest_html([], []) == ""   # graceful: no render
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-x", "-q"])

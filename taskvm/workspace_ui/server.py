@@ -50,7 +50,8 @@ from taskvm.harness.state_adapter import StateAdapter, make_adapters
 from taskvm.task_state.entity_binding import TaskBinding
 from taskvm.workspace_ui.editable_components import (
     checkpoint_button_html, conflict_row_html, editable_field_html,
-    readonly_card_html, saga_undo_timeline_html, undo_button_html)
+    milestone_suggest_html, readonly_card_html, saga_undo_timeline_html,
+    undo_button_html)
 from taskvm.workspace_ui.live_sync import (canonical_snapshot, project_readonly,
                                             resync_with_conflicts, resync_values)
 # Task5 (E10 rework): the GenUI decoder is now wired into the live render path.
@@ -171,6 +172,13 @@ class WorkspaceSession:
     # milestone for the celebrate badge by mapping the checkpoint count to
     # this list (C1/C2/…). Empty for tasks with no predefined milestones.
     task_milestones: list = field(default_factory=list)
+    # FF.3 §4: LLM-suggested milestones at seed time (governance start point).
+    # Each is {id, name, description}. The user ADOPTS zero or more via the
+    # /<sid>/adopt_milestone route → id moves to adopted_milestones. Honest
+    # degrade: if the LLM call fails (429/timeout), this stays [] (the rw-zone
+    # just doesn't show the suggestion block — session works normally).
+    suggested_milestones: list[dict] = field(default_factory=list)
+    adopted_milestones: list[str] = field(default_factory=list)
 
 
 user_sessions: dict[str, WorkspaceSession] = {}
@@ -202,6 +210,7 @@ _PAGE_TPL = """\
       </section>
       <section class="zone rw">
         <h2>可读可写区 · governance (edit / undo / checkpoint)</h2>
+        {{ milestone_html | safe }}
         {{ notice_html | safe }}
         {{ saga_html | safe }}
         {{ rw_fields_html | safe }}
@@ -419,12 +428,72 @@ def render_two_zone_html(sess: WorkspaceSession) -> str:
     saga_html = ""
     if sess.last_undo_saga is not None:
         saga_html = saga_undo_timeline_html(sess.last_undo_saga.to_dict())
+    # FF.3 §4: render the LLM-suggested milestones at the rw-zone top. Empty
+    # string when there are no suggestions (graceful degrade — the block just
+    # doesn't appear; session works normally).
+    milestone_html = milestone_suggest_html(
+        sess.suggested_milestones, sess.adopted_milestones)
     return render_template_string(
         _PAGE_TPL, sid=sess.sid, task_id=sess.task_id, ro_html=ro_html,
         rw_fields_html=rw_fields_html, undo_html=undo_html,
         checkpoint_html=checkpoint_html, n_log=len(sess.rollback_log.records),
         n_ckpt=len(sess.checkpoints), notice_html=notice_html,
-        saga_html=saga_html, sim_url=SIM_URL)
+        saga_html=saga_html, milestone_html=milestone_html, sim_url=SIM_URL)
+
+
+def _suggest_milestones(goal: str, n: int = 3) -> list[dict]:
+    """FF.3 §4.1: call the LLM ONCE at seed time to suggest N governance
+    milestones for the task goal. Returns a list of {id, name, description}.
+    Honest degrade: ANY failure (429/timeout/parse) → [] (the rw-zone simply
+    doesn't render the suggestion block; the session works normally).
+
+    Deviation from §4.1's ``temperature=0.3``: gpt-5.6-sol (the default model,
+    大纲附录 B.2) is a reasoning model that rejects non-default temperature
+    (same lesson as W1/EE — memory taskvm-env-and-proxy-gotchas). Passing 0.3
+    would 400 → graceful-degrade to [] every time. We pass ``temperature=None``
+    (the reasoning-model-safe default) so the suggestion actually returns. The
+    prompt + repair_retries=2 are otherwise exactly §4.1."""
+    from taskvm.benchmark.model_client import complete_json
+    system = (
+        "你是 TaskVM 的 governance 规划助手。给定一个跨多个应用的任务目标，"
+        "建议 2-3 个有意义的里程碑 checkpoint，每个 checkpoint 代表任务推进到某个"
+        "可以暂停/回退的中间状态。格式：JSON 数组，每项包含 id(C1/C2/C3)、"
+        "name(简短中文名)、description(一句话描述达到这个 checkpoint 时的状态)。"
+        "不要超过 3 个 checkpoint。不要解释，直接输出 JSON。"
+    )
+    user = f"任务目标：{goal}"
+    try:
+        parsed, raw, _resp = complete_json(
+            system=system, user=user, max_tokens=400, temperature=None,
+            model=None, repair_retries=2)
+    except Exception as e:
+        logger.warning("[suggest_milestones] LLM call failed (%s); "
+                       "graceful-degrading to []", e)
+        return []
+    # complete_json returns the FIRST balanced {...} object as `parsed` (here a
+    # single milestone dict, NOT the array). The model emits a JSON ARRAY of
+    # milestones → parse the raw text directly to get all of them (same pattern
+    # as genui_decoder._parse_jsonl handling a JSONL stream).
+    import json as _json
+    arr = None
+    try:
+        arr = _json.loads(raw) if raw else None
+    except Exception:
+        arr = None
+    if not isinstance(arr, list):
+        arr = parsed if isinstance(parsed, list) else (
+            parsed.get("checkpoints") if (isinstance(parsed, dict)
+                and isinstance(parsed.get("checkpoints"), list)) else None)
+    if not isinstance(arr, list):
+        return []
+    out = []
+    for i, m in enumerate(arr[:n]):
+        if isinstance(m, dict):
+            mid = m.get("id") or f"C{i+1}"
+            out.append({"id": str(mid),
+                        "name": str(m.get("name") or m.get("description") or mid),
+                        "description": str(m.get("description") or "")})
+    return out
 
 
 # ── mock binding (W2 gate / visual mode) ─────────────────────────────────────
@@ -516,13 +585,29 @@ def health():
 @app.route("/seed", methods=["POST"])
 def seed_route():
     """Seed a fresh session for the configured task. Body: {"task_id": "..."}.
-    MobileGym task ids (e.g. ``top3_expense_to_wechat``) route to the bridge."""
+    MobileGym task ids (e.g. ``top3_expense_to_wechat``) route to the bridge.
+
+    FF.3 §4: when ``suggest_milestones`` is true (default), call the LLM once
+    at seed time to suggest N governance milestones → sess.suggested_milestones.
+    The rw-zone renders them as "系统建议的里程碑" cards with an 采纳 button
+    (POST /<sid>/adopt_milestone). Honest degrade: a 429/timeout → [] (the
+    block just doesn't render). JSON callers (Accept: application/json) get
+    {sid, task_id, suggested_milestones} back; HTML callers redirect to /<sid>.
+    """
     data = request.get_json(silent=True) or {}
     task_id = data.get("task_id") or "doc_handoff"
     host = data.get("host", "localhost")
     executor = data.get("executor", "gui_agent")   # EE.1: default gui_agent
+    suggest = data.get("suggest_milestones", True)
     fixture, adapters = _get_fixture_and_adapters(task_id, host, executor=executor)
     sess = seed_session(fixture, adapters, host=host)
+    if suggest:
+        sess.suggested_milestones = _suggest_milestones(fixture.goal)
+        logger.info(f"[workspace_ui] suggested {len(sess.suggested_milestones)} "
+                    f"milestone(s) for sid={sess.sid}")
+    if _wants_json():
+        return jsonify({"ok": True, "sid": sess.sid, "task_id": sess.task_id,
+                        "suggested_milestones": sess.suggested_milestones})
     return redirect(f"/{sess.sid}")
 
 
@@ -720,6 +805,43 @@ def checkpoint(sid: str):
         return jsonify({
             "ok": True, "sid": sid, "checkpoint_index": n,
             "checkpoint_reached": True, "milestone_reached": milestone_reached,
+        })
+    from urllib.parse import quote
+    return redirect(f"/{sid}?celebrate={quote(ms_name)}")
+
+
+@app.route("/<sid>/adopt_milestone", methods=["POST"])
+def adopt_milestone(sid: str):
+    """FF.3 §4.1: adopt one LLM-suggested milestone → move its id to
+    ``sess.adopted_milestones`` (the rw-zone card flips to ✓ adopted). The
+    milestone is a governance INTENT marker (the user intends to reach this
+    state) — NOT a verifier criterion (the LLM doesn't produce expected_diff;
+    §13.3: "milestone 初始化 LLM 调用是建议，不是决定"). FF.6: the response
+    carries ``milestone_reached`` so the celebrate badge fires on adoption too.
+    """
+    sess = user_sessions.get(sid)
+    if sess is None:
+        return ("session not found", 404)
+    # accept milestone_id from JSON body OR form data
+    if request.is_json:
+        milestone_id = (request.get_json(silent=True) or {}).get("milestone_id")
+    else:
+        milestone_id = request.form.get("milestone_id")
+    if not milestone_id:
+        return ("milestone_id required", 400)
+    found = next((m for m in sess.suggested_milestones
+                 if m.get("id") == milestone_id), None)
+    if found is None:
+        return (f"no suggested milestone with id={milestone_id}", 404)
+    if milestone_id not in sess.adopted_milestones:
+        sess.adopted_milestones.append(milestone_id)
+    ms_name = found.get("name") or milestone_id
+    logger.info(f"[workspace_ui] adopted milestone {milestone_id} ({ms_name}) "
+                f"for sid={sid}")
+    if _wants_json():
+        return jsonify({
+            "ok": True, "sid": sid, "milestone_id": milestone_id,
+            "adopted": True, "milestone_reached": {"id": milestone_id, "name": ms_name},
         })
     from urllib.parse import quote
     return redirect(f"/{sid}?celebrate={quote(ms_name)}")
