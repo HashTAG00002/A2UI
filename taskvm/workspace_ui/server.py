@@ -51,7 +51,7 @@ from taskvm.task_state.entity_binding import TaskBinding
 from taskvm.workspace_ui.editable_components import (
     checkpoint_button_html, conflict_row_html, editable_field_html,
     milestone_suggest_html, readonly_card_html, saga_undo_timeline_html,
-    undo_button_html)
+    undo_button_html, workflow_controls_html)
 from taskvm.workspace_ui.live_sync import (canonical_snapshot, project_readonly,
                                             resync_with_conflicts, resync_values)
 # Task5 (E10 rework): the GenUI decoder is now wired into the live render path.
@@ -214,6 +214,16 @@ class WorkspaceSession:
     # just doesn't show the suggestion block — session works normally).
     suggested_milestones: list[dict] = field(default_factory=list)
     adopted_milestones: list[str] = field(default_factory=list)
+    # GG.5: workflow runtime closed loop. The seeded WorkflowPlan (from
+    # interpret_as_workflow at seed time), the autonomous-execution result, the
+    # pause flag (checked at node boundaries — never mid-gesture), and the
+    # checkpoint→saga map (which saga was active when each checkpoint was
+    # recorded, so rollback_to C_k can resolve "undo sagas after C_k").
+    workflow_plan: Any = None   # WorkflowPlan | None (Any to avoid import cycle)
+    workflow_result: Any = None  # WorkflowResult | None
+    paused: bool = False
+    checkpoint_saga_map: list[tuple[str, str]] = field(default_factory=list)
+    workflow_thread: Any = None  # the background daemon thread (None = not running)
 
 
 user_sessions: dict[str, WorkspaceSession] = {}
@@ -253,6 +263,7 @@ _PAGE_TPL = """\
         {{ milestone_html | safe }}
         {{ notice_html | safe }}
         {{ saga_html | safe }}
+        {{ workflow_html | safe }}
         {{ rw_fields_html | safe }}
         <div class="actions">
           {{ undo_html | safe }}
@@ -446,6 +457,8 @@ def render_two_zone_html(sess: WorkspaceSession) -> str:
     undo_html = "".join(undo_button_html(a) for a in apps_with_logs) or \
         '<span class="meta">no writes to undo yet</span>'
     checkpoint_html = checkpoint_button_html()
+    # GG.5: workflow runtime controls (start/pause + checkpoint-timeline drag)
+    workflow_html = workflow_controls_html(sess)
     notice_html = ""
     if sess.last_dispatch:
         d = sess.last_dispatch
@@ -485,7 +498,8 @@ def render_two_zone_html(sess: WorkspaceSession) -> str:
         rw_fields_html=rw_fields_html, undo_html=undo_html,
         checkpoint_html=checkpoint_html, n_log=len(sess.rollback_log.records),
         n_ckpt=len(sess.checkpoints), notice_html=notice_html,
-        saga_html=saga_html, milestone_html=milestone_html, sim_url=SIM_URL)
+        saga_html=saga_html, milestone_html=milestone_html, sim_url=SIM_URL,
+        workflow_html=workflow_html)
 
 
 def _suggest_milestones(goal: str, n: int = 3) -> list[dict]:
@@ -574,6 +588,34 @@ def seed_session(fixture, adapters: dict[str, StateAdapter],
     # FF.1 §2.2 D / FF.6: surface the task's predefined milestones so the
     # /<sid>/checkpoint route can name a celebrate badge (C1/C2/…).
     sess.task_milestones = list(getattr(fixture, "checkpoints", []) or [])
+    # GG.5: build the WorkflowPlan at seed time (deterministic classification —
+    # Sequential/Parallel/Loop — from the task's event sequence via
+    # interpret_as_workflow). The plan drives the autonomous /start execution.
+    # Honest degrade: if plan building fails, workflow_plan stays None (the
+    # session still works for manual /edit; /start will honest-fail).
+    try:
+        from taskvm.governance import (make_scripted_driver, GovernanceInterpreter,
+                                       VMStateSnapshot)
+        from taskvm.governance.scripted_driver import _build_minimal_binding
+        drv = make_scripted_driver(fixture.task_id)
+        binding = _build_minimal_binding(drv.task)
+        vm = VMStateSnapshot(sid=sid, binding=binding, adapters=adapters,
+                             rollback_log=sess.rollback_log,
+                             checkpoints=drv.task.checkpoints)
+        events = []
+        while True:
+            ev = drv.next_event()
+            if ev is None:
+                break
+            events.append(ev)
+        interp = GovernanceInterpreter(enable_llm_rollback_nl=False)
+        sess.workflow_plan = interp.interpret_as_workflow(events, vm, task=drv.task)
+        logger.info(f"[workspace_ui] workflow_plan: type={sess.workflow_plan.workflow_type} "
+                    f"nodes={len(sess.workflow_plan.nodes)}")
+    except Exception as e:
+        logger.warning(f"[workspace_ui] workflow_plan build failed ({e}); "
+                       f"/start will honest-fail")
+        sess.workflow_plan = None
     user_sessions[sid] = sess
     logger.info(f"[workspace_ui] seeded sid={sid} task={fixture.task_id}")
     return sess
@@ -913,7 +955,18 @@ def checkpoint(sid: str):
     ms_id = getattr(ms, "id", None) or f"C{n}"
     ms_name = getattr(ms, "description", None) or f"checkpoint {n}"
     milestone_reached = {"id": ms_id, "name": ms_name}
-    logger.info(f"[workspace_ui] checkpoint #{n} for sid={sid} (milestone={ms_id})")
+    # GG.5: record which saga was active when this checkpoint was taken, so
+    # /rollback_to C_k can resolve "undo all sagas after C_k" via
+    # VMStateSnapshot.sagas_after_checkpoint. latest_saga_id() = the most
+    # recently dispatched saga (None if no writes yet — C0 case).
+    latest_saga = None
+    try:
+        latest_saga = sess.rollback_log.latest_saga_id()
+    except Exception:
+        pass
+    sess.checkpoint_saga_map.append((ms_id, latest_saga))
+    logger.info(f"[workspace_ui] checkpoint #{n} for sid={sid} (milestone={ms_id}, "
+                f"active_saga={latest_saga})")
     if _wants_json():
         return jsonify({
             "ok": True, "sid": sid, "checkpoint_index": n,
@@ -921,6 +974,167 @@ def checkpoint(sid: str):
         })
     from urllib.parse import quote
     return redirect(f"/{sid}?celebrate={quote(ms_name)}")
+
+
+# ── GG.5: workflow runtime closed loop (start / pause / rollback_to) ─────────
+@app.route("/<sid>/start", methods=["POST"])
+def start_workflow(sid: str):
+    """GG.5: launch the seeded WorkflowPlan in a BACKGROUND daemon thread —
+    autonomous execution that auto-advances nodes without stopping, streaming
+    ``workflow_progress`` SSE events (drained by /poll → workflow_anim.js).
+    ``pause_check`` reads ``sess.paused`` at each node boundary (never
+    mid-gesture). On completion or pause, stores ``sess.workflow_result`` +
+    pushes a ``workflow_complete`` event. Honest-fail if no plan or already
+    running."""
+    sess = user_sessions.get(sid)
+    if sess is None:
+        return ("session not found", 404)
+    if sess.workflow_plan is None:
+        return jsonify({"ok": False, "error": "no workflow_plan (seed failed to build one)"}), 400
+    if sess.workflow_thread is not None and sess.workflow_thread.is_alive():
+        return jsonify({"ok": False, "error": "workflow already running"}), 409
+    sess.paused = False
+    sess.workflow_result = None
+    from taskvm.execution.workflow_executor import WorkflowExecutor
+
+    def _on_node_complete(i, node_result):
+        # push a workflow_progress SSE event for each node completion
+        plan = sess.workflow_plan
+        node = plan.nodes[i] if i < len(plan.nodes) else None
+        ntype = (node.node_type.value if node else "sequential")
+        # build lanes from the node_result's subgoal_results
+        lanes = []
+        for j, sr in enumerate((node_result.subgoal_results or [])):
+            app = (sr.subgoal.patch_ops[0].app if sr.subgoal and sr.subgoal.patch_ops else f"lane{j}")
+            lanes.append({"app": app, "status": "done" if sr.pass_ else "locked"})
+        push_workflow_progress(sid, _wf_progress_event(ntype, lanes, "done"))
+
+    def _on_subgoal_complete(sr):
+        # the executor calls on_subgoal_complete as (SubgoalResult,) — a per-
+        # subgoal "running" hint pushed for live lane progress (best-effort).
+        try:
+            app = (sr.subgoal.patch_ops[0].app if sr.subgoal and sr.subgoal.patch_ops else "lane")
+            push_workflow_progress(sid, _wf_progress_event(
+                sess.workflow_plan.workflow_type,
+                [{"app": app, "status": "running"}], "waiting"))
+        except Exception as e:
+            logger.warning("[workflow] on_subgoal_complete push: %s", e)
+
+    def _run():
+        try:
+            ex = WorkflowExecutor()
+            result = ex.execute(
+                sess.workflow_plan, sess.adapters, sid,
+                rollback_log=sess.rollback_log,
+                on_node_complete=_on_node_complete,
+                on_subgoal_complete=_on_subgoal_complete,
+                pause_check=lambda: sess.paused)
+            sess.workflow_result = result
+            push_workflow_progress(sid, {"event": "workflow_complete",
+                "paused": result.paused, "overall_pass": result.overall_pass,
+                "stopped_at_node": result.stopped_at_node,
+                "n_nodes": len(result.nodes)})
+            logger.info(f"[workflow] sid={sid} done: paused={result.paused} "
+                        f"pass={result.overall_pass} stopped_at={result.stopped_at_node}")
+        except Exception as e:
+            logger.exception(f"[workflow] sid={sid} execution failed")
+            push_workflow_progress(sid, {"event": "workflow_complete",
+                "error": str(e), "paused": False, "overall_pass": False})
+
+    import threading
+    t = threading.Thread(target=_run, daemon=True)
+    sess.workflow_thread = t
+    t.start()
+    return jsonify({"ok": True, "sid": sid, "started": True,
+                    "plan_type": sess.workflow_plan.workflow_type,
+                    "n_nodes": len(sess.workflow_plan.nodes)})
+
+
+@app.route("/<sid>/pause", methods=["POST"])
+def pause_workflow(sid: str):
+    """GG.5: request a pause. Sets ``sess.paused = True`` — the background
+    driver's ``pause_check`` reads it at the next NODE boundary and stops
+    (does NOT kill the in-flight GUI gesture — that's the honest boundary).
+    Returns immediately; the actual stop happens after the current node."""
+    sess = user_sessions.get(sid)
+    if sess is None:
+        return ("session not found", 404)
+    sess.paused = True
+    logger.info(f"[workflow] sid={sid} pause requested (stops at next node boundary)")
+    return jsonify({"ok": True, "sid": sid, "paused": True})
+
+
+@app.route("/<sid>/rollback_to", methods=["POST"])
+def rollback_to(sid: str):
+    """GG.5: drag-rollback to a checkpoint. Takes ``target_checkpoint_id`` (a
+    milestone id like C1/C2). Resolves ``sagas_after_checkpoint(target_cp)`` via
+    the session's checkpoint_saga_map, then undoes each saga in LIFO order via
+    ``undo_saga`` (real GUI rollback — the compensation drives the app's own
+    write surface). Aggregates the SagaResults into one rollback outcome; an
+    irreversible saga (e.g. wechat send_message → 409) leaves that step 🔒
+    locked — the checkpoint刻度 stays locked/red (the honest 409). Updates
+    ``sess.last_undo_saga`` so saga_undo_timeline_html renders the outcome."""
+    sess = user_sessions.get(sid)
+    if sess is None:
+        return ("session not found", 404)
+    data = (request.get_json(silent=True) if request.is_json
+            else request.form) or {}
+    target_cp = data.get("target_checkpoint_id")
+    if not target_cp:
+        return jsonify({"ok": False, "error": "target_checkpoint_id required"}), 400
+    # build a VMStateSnapshot to resolve sagas_after_checkpoint
+    from taskvm.governance import VMStateSnapshot
+    vm = VMStateSnapshot(sid=sid, binding=sess.binding, adapters=sess.adapters,
+                         rollback_log=sess.rollback_log, checkpoints=sess.task_milestones,
+                         checkpoint_saga_map=sess.checkpoint_saga_map)
+    try:
+        saga_ids = vm.sagas_after_checkpoint(target_cp)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"cannot resolve target checkpoint: {e}"}), 400
+    if not saga_ids:
+        return jsonify({"ok": True, "sid": sid, "target_checkpoint_id": target_cp,
+                        "n_sagas": 0, "message": "no sagas to undo after this checkpoint"})
+    # undo each saga LIFO (sagas_after_checkpoint already returns LIFO order)
+    outcomes = []
+    n_reverted, n_targets, n_locked = 0, 0, 0
+    agg_steps = []   # aggregate SagaStepResult list across all undone sagas
+    for saga_id in saga_ids:
+        try:
+            result = sess.rollback_log.undo_saga(saga_id, sid, sess.adapters)
+            outcomes.append({"saga_id": saga_id, "n_reverted": result.n_reverted,
+                             "n_targets": result.n_targets,
+                             "partial_failure": result.partial_failure,
+                             "fully_reverted": result.fully_reverted})
+            n_reverted += result.n_reverted
+            n_targets += result.n_targets
+            agg_steps.extend(result.steps or [])
+            n_locked += sum(1 for s in (result.steps or []) if not s.reverted)
+        except Exception as e:
+            outcomes.append({"saga_id": saga_id, "error": str(e),
+                             "partial_failure": True, "fully_reverted": False})
+            n_locked += 1
+    # surface the aggregate as last_undo_saga (reuse saga_undo_timeline_html)
+    from taskvm.execution.rollback import SagaResult
+    agg = SagaResult(saga_id=f"rollback_to_{target_cp}", n_targets=n_targets,
+                     n_reverted=n_reverted,
+                     fully_reverted=(n_locked == 0 and n_targets > 0),
+                     partial_failure=(n_locked > 0),
+                     errors=[o.get("error") for o in outcomes if o.get("error")],
+                     steps=agg_steps)
+    sess.last_undo_saga = agg
+    sess.last_undo = {"target_checkpoint_id": target_cp, "n_sagas": len(saga_ids),
+                      "n_reverted": n_reverted, "n_targets": n_targets,
+                      "n_locked": n_locked, "outcomes": outcomes}
+    logger.info(f"[workflow] rollback_to {target_cp} sid={sid}: {len(saga_ids)} sagas, "
+                f"{n_reverted}/{n_targets} reverted, {n_locked} locked")
+    if _wants_json():
+        return jsonify({"ok": True, "sid": sid, "target_checkpoint_id": target_cp,
+                        "n_sagas": len(saga_ids), "n_reverted": n_reverted,
+                        "n_targets": n_targets, "n_locked": n_locked,
+                        "fully_reverted": agg.fully_reverted,
+                        "partial_failure": agg.partial_failure, "outcomes": outcomes})
+    from urllib.parse import quote
+    return redirect(f"/{sid}?rollback={quote(target_cp)}")
 
 
 @app.route("/<sid>/adopt_milestone", methods=["POST"])

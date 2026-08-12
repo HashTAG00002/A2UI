@@ -49,15 +49,20 @@ def readonly_card_html(app: str, entities: dict[str, dict[str, Any]],
     # GG: the visible identity of each row is its screen-visible title (the
     # TITLE_FIELD value — title/name/subject/...), NOT the internal entity_id.
     # data-entity carries the title (CSS-animation target; no JS reads it). The
-    # changed set is (app, entity_id, field) tuples computed server-side
-    # (control-plane) — kept as-is for matching, never rendered.
-    from taskvm.governance.translate import TITLE_FIELD
+    # id_field (eid/tid/fid/mid/aid — the entity_id key) is SKIPPED: it's the
+    # primary key, not a screen-visible field (a real app never shows a "FID"
+    # column). The changed set is (app, entity_id, field) tuples computed
+    # server-side (control-plane) — kept as-is for matching, never rendered.
+    from taskvm.governance.translate import TITLE_FIELD, ID_FIELD
     title_field = TITLE_FIELD.get(app)
+    id_field = ID_FIELD.get(app)
     rows = []
     for eid, fields in entities.items():
         visible_title = (fields.get(title_field) if title_field else None) or eid
         parts = []
         for k, v in fields.items():
+            if id_field and k == id_field:
+                continue   # GG: skip the entity_id key field (not screen-visible)
             is_changed = changed is not None and (app, eid, k) in changed
             cls = "ro-value changed" if is_changed else "ro-value"
             parts.append(
@@ -103,6 +108,49 @@ def checkpoint_button_html() -> str:
     snapshot + a count; full checkpoint-restore is W3."""
     return '<form class="rw-ckpt" method="post" action="checkpoint">' \
            '<button type="submit" class="ckpt">⚑ checkpoint</button></form>'
+
+
+def workflow_controls_html(sess) -> str:
+    """GG.5: the workflow runtime controls — autonomous start + pause buttons +
+    the checkpoint-timeline (drag a checkpoint刻度 to rollback_to it). The
+    checkpoint list comes from ``sess.checkpoint_saga_map`` (populated by
+    /checkpoint); each刻度 is a milestone id (C1/C2… — user-visible governance
+    concept, NOT an internal entity_id/saga_id). Dragging fires
+    ``POST /<sid>/rollback_to`` (timeline.js wires the drag handler). An
+    irreversible saga in the span → the刻度 gets class="locked" + the 🔒 marker
+    (timeline.js snap-stop + shake). The start/pause buttons post to /start +
+    /pause; the workflow_anim.js SSE render shows live node progress."""
+    cps = getattr(sess, "checkpoint_saga_map", []) or []
+    if not cps:
+        ticks = '<span class="muted">no checkpoints yet — click ⚑ checkpoint to mark one</span>'
+    else:
+        ticks = "".join(
+            f'<span class="cp-tick" data-cp="{_esc(cp_id)}" draggable="true" '
+            f'tabindex="0" title="拖到此处回退到 {_esc(cp_id)}">{_esc(cp_id)}</span>'
+            for cp_id, _saga in cps)
+    paused = getattr(sess, "paused", False)
+    running = (sess.workflow_thread is not None and sess.workflow_thread.is_alive())
+    plan_type = getattr(sess.workflow_plan, "workflow_type", "?") if sess.workflow_plan else "—"
+    n_nodes = len(sess.workflow_plan.nodes) if sess.workflow_plan else 0
+    return (
+        f'<div class="wf-controls" data-plan-type="{_esc(plan_type)}" '
+        f'data-running="{1 if running else 0}" data-paused="{1 if paused else 0}">'
+        f'  <div class="wf-head">工作流 · {_esc(plan_type)} · {n_nodes} 节点'
+        f'    <span class="wf-state">{"运行中" if running else ("已暂停" if paused else "就绪")}</span>'
+        f'  </div>'
+        f'  <div class="wf-buttons">'
+        f'    <form class="inline" method="post" action="start">'
+        f'      <button type="submit" class="wf-start"{" disabled" if running else ""}>▶ 开始自治执行</button>'
+        f'    </form>'
+        f'    <form class="inline" method="post" action="pause">'
+        f'      <button type="submit" class="wf-pause"{" disabled" if not running else ""}>⏸ 暂停</button>'
+        f'    </form>'
+        f'  </div>'
+        f'  <div class="cp-timeline" role="slider" aria-label="checkpoint rollback timeline">'
+        f'    {ticks}'
+        f'  </div>'
+        f'  <div class="cp-hint">拖动刻度回退到该 checkpoint（不可逆步骤 🔒 拖不回）</div>'
+        f'</div>')
 
 
 def _short_reason(err: str) -> str:

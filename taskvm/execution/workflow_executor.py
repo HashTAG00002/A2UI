@@ -76,12 +76,20 @@ class NodeResult:
 class WorkflowResult:
     nodes: list[NodeResult] = field(default_factory=list)
     overall_pass: bool = False
+    # GG.5: pause-at-node-boundary. When pause_check returns True between nodes,
+    # execute stops after the current node completes (NEVER mid-gesture — the
+    # check is at the top of the for-node loop, so an in-flight GUI gesture
+    # finishes). paused=True + stopped_at_node=N records where it stopped.
+    paused: bool = False
+    stopped_at_node: int | None = None
 
     def to_dict(self) -> dict:
         return {
             "nodes": [n.to_dict() for n in self.nodes],
             "overall_pass": self.overall_pass,
             "n_nodes": len(self.nodes),
+            "paused": self.paused,
+            "stopped_at_node": self.stopped_at_node,
         }
 
 
@@ -124,14 +132,29 @@ class WorkflowExecutor:
                 rollback_log=None,
                 on_node_complete: Callable[[int, NodeResult], None] | None = None,
                 on_subgoal_complete: Callable[[int, SubgoalResult, WorkflowNode], None] | None = None,
+                pause_check: Callable[[], bool] | None = None,
                 ) -> WorkflowResult:
         """Walk ``plan.nodes``; dispatch each node's subgoals. ``on_node_complete``
         fires after each node (the SSE workflow_progress barrier-update hook);
         ``on_subgoal_complete`` fires after each subgoal (per-lane real-time
         progress — FF.5 §6.3). Both are best-effort (errors logged, never
-        abort the execution)."""
+        abort the execution).
+
+        GG.5 ``pause_check``: if supplied, called at the TOP of each node
+        iteration (between nodes — never mid-gesture). If it returns True, the
+        loop breaks after recording ``stopped_at_node=i`` + ``paused=True``.
+        This enforces "pause stops after the current node, doesn't kill the
+        in-flight GUI gesture" (the honest boundary — gui_act_async has no
+        cancel token, so pause must be at the node boundary)."""
         results: list[NodeResult] = []
+        paused = False
+        stopped_at = None
         for i, node in enumerate(plan.nodes):
+            if pause_check is not None and pause_check():
+                paused = True
+                stopped_at = i
+                logger.info("[workflow] paused at node %d (before executing it)", i)
+                break
             if node.node_type == WorkflowNodeType.SEQUENTIAL:
                 r = self._exec_sequential(node, adapters, sid, rollback_log,
                                           on_subgoal_complete)
@@ -148,8 +171,9 @@ class WorkflowExecutor:
             if on_node_complete is not None:
                 try: on_node_complete(i, r)
                 except Exception as e: logger.warning("[workflow] on_node_complete: %s", e)
-        return WorkflowResult(nodes=results,
-                               overall_pass=bool(results) and all(r.pass_ for r in results))
+        overall = bool(results) and all(r.pass_ for r in results) and not paused
+        return WorkflowResult(nodes=results, overall_pass=overall,
+                               paused=paused, stopped_at_node=stopped_at)
 
     # ── per-subgoal dispatch + E11 verify ─────────────────────────────────
     def _exec_one_subgoal(self, sg: SubgoalInstruction, adapters: dict,

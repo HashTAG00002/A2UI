@@ -190,6 +190,56 @@
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", function () { init(); maybeCelebrateFromQuery(); });
-  } else { init(); maybeCelebrateFromQuery(); }
+    document.addEventListener("DOMContentLoaded", function () { init(); maybeCelebrateFromQuery(); initCheckpointTimeline(); });
+  } else { init(); maybeCelebrateFromQuery(); initCheckpointTimeline(); }
+
+  // ── GG.5: checkpoint-timeline drag → /<sid>/rollback_to ──────────────────
+  // Each .cp-tick (a checkpoint刻度, draggable) posts rollback_to on drop /
+  // Enter. An irreversible span (the server's rollback outcome has n_locked>0)
+  // → the刻度 gets class="locked" + a shake (reuse triggerShake). The sid is
+  // read from the page URL (/<sid>).
+  function initCheckpointTimeline() {
+    var tl = document.querySelector(".cp-timeline");
+    if (!tl) return;
+    var sid = window.location.pathname.replace(/^\/+/, "");
+    function rollbackTo(cpId, tick) {
+      fetch("/" + sid + "/rollback_to", {
+        method: "POST",
+        headers: {"Content-Type": "application/x-www-form-urlencoded"},
+        body: "target_checkpoint_id=" + encodeURIComponent(cpId)
+      }).then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function (d) {
+          if (d && d.partial_failure) {
+            // an irreversible saga in the span → lock this刻度 + shake
+            if (tick) { tick.classList.add("locked"); triggerShake(tick); }
+            alert("部分步骤不可逆（" + (d.n_locked || 0) + " 步 🔒），无法完全回退到 " + cpId +
+                  "。该刻度已锁死。");
+          }
+          // reload the page to reflect the new state (re-rendered ro-zone + saga timeline)
+          window.location.reload();
+        }).catch(function (e) {
+          // fetch failed (e.g. server down) — fall back to a form-style reload
+          window.location.reload();
+        });
+    }
+    tl.querySelectorAll(".cp-tick").forEach(function (tick) {
+      tick.addEventListener("click", function (ev) {
+        // click = rollback to this checkpoint (a simple, accessible affordance)
+        if (tick.classList.contains("locked")) { triggerShake(tick); return; }
+        rollbackTo(tick.getAttribute("data-cp"), tick);
+      });
+      tick.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          if (tick.classList.contains("locked")) { triggerShake(tick); return; }
+          rollbackTo(tick.getAttribute("data-cp"), tick);
+        }
+      });
+      // drag support (HTML5 draggable) — drop anywhere = rollback to this cp
+      tick.addEventListener("dragend", function (ev) {
+        if (tick.classList.contains("locked")) { triggerShake(tick); return; }
+        rollbackTo(tick.getAttribute("data-cp"), tick);
+      });
+    });
+  }
 })(typeof window !== "undefined" ? window : this);

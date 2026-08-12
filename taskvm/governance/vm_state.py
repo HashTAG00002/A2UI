@@ -74,16 +74,38 @@ class VMStateSnapshot:
         ids = [cid for cid, _ in self.checkpoint_saga_map]
         if target_checkpoint_id not in ids:
             # target not recorded — undo everything (conservative)
-            return list({sid for _, sid in self.checkpoint_saga_map})
+            seen: list[str] = []
+            for rec in reversed(self.rollback_log.records):
+                if rec.saga_id and rec.saga_id not in seen:
+                    seen.append(rec.saga_id)
+            return seen
         idx = ids.index(target_checkpoint_id)
-        # sagas recorded STRICTLY AFTER the target checkpoint
-        after = [sid for cid, sid in self.checkpoint_saga_map[idx + 1:]]
-        # preserve LIFO order, dedup
-        out: list[str] = []
-        for s in reversed(after):
-            if s not in out:
-                out.append(s)
-        return out
+        # the saga that was active WHEN the target checkpoint was taken (None if
+        # the checkpoint was taken before any write — C0 case)
+        target_saga = self.checkpoint_saga_map[idx][1]
+        # GG.5 fix: the map only records sagas at checkpoint moments, so sagas
+        # dispatched AFTER the last checkpoint (with no later checkpoint to
+        # record them) would be missed by the map-only approach. Use the
+        # rollback_log records directly: include every saga dispatched AFTER the
+        # target checkpoint's active saga (i.e. sagas whose first record comes
+        # after the target_saga's last record, or all sagas if target_saga is
+        # None). This is the honest "undo everything that happened after C_k".
+        log_sagas: list[str] = []
+        seen_sagas: set[str] = set()
+        started = (target_saga is None)   # if no saga at C_k, ALL log sagas are after it
+        for rec in self.rollback_log.records:
+            sid = rec.saga_id
+            if not sid:
+                continue
+            if not started:
+                if sid == target_saga:
+                    started = True   # past the target's saga; subsequent sagas are "after"
+                continue
+            if sid not in seen_sagas:
+                seen_sagas.add(sid)
+                log_sagas.append(sid)
+        # LIFO order (reverse dispatch)
+        return list(reversed(log_sagas))
 
     def to_dict(self) -> dict:
         return {
