@@ -22,6 +22,27 @@ TaskVM 把多个正在运行的**既有应用**的实时状态，反向编译成
 4. **governance over autonomy（治理优先于自治）**：**核心词是 governance（人侧），不是 autonomous（agent 侧）**。人在任务起始时自顶向下设定 milestone/checkpoint（"这次要做到哪里"），自底向上系统动态收集实时状态；人**随时**可在界面里推进/回退/撤销**真实 app 变更**。Agent 在 governance 大前提下尽可能自治执行；安全性/边界**全部下放给自动 verifier**，**绝不需要**"人审核 Agent 结果后才能继续"那种 Sidekick 式人工中制介入（用户特别讨厌这种范式，"太老了"）。这与 AgentLens（侧重 autonomous 下何时介入监督）、ALLOY（人类监督工作流）**方向相反**——他们是"监督 agent"，我们是"治理世界状态"。
 5. **round-trip verification + reversibility（验证与可逆）**：独立 verifier 读隐藏 canonical ground-truth，判 changed-happened + non-interference + reconciliation + **回退后真实 app 真的复原**。负对照（打坏 dispatcher）必须 ≤0.3。verifier **永不**来自生成 binding 的模型自评。这是 VM 的"内存安全/事务"层。
 
+### ⚠️ 开放场景咬死规约（2026-08-13 固化，与五锚点同等优先级）
+
+> **核心命题**：五个锚点不是在"自建受控 app"上成立就算数——它们必须在**一个从未预写过任何模板、指令模板、实体 ID 映射的全新 app/substrate**上，同样端到端成立，才叫"咬死"。具体地说，每个锚点对应一个**开放场景下的可验证判据**，不满足这个判据的任何实现都必须如实标注为"受控场景验证，非开放场景证明"。
+
+| 锚点 | 开放场景咬死的技术含义 | 违反时的诚实标注 |
+|---|---|---|
+| **① bottom-up live projection** | 编码器（compiler）必须从**渲染画面本身**（截图 + 清洗后的可见文本）发现 binding，不依赖任何预写的 entity_id/operator 映射表。解码器（GenUI）必须把 VM-state 变量的**可见标签**（不是内部字段名）渲染成控件标题。投影随外部并发修改**自动触发**（SSE polling），不是用户 refresh。 | "binding 发现是 GT 硬喂的"/"可见标题是 f-string 模板生成的"/"需手动刷新才看到外部变化" |
+| **② bidirectional executable binding** | 写路径必须经过**真实浏览器 + 真实手势**（点击/输入/回车），不走任何内部 REST/JSON API；GUI Agent 的 instruction 必须**零内部 ID**、零 operator 黑话（`move_event`/`set_deadline` 等），只含用户能在屏幕上看到的定位信息（title/可见文本/可见颜色）；一个 VM 变量绑多个 app 对象，写回时这些 app 对象**并行各自走真实 GUI**。 | "写路径调了 requests.post"/"instruction 里含 entity_id 或 operator 关键词"/"fanout 只写了一个 app" |
+| **③ substrate-independence** | 同一 VM 操作（如改 release_date）在 Stack A（Calendar）和 Stack B（Outlook Cal）上，binding_f1 差距 <0.2，round_trip 差距 <0.15，且底层轨迹（apps_written + operators）**必须不同**——不同基础，才证明抽象层真的与底层解耦。换一个 harness 从未见过的第三个 substrate，整个链路**不需要任何代码修改**即可工作（只需 adapter 插件）。 | "Stack A/B 测试里 operators 集合相同"/"换 substrate 需要改 instruction 模板" |
+| **④ governance over autonomy** | WorkflowPlan 必须**任务特异地动态生成**（每个任务的 checkpoint 数量、节点间依赖/顺序/并行关系、每个节点的语义标签，全部来自 LLM 对该任务 goal 的理解，而非固定结构）；前端必须把这个**语义结构忠实渲染**（节点标签是可见业务语言，依赖关系用视觉箭头/层级表示）；用户可以在运行中**拖拽任意 checkpoint 为回退目标**，系统自治执行到那个 checkpoint 为止，中途**不需要用户审核每一步**。 | "WorkflowPlan 是固定三种硬编码结构（seq/parallel/loop）之一，不含任务特异语义节点"/"进度条只有通用的 step1/step2，没有任务业务标题"/"需要用户确认每步才继续" |
+| **⑤ round-trip verification + reversibility** | verifier 读的是**真实 app canonical state**（不是 GUI Agent 自报）；不可逆操作**必须 UI 上有用户可见的锁定标记**（不只是后端 partial_failure 字段）；reversibility 谱的两端都有证据：可逆操作真实回退（state-verified），不可逆操作诚实声明（409 + 锁死刻度 + 用户可见文案，用业务语言不用内部 ID）。 | "verifier 靠 mock GT"/"partial_failure 只是后端字段没有前端呈现"/"不可逆提示文案含 saga_id/entity_id 等内部词汇" |
+
+**判定口令（任何 agent 往模型输入里放任何信息前必问）**：*"这个字符串/字段/ID，一个拿着真实设备看着渲染屏幕的用户，能在屏幕上直接看到它吗？"* 看不到 → 禁止进入任何模型输入。
+
+**工作流动态生成的具体含义**（补充 ④ 的实现要求）：
+- seed 时 LLM 用 task goal（自然语言描述）生成 N 个 checkpoint，每个 checkpoint 有：业务标签（中文可见名）、前置 checkpoint（依赖图）、对应的 app 集合（告诉用户"到这个点时哪几个 app 会变"）
+- `WorkflowPlan.nodes` 里每个节点的 `display_name` 字段必须是业务语言（如"会议+任务同步"），不是"step 1"/"parallel node 0"
+- Sequential/Parallel/Loop 三种结构是**执行模式**（由 binding fan-out 数量 + event_type 决定），但**可视化节点的内容**必须来自 checkpoint 的业务语义，两者正交：一个 Parallel 节点的标签是"材料任务同步"（由 checkpoint.name 决定），不是"4-app fanout"（那是执行模式描述，不是任务语义）
+
+---
+
 冻结 RQ：*Can an agent compile live, fragmented application state into a task virtual machine that users can govern — manipulating a bidirectional projection to drive, roll back, and verify cross-application effects across heterogeneous existing software?*
 
 最强单句主张：*We turn application-centric interaction into task-native governance: the user governs a task virtual machine projected from live cross-application state, while the agent realizes and verifies that state in heterogeneous software — and the projection stays faithful, reversible, and substrate-independent.*
