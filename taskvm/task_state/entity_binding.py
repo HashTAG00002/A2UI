@@ -109,6 +109,11 @@ class TaskBinding:
 OPERATOR_REGISTRY: dict[str, dict[str, str]] = {
     "move_event":   {"app": "calendar",  "field": "date",
                      "signature": "move_event(eid, new_date) — move calendar event to new_date"},
+    # GG.6 open-world: a NEW operator the harness has no prewritten template for.
+    # The SubgoalGenerator + resolve_locator + no-leak gate handle it generically
+    # (zero operator-specific if/elif) — the open-world guarantee.
+    "update_rsvp":  {"app": "calendar",  "field": "rsvp",
+                     "signature": "update_rsvp(eid, new_rsvp) — set a calendar event's RSVP status (accepted/declined/tentative)"},
     "set_deadline": {"app": "taskboard", "field": "deadline",
                      "signature": "set_deadline(tid, new_date) — set a task's deadline"},
     "set_status":   {"app": "taskboard", "field": "status",

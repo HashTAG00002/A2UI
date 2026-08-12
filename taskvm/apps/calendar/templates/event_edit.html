@@ -15,6 +15,14 @@
     <input type="hidden" name="eid" value="{{ event.eid }}">
   </div>
   <div class="field">
+    <label for="new_rsvp">RSVP (参会状态 — GG.6 update_rsvp operator)</label>
+    <select name="new_rsvp" id="new_rsvp">
+      <option value="accepted" {{ 'selected' if event.rsvp == 'accepted' else '' }}>accepted</option>
+      <option value="declined" {{ 'selected' if event.rsvp == 'declined' else '' }}>declined</option>
+      <option value="tentative" {{ 'selected' if event.rsvp == 'tentative' else '' }}>tentative</option>
+    </select>
+  </div>
+  <div class="field">
     <label>Title (read-only)</label>
     <div class="readonly-val" data-field="title">{{ event.title }}</div>
   </div>

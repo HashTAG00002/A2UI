@@ -100,29 +100,70 @@ def api_events(sid: str):
                     "events": sess.get("events") or []})
 
 
-def _move_event(sess: dict, eid: str, new_date: str) -> tuple[str, dict] | None:
-    """The shared move_event logic (the app's own business operation). Called by
-    BOTH the JSON API route (``/api/event/<sid>/move``) AND the PRG form route
-    (``/<sid>/event/<eid>/move``) so the GUI form and the adapter hit the same
-    backend mutation. Returns ``(old_date, event)`` or None if the event wasn't
-    found. Holds ``_sessions_lock`` for the dict mutation."""
+# GG.6: generic operator→field map (mirrors drive's _FIELD_MAP). Adding a new
+# calendar operator (e.g. update_rsvp) = one entry here + in _FIELD_MAP below +
+# in OPERATOR_REGISTRY — zero operator-specific branching in the adapter or the
+# SubgoalGenerator (the open-world guarantee).
+APP_OPERATORS = ("move_event", "update_rsvp")
+_FIELD_MAP = {"move_event": "date", "update_rsvp": "rsvp"}
+
+
+def _mutate_event(sess: dict, eid: str, op: str, value) -> tuple | None:
+    """GG.6: the shared mutation logic (the app's own business operation),
+    generalized from the old move_event-only ``_move_event``. Called by BOTH
+    the generic JSON API route (``/api/event/<sid>/<eid>``) AND the PRG form
+    route. Returns ``(old_value, event)`` or None if the event wasn't found.
+    The field is looked up from ``_FIELD_MAP[op]`` — generic, no per-op if/elif."""
+    if op not in APP_OPERATORS:
+        return None
+    field = _FIELD_MAP[op]
     with _sessions_lock:
         ev = _find_event(sess, eid)
         if ev is None:
             return None
-        old_date = ev["date"]
-        ev["date"] = new_date
-        return old_date, ev
+        old = ev[field]
+        ev[field] = value
+        return old, ev
+
+
+# legacy alias (the old move_event-only helper) for any caller still using it
+def _move_event(sess: dict, eid: str, new_date: str) -> tuple[str, dict] | None:
+    """Legacy move_event helper — delegates to the generic _mutate_event."""
+    return _mutate_event(sess, eid, "move_event", new_date)
+
+
+@app.route("/api/event/<sid>/<eid>", methods=["POST"])
+def api_event_mutate(sid: str, eid: str):
+    """GG.6: generic executable-operator route (mirrors drive's
+    /api/file/<sid>/<fid>). Takes {operator, value}; the field is resolved from
+    _FIELD_MAP. Adding a new operator needs no route change.
+      {operator: "move_event",  value: "2026-08-18"}  → event.date = "2026-08-18"
+      {operator: "update_rsvp", value: "declined"}    → event.rsvp = "declined"
+    Returns ``old`` (the before-value of the changed field) so the rollback
+    skeleton can compensate (the before-value is visible app state, never GT)."""
+    sess = user_sessions.get(sid)
+    if sess is None:
+        return jsonify({"error": "session not found", "sid": sid}), 404
+    data = request.get_json(silent=True) or {}
+    op = data.get("operator")
+    value = data.get("value")
+    if op not in APP_OPERATORS:
+        return jsonify({"error": f"operator must be one of {APP_OPERATORS}"}), 400
+    if value is None:
+        return jsonify({"error": "value required"}), 400
+    res = _mutate_event(sess, eid, op, value)
+    if res is None:
+        return jsonify({"error": f"event {eid} not found"}), 404
+    old, ev = res
+    return jsonify({"status": "ok", "eid": eid, "operator": op,
+                    "old": old, "new": value, "event": ev})
 
 
 @app.route("/api/event/<sid>/move", methods=["POST"])
 def api_event_move(sid: str):
-    """move_event(eid, new_date): the executable operator on the write path
-    (JSON API — the app's own backend). The P1 edit form posts here via its PRG
-    sibling route; the GUI agent (P2) drives the browser through the form, NOT
-    through this route directly. Mutates the event date in the real session
-    state; the verifier reads the real post-state via
-    ``state_adapter.read_canonical`` for round-trip GT."""
+    """Legacy move_event route (backward compat — the P1 PRG form posts here).
+    Delegates to the generic _mutate_event; returns the old_date/new_date shape
+    for callers that still read those keys."""
     sess = user_sessions.get(sid)
     if sess is None:
         return jsonify({"error": "session not found", "sid": sid}), 404
@@ -131,7 +172,7 @@ def api_event_move(sid: str):
     new_date = data.get("new_date")
     if not eid or not new_date:
         return jsonify({"error": "eid and new_date required"}), 400
-    res = _move_event(sess, eid, new_date)
+    res = _mutate_event(sess, eid, "move_event", new_date)
     if res is None:
         return jsonify({"error": f"event {eid} not found"}), 404
     old_date, ev = res
@@ -201,6 +242,25 @@ def event_move_prg(sid: str, eid: str):
         return (f"event {eid} not found", 404)
     logger.info(f"[calendar] PRG move {eid}: → {new_date} (sid={sid})")
     return redirect(f"/{sid}/event/{eid}?moved=1&moved_date={new_date}")
+
+
+@app.route("/<sid>/event/<eid>/mutate", methods=["POST"])
+def event_mutate_prg(sid: str, eid: str):
+    """GG.6: generic PRG handler (mirrors drive's file_mutate_prg). Reads the
+    operator + value from the form, delegates to _mutate_event. The edit form
+    posts here when the user/agent changes any field (date or rsvp)."""
+    sess = user_sessions.get(sid)
+    if sess is None:
+        return ("session not found", 404)
+    op = request.form.get("operator")
+    value = request.form.get("value")
+    if op not in APP_OPERATORS or value is None:
+        return (f"operator (one of {APP_OPERATORS}) + value required", 400)
+    res = _mutate_event(sess, eid, op, value)
+    if res is None:
+        return (f"event {eid} not found", 404)
+    logger.info(f"[calendar] PRG mutate {eid}: {op} → {value} (sid={sid})")
+    return redirect(f"/{sid}/event/{eid}?moved=1&moved_date={value}")
 
 
 @app.route("/api/inject_task/<sid>", methods=["POST"])

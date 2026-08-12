@@ -58,7 +58,7 @@ INTERNAL_ID_RE = re.compile(
 OPERATOR_JARGON_RE = re.compile(
     r"\b(?:move_event|set_deadline|set_status|set_assignee|move_file|rename|"
     r"set_owner|set_publish_date|set_state|set_priority|set_to|set_send_date|"
-    r"reschedule_appointment|send_message|toggle_like)\b")
+    r"reschedule_appointment|send_message|toggle_like|update_rsvp)\b")
 
 # Field-display names (user-facing Chinese for the writable fields) — used by
 # entity_id_to_locator + SubgoalGenerator to render field names a user sees, not
@@ -68,6 +68,7 @@ FIELD_DISPLAY: dict[str, str] = {
     "parent": "所在文件夹", "name": "文件名", "owner": "所有者", "publish_date": "发布日期",
     "state": "状态", "priority": "优先级", "to_addr": "收件人", "send_date": "发送日期",
     "subject": "主题", "scheduled_for": "日期", "messages": "消息",
+    "rsvp": "参会状态",   # GG.6: the new update_rsvp operator's field
 }
 
 # Kind display (user-facing noun for the entity kind, per app).

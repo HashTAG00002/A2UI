@@ -169,31 +169,34 @@ class StateAdapter:
 
 
 class CalendarAdapter(StateAdapter):
+    """GG.6: generalized to the drive/mail field-setter pattern. The old
+    ``if operator != "move_event"`` gate (the LAST per-operator if/elif in the
+    write path) is removed — operators map to fields via ``_OP_FIELD`` + a
+    single generic ``/api/event/<sid>/<eid>`` route. Adding a new calendar
+    operator (e.g. ``update_rsvp``) requires only a data-table entry here +
+    in the app's ``_FIELD_MAP`` + ``OPERATOR_REGISTRY`` — zero operator-specific
+    branching in the adapter or the SubgoalGenerator (the open-world guarantee)."""
     app = "calendar"
     resource = "events"
     id_field = "eid"
     entity_kind = "event"
+    _OP_FIELD = {"move_event": "date", "update_rsvp": "rsvp"}
 
     def mutate(self, sid: str, entity_id: str, operator: str, value: Any) -> dict:
-        if operator != "move_event":
-            raise ValueError(f"calendar only supports move_event, got {operator}")
+        if operator not in self._OP_FIELD:
+            raise ValueError(f"calendar operator must be one of "
+                             f"{list(self._OP_FIELD)}, got {operator}")
         if self.use_gui_executor:
             # P2 (E10 rework): drive the real browser through the edit form
-            # (list → View → Edit → date input → Review → Confirm) via the
-            # grounding model. The Flask /api/event/<sid>/move route stays as
-            # the app's backend (the form posts to it when the GUI clicks
-            # Confirm), but mutate no longer calls it directly.
+            # (list → View → Edit → field input → Review → Confirm) via the
+            # grounding model. The field is looked up from _OP_FIELD — generic.
             resp = self._mutate_via_gui(sid, entity_id, operator, value,
-                                        field="date")
-            # match the legacy response shape (old_date/new_date) so any caller
-            # reading those keys keeps working
-            resp["old_date"] = resp.get("old")
-            resp["new_date"] = resp.get("new")
+                                        field=self._OP_FIELD[operator])
             resp["eid"] = entity_id
             return resp
-        # legacy API path (requests.post to the internal Flask route)
-        r = requests.post(f"{self.base_url}/api/event/{sid}/move",
-                          json={"eid": entity_id, "new_date": value},
+        # generic field-setter route (mirrors drive's /api/file/<sid>/<fid>)
+        r = requests.post(f"{self.base_url}/api/event/{sid}/{entity_id}",
+                          json={"operator": operator, "value": value},
                           timeout=self.timeout)
         r.raise_for_status()
         return r.json()
