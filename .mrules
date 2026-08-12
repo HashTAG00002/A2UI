@@ -1361,3 +1361,29 @@ recon workflow（10 agent，529K tokens）发现 HANDOFF_E17.md 在未验证实�
 2. **genui_surface_semantic_sim 是结构匹配非 LLM-judge**——`structural_match` 比 var_id 集合（两边都有 release_date），不比 HTML/视觉。`llm_judge=False`。要做真 LLM-judge 需 EE.7 GenUI 默认 on 后截两边 GenUI 页面喂 gpt-5.6-sol 问"slot 语义是否一致"。handoff 允许 GenUI sim 为 Optional。
 3. **trajectory_differs 用 apps_written + operators 集合差**——Stack A/B 都有 taskboard+set_deadline（共同部分），但 calendar/outlook_cal + move_event/reschedule_appointment 不同 → differs=True。若两个 stack 的 app/op 集合完全相同（不该发生，因 substrate 不同），differs 会误判 False；当前 task pair 设计保证不同。
 4. **`run_stack` 的 fixture 解析用 task_id 前缀启发式**（`startswith("outlook_"/"send_"/"set_mail")` → ood_fixtures，否则 fixtures）——脆弱但覆盖当前 5 个 OOD task 前缀。新增 OOD task 若不以这些前缀开头会误走 builtin fixtures。
+
+### EE.5 — reconciliation killtest（3 merge strategies，Reconciliation Accuracy 指标）
+
+**改了什么**（新建 `taskvm/evaluation/run_reconciliation_killtest.py` + 1 L0 测试）：
+- 3 场景 × N samples，量化大纲 §6 的 Reconciliation Accuracy（SaC 逐字交出的 future work）：
+  - A `accept_underlying`：用户改 release_date 8/14→8/18，外部注入 T2.deadline=8/20，用户接受底层 → T2=8/20，T1=8/18，E1=8/18。
+  - B `keep_projected`：用户保留投影 8/18 → re-dispatch Y 覆盖外部 8/20 → T2=8/18。
+  - C `merge`：用户合并 resolved_value=2026-08-19 → re-dispatch Z → T2=2026-08-19。
+- 每场景：seed release_reschedule → dispatch 用户 edit → 外部注入（taskboard mutate API direct，EE.3 pattern）→ `resync_with_conflicts` 检测冲突 → `apply_merge_option` 执行合并 → 验证 post-merge state + non-interference（E2/T3 全程不动）。
+- handoff 的 "accept_theirs/keep_mine/merge_manual" 映射到代码实际 option 名 `accept_underlying/keep_projected/merge`（`verifier/reconciliation.merge_options`）。
+- `RECONCILIATION_PASS` = 全部 scenario-sample 的 post_merge_checks.ok AND invariants AND conflict_detected AND merge_applied。
+
+**证据**（`eval_results/reconciliation_killtest_20260812_190301.json`，dry-run mode，2 samples/scenario）：
+- **RECONCILIATION_PASS: True** ✓ 6/6 scenario-samples passed
+- A_accept_underlying: 2/2 ✓（T2.deadline=2026-08-20 正确，T1=8/18, E1=8/18, E2=8/12, T3=done 不动）
+- B_keep_projected: 2/2 ✓（T2.deadline=2026-08-18 正确，re-dispatch 覆盖了外部 8/20）
+- C_merge: 2/2 ✓（T2.deadline=2026-08-19 正确，re-dispatch Z）
+- 每场景 conflict_detected=True（T2: projected 8/18, underlying 8/20），merge_applied=True ✓
+- non-interference invariants 全过（E2 8/12 不动，T3 done 不动）✓
+- L0: 24 passed（23→24，新增 test_reconciliation_killtest_importable）✓
+
+**已知局限（不美化）**：
+1. **dry-run 用 api executor**——但 merge 逻辑本身是规则版（`apply_merge_option`，不调模型），所以 dry-run **完全验证**了 3 策略的正确性，不像 EE.3/EE.4 那样只是结构验证。这是 merge 逻辑的诚实性质：它是确定性的 dict-diff + re-dispatch，不需要模型。gui_agent 模式下唯一区别是 re-dispatch 走 GUI 手势（keep_projected/merge 的 re-dispatch 会调 `ad.mutate` → `_mutate_via_gui`），但 accept_underlying 不写（只 re-project），所以 gui_agent 模式下 A 场景仍纯 API-free。
+2. **只测 release_reschedule（2 App）**——没测 launch_full 的 4-App reconciliation。launch_full 的 T2 也是 release_date 绑定，同样的冲突逻辑会生效，但未单独跑。handoff 要求"3 种合并策略均正确执行"，release_reschedule 已覆盖；4-App 场景的 reconciliation 留 final。
+3. **外部注入只改 T2.deadline**——没测多字段同时冲突、跨 app 冲突（如 calendar.E1 被外部改）。当前 `detect_conflicts` 检查每个 binding 的每个 entity，多冲突会全部检测，但 killtest 只验证单冲突场景。多冲突场景留 final。
+4. **`apply_merge_option` 的 response 字段从 JSON 里剔除了**（`{k:v for k,v in merge_result.items() if k != "response"}`）——response 含 app-internal detail（file/message dict），体积大且非验收关键。如需完整 response 可改。

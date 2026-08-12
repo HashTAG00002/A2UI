@@ -246,5 +246,18 @@ def test_substrate_invariance_importable():
         assert callable(fn)
 
 
+# ── EE.5: reconciliation killtest ───────────────────────────────────────────
+def test_reconciliation_killtest_importable():
+    """run_reconciliation_killtest importable + 3 scenarios cover the merge
+    options (accept_underlying / keep_projected / merge)."""
+    from taskvm.evaluation.run_reconciliation_killtest import (
+        run_scenario, main, SCENARIOS)
+    assert len(SCENARIOS) == 3
+    opts = {s["option"] for s in SCENARIOS}
+    assert opts == {"accept_underlying", "keep_projected", "merge"}, (
+        f"3 merge strategies must be covered; got {opts}")
+    assert callable(run_scenario) and callable(main)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-x", "-q"])
