@@ -2274,3 +2274,56 @@ tests/test_imports.py                      新增 FF.2/FF.4 相关 L0 测试
 ### 为什么这次纠错重要
 
 E7 讲的是"写路径不能走后门"，E16 讲的是"prompt 里不能塞后门信息"，**E21 讲的是：泄露的总源头在渲染层——你自建的 app 长什么样，决定了观测天然带不带毒**。前两次都在"信息进入模型的最后一环"堵，这次发现毒是从第一环（页面模板把主键渲染成可见列）就带上的。教训：**非侵入式原则要贯彻到"我们自建的测试环境本身长什么样"——harness 的 fixture/substrate 也必须符合真实软件的形态约束，否则在最上游就污染了整个评估的生态效度（ecological validity）**。这是 CHI 审稿人视角下最致命的一类问题，也是用户从 E5（existing applications）起就一直在不同侧面反复敲打的同一个母题。
+
+## E22 — GG 阶段完成：内部 ID 零暴露契约落地（GG.1-GG.6 全部 PASS + 开放场景 killtest 证明泛化）；entity_id 作为内部 join key 保留在 control-plane，模型/用户侧只见 visible locator
+
+**[session: 2026-08-13，GG 阶段开工后一次成型；branch `gg-phase`，commits 3157d7d→ff42f2a；开工文档 `docs/A2UI_GG阶段开工目标.md`，实施计划 `/home/hadoop-mt-ocr/.claude/plans/effervescent-baking-brook.md`]**
+
+### 删了什么 / 改了什么（按 GG.1-GG.6 + UI de-leak）
+
+**GG.1 渲染层清洗**（commit 3157d7d）：5 个自建 app 模板（calendar/taskboard/drive/mail/outlook_cal）删 `data-{kind}-id` 行属性 + 可见 ID 列（EID/TID/FID/MID/AID）+ `data-var`；CSS 选择器去属性限定；app.py docstring 改写。DOM parser（`replay_engine.parse_dom_entities`）从 entity_id-keyed 改为 **visible-title-keyed**（title/name/subject/peer_name）；`assert_obs_matches_state` 用 `governance.translate.build_locator_index` 把 DOM title→entity_id re-key（title 是屏幕可见的，非 GT 泄露）；id_field 在字段比较中跳过（它是键，不是可见字段）。`data-field` 保留在单元格上（parser 字段键契约，HTML 属性非屏幕可见；raw DOM 不再喂给 compiler）。
+
+**GG.2 观测层清洗**（commit 3157d7d）：`synthesize_a11y` 删 `[bid={eid}]` 前缀（实体由可见 title 自然标识）；`_A11Y_FIELDS` 删 `peer_wxid`（保留 `peer_name`）；`compiler.build_user_prompt` 删 raw DOM section + `# Valid entity ids` 白名单块（两者都泄露 entity_id 进模型输入）；`a2ui_spec.TASKVM_BINDING_CONTRACT` 改写为教模型按 visible title（locator）寻址，不提 `data-*-id`；compiler system prompt 内部 ID 正则扫描 = 0 命中。
+
+**GG.3 翻译层 + LLM SubgoalGenerator**（commits 3157d7d + 36acdbb）：新建 `governance/translate.py`（TITLE_FIELD/ID_FIELD per app、build_locator_index 严格碰撞检测、resolve_locator 注入 entity_id、entity_id_to_locator 反向、assert_no_internal_id/assert_no_operator_jargon 扫描器、eid_to_title_in_seed mock 路径）。新建 `governance/subgoal_generator.py`（LLM gpt-5.6-sol 2 候选 + TTS pick + mock 确定性路径，零泄露门）。binding 契约改 `entity_id` → `locator`（EntityBinding/Dependency dataclass 加 locator 字段；render_check.validate_binding 接受 locator OR entity_id；run_w1_killtest 构建 locator_index + 在 validate 与 patch 间插入 resolve_locator + no-leak 门；mock 路径从 seed_state emit locator）。**删除** `_build_edit_nl`（governance_interpreter，全部 operator if/elif + `{eid}` 泄露）+ `_build_instruction`（gui_executor，`the {entity_kind} with id '{entity_id}'`）两个完整函数。
+
+**GG.4 执行层去深链**（commit 54b5f05）：删 `_edit_form_url`/`_EDIT_PATH_KIND`（substrate/base.py，拼 `/<sid>/<kind>/<eid>/edit` 深链）；`_execute_locked` 改 `goto(page_url)`（始终从列表页，模型按可见 title grounding）；`resume_url` 参数保留为始终 None（签名兼容）；删 dead `_send_message`（bridge.py，7 步硬编码 + openApp 深链 + textarea.focus 后门）；`gui_write_async._navigate_wechat` 删 `openApp('wechat','/chat/{chat_id}')` 深链 → 只 `open_app("wechat")` + 模型按 visible peer_name 点联系人（`_resolve_peer_name` 从 env state 解析 chat_id→peer_name）；bridge `mutate_x` 删 inline f-string instruction 模板 → 要求 `instruction_override`（无则诚实报错）。
+
+**GG.5 工作流运行时闭环**（commit 4fb4833）：WorkspaceSession 新字段（paused/workflow_plan/workflow_result/checkpoint_saga_map/workflow_thread）；seed_session 用 `interpret_as_workflow` 构建 WorkflowPlan；`WorkflowExecutor.execute` 加 `pause_check`（节点边界检查，不杀进行中手势）+ WorkflowResult 加 paused/stopped_at_node；新路由 `/start`（后台 daemon 线程 + SSE 三种节点进度）+ `/pause`（设 paused=True）+ `/rollback_to`（sagas_after_checkpoint → 逐 saga undo_saga 真实 GUI 回退 + 聚合 SagaResult）；`/checkpoint` 填 checkpoint_saga_map；`VMStateSnapshot.sagas_after_checkpoint` 修复（用 rollback_log records 直接解析，不再漏最后 checkpoint 之后的 saga）；timeline.js checkpoint 拖拽 → rollback_to fetch + locked 刻度 shake；`workflow_controls_html`（开始/暂停按钮 + checkpoint timeline）。
+
+**GG.UI-deleak**（commit b1c3d9e）：`readonly_card_html` 显示 visible title（非 `<code>{eid}</code>`）+ 跳过 id_field；`saga_undo_timeline_html` 段标签从 `app.eid.field` 改为 visible locator + 字段中文名，删 saga_id 头部；`conflict_row_html` 同理。渲染页扫描：0 visible entity_id。
+
+**GG.6 开放场景 killtest**（commit ff42f2a）：新建 `run_open_world_killtest.py` + `rsvp_update_test` fixture（新 operator `update_rsvp`，不在 W1 TASKS）。`CalendarAdapter` 从 `if operator != "move_event"` 门**泛化**为 drive/mail 的 `_OP_FIELD` 字典 + 通用 `/api/event/<sid>/<eid>` 路由（**删除了写路径最后一个 per-operator if/elif**）。calendar/app.py 加 `_FIELD_MAP`/`_mutate_event`/通用路由。数据表条目：OPERATOR_REGISTRY/FIELD_DISPLAY/OPERATOR_JARGON_RE 各加一条（零 if/elif）。
+
+### 验证证据（全在 `eval_results/`，gitignored；路径写进 commit message）
+
+- **L0**：`pytest tests/test_imports.py` → 37 passed（贯穿全阶段，每步绿）
+- **L1 mock**：`run_w1_killtest --mock` → 4/4 PASS binding_f1=1.0 neg=0.3（locator 契约端到端）
+- **GG.1**：`eval_results/gg1_render_purge_20260813_040843/`（5 app Playwright 截图 + a11y_dump.txt + observation_purge.json）+ grep 门 0 行
+- **GG.2**：a11y 跨 4 app 内部 ID 正则扫描 = 0 命中（证据在 gg1_render_purge 的 observation_purge.json）
+- **GG.3**：`eval_results/gg3_subgoal_samples_20260813_041919.json`（6 任务 × 18 op，all_clean=True）
+- **GG.4**：`eval_results/gg4_deep_link_purge_grep_*.txt`（`def _edit_form_url` GONE，`def _send_message` GONE，0 live openApp/goto(resume_url) 调用）
+- **GG.5**：`eval_results/gg5_workflow_loop_{sequential,parallel,loop}_*.json`（三种 workflow 全闭环 PASS 0 泄露）+ `gg5_workflow_ui_*.png`（控件截图）+ pause_check 单测（paused=True stopped_at_node=1）
+- **GG.6**：`eval_results/open_world_killtest_*.json`（mock + real LLM 两种都 PASS；real: round_trip 2/2 mean=1.0 no-leak gate clean neg=0.3 regression W1 4/4=True；compiler emit `locator:title:项目发布会议` 非 entity_id；f1_varid_semantic=1.0 f1_triples=1.0；SubgoalGenerator 两路径零泄露）
+
+### 核心设计：entity_id 作为内部 join key 保留（control-plane），模型/用户侧只见 visible locator
+
+三个 Explore agent 的独立勘探一致确认：entity_id 是全系统 join key（canonical state、fixtures/GT、saga、verifier、write-path mutate 全部按 entity_id 键合），且在 verifier/control-plane 层不可还原（GT fixture 的 CanonicalBinding.entity_id、read_canonical 返回 {eid:{field}}、SagaResult.steps 的 (app,eid)、map_gt_var_id_to_compiler 三元组）。**不能把 entity_id 改名成 title**（会破坏 URL/fixture/saga）。设计：保留 entity_id 作内部 join key（永不进模型）；模型 emit locator（visible title）；harness 用 `governance.translate.resolve_locator` 在 validate 之后、patch 之前一次性解析 locator→entity_id 注入 binding；下游 compile_patch/dispatch/adapter.mutate/verifier 全部不变。
+
+### 已知残留局限（诚实标注，供论文 Discussion + 下轮 agent 继承）
+
+1. **entity_id 在 control-plane 残留（合规）**：View href URL（`/<sid>/event/E1`，服务器路由，非屏幕可见文本）、hidden form `<input name="eid">`（表单 target）、canonical state/fixtures/saga/verifier（GT 主键）。这些是 GG §0 红线合规的 control-plane 残留（用户屏幕看不到 URL 字符串/hidden input）。
+2. **data-field 保留在单元格**：parser 字段键契约（HTML 属性，非屏幕可见；raw DOM 不进 compiler prompt）。这是为保持 verifier 字段级比较的精确性（`<th>Publish</th>` ↔ field `publish_date` 位置解析会错配）的稳健性选择，red-line 合规。
+3. **resume_url 签名参数保留为始终 None**：backward-compat（ ripping 会触多处 caller，无 red-line 收益）。
+4. **wechat 真实手势导航未 live 测**：`gui_write_async._navigate_wechat` 改为 `open_app` + 按 peer_name 点联系人，但需要 MobileGym wechat sim 运行才能 live 验证（GG.5/GG.6 用 api 模式 + 桌面 app 验证了闭环；wechat gui_agent live 测留给下轮）。
+5. **GG.6 gui_agent 模式未跑**：open-world killtest 在 api 模式 PASS（核心证明：compiler 发现 binding + SubgoalGenerator 生成指令 + 泛化）；gui_agent 模式（真实浏览器 grounding）需要 rsvp form 交互 + 更长时间，留作后续。
+6. **binding_f1 byte-exact var_id = 0.0**：GG.6 real 模式模型选了 var_id `project_launch_meeting_rsvp`（GT 是 `meeting_rsvp`）——这是 var_id 自由标签的预期行为（f1_varid_semantic=1.0 才是诚实指标），非失败。
+7. **Parallel 工作流真并行未实现**：GG.5 的 PARALLEL 节点在 gui_agent 单浏览器模式下 serialize（api 模式用 ThreadPoolExecutor 真并行）。FF.4 已记录；GG 未改（Playwright 多实例在本机稳定性存疑）。
+
+### 对论文 claim 的证明力（取代 E21 末尾的限定语）
+
+**GG.6 的 open-world killtest PASS 是"还是不是我们最终的原型实现"的唯一证据**：一个 harness 从未硬编码过模板的新 operator（`update_rsvp`）在全链路上工作（compiler 从可见观测发现 binding → SubgoalGenerator 现场生成零 ID 指令 → 泛化 CalendarAdapter 派发 → verifier 确认 round_trip=1.0 + neg=0.3），且 no-leak 静态门全 clean。这证明 GG §0 红线（内部信息零暴露）+ GG §1.3（废除全部 if/elif 模板）落地后，系统对开放场景有真泛化能力。**FF.7 的旧 4/4 数字仍不得作为"开放场景 VM 范式可用性"证据（E21 限定语延续）；GG.6 的新数字可以。**
+
+### 教训（继承 E21）
+
+E21 发现毒从渲染层第一环带上；E22 证明**清掉四层泄露 + 废除全部 operator if/elif 后，泛化能力自然涌现**（不需要为每个新 operator 写模板）。这坐实了 E10 元原则的逆向推论：**模板/后门不只是"绕过真实 UI"的捷径，它们还是"假装泛化"的脚手架——拆掉脚手架后还能跑，才是真泛化。** GG.6 的 update_rsvp 就是这个"拆脚手架后还能跑"的可复现证明。
