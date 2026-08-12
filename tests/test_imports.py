@@ -326,5 +326,18 @@ def test_genui_form_wired_controls():
     assert 'data-var="release_date"' in html_nosid, "no-sid still renders the bare input"
 
 
+# ── EE.9: interaction compression killtest ──────────────────────────────────
+def test_interaction_compression_baseline_model():
+    """_baseline_actions: launch_full (4 apps, 5 bindings) → 4 navigates + 15
+    per-binding = 19 baseline actions; TaskVM = 1 → compression 19x (≥4x)."""
+    from taskvm.evaluation.run_interaction_compression import _baseline_actions
+    from taskvm.benchmark.fixtures import get_task
+    b = _baseline_actions(get_task("launch_full"))
+    assert b["n_apps"] == 4 and b["n_bindings"] == 5
+    assert b["total"] == 4 + 5 * 3, f"baseline = n_apps + 3*n_bindings; got {b['total']}"
+    # compression = baseline / 1 (taskvm) = baseline total
+    assert b["total"] >= 4, "4-App task must compress ≥4x"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-x", "-q"])
