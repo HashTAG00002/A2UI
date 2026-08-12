@@ -847,11 +847,11 @@ E14-honest 末尾留了 4 项 TODO（DOM reader bug、wechat textarea 视口外�
 
 **修复**：`mutate_x` 改为在操作前读取当前 toggle 状态（`_currently_on`），据此算 `expected_in_list = not _currently_on`，instruction 也根据方向生成（rollback 时要求模型验证图标"变回 OUTLINE"而非"变 FILLED"）。修复后 bridge 日志确认 `POST /api/x/... 200`（不再 500）。
 
-**验证**：`eval_results/x_toggle_rollback_killtest_20260812_fixed.json`（旧 bridge 代码，HTTP 500 但 state-verified）+ `eval_results/x_toggle_rollback_killtest_*_verify_fix.json`（新 bridge 代码，HTTP 200）：
-- `n_write_success=17`，`n_rollback_success=0`（HTTP 口径，旧代码）/ `rollback_verified=True 18/18`（state 口径）
-- `n_overall_success=17`，`overall_success_rate=0.9444`，`PASS=True`（按 state-verified 口径）
-- `after_rollback_in_list==initially_in_list` 18/18（全部真的回到初始状态）
-- `honest_framing` 明确说明：`rollback_success_rate=0.0` 是 HTTP 口径的误导值，真正的验收应按 `overall_success`（state-verified）
+**验证（两份 JSON，旧 + 新 bridge 代码对照）**：
+- 旧 bridge 代码：`eval_results/x_toggle_rollback_killtest_20260812_fixed.json`（2 samples × 9 = 18 tests）— `rollback_success_rate=0.0`（HTTP 18/18 返回 500，bridge bug）/ `rollback_verified=True 18/18`（state 口径）/ `overall_success_rate=0.9444`（17/18 state-verified）
+- 新 bridge 代码（Task E fix 后）：`eval_results/x_toggle_rollback_killtest_20260812_105555_verify_fix.json`（1 sample × 9 = 9 tests）— `rollback_success_rate=1.0`（HTTP 9/9 返回 200）/ `rollback_verified=True 9/9` / `overall_success_rate=1.0`（9/9）— **HTTP 口径与 state 口径一致，bridge 方向感知 bug 已彻底修复**
+- `after_rollback_in_list==initially_in_list` 全部为 True（旧 18/18 + 新 9/9，全部真的回到初始状态）
+- `honest_framing` 明确说明：旧报告的 `rollback_success_rate=0.0` 是 HTTP 口径的误导值，真正的验收应按 `overall_success`（state-verified）
 
 **为什么重要**：这是 MobileGym 上**第一个真实可逆补偿证据**。E14-honest 之前 MobileGym 的 rollback 只有 wechat 的 honest-irreversibility（诚实报告不可逆，fidelity=0.0）。Task E 证明了 toggle 这种天然可逆操作可以通过 GUI 手势（tap on → tap off）完成完整的 write→rollback→verify 循环，且每一步都有独立 state 验证。**wechat + X toggle 合起来覆盖了可逆性谱的两端**：诚实不可逆（wechat，409）+ 真实可逆（X toggle，state-verified 94.4%）。
 
@@ -865,7 +865,7 @@ E14-honest 末尾留了 4 项 TODO（DOM reader bug、wechat textarea 视口外�
 | Task B (DOM reader) | ✅ PASS | mobilegym_binding_postfix_20260811_taskB.json | 5 posts 各得唯一正确内容预览 |
 | Task C (wechat CSS) | ✅ PASS | mobilegym_wechat_postcss_20260811_213259_v2.json | round_trip=1.0×3, honest-irrev 3/3 (fidelity=0.0), neg=0.3；E14"移动端 grounding 是模型能力边界"结论被修正为"那是 sim 布局 bug 的假象" |
 | Task D (scroll) | ❌ FAIL（诚实） | x_toggle_scroll_killtest_20260812_014823.json | 5.6% (1/18)，max_steps=25 不足；E14 的 94.4% 边界明确：只对可见帖子成立 |
-| Task E (rollback) | ✅ PASS（state 口径） | x_toggle_rollback_killtest_20260812_fixed.json + _verify_fix.json | overall 94.4% (17/18 state-verified)；HTTP 500 是 bridge bug 已修（方向感知 expected_in_list）；第一个 MobileGym 真实可逆补偿证据 |
+| Task E (rollback) | ✅ PASS（state 口径） | x_toggle_rollback_killtest_20260812_fixed.json + _verify_fix.json | 旧代码 overall 94.4% (17/18 state-verified，HTTP 500 是 bridge bug)；新代码 verify_fix 100% (9/9，HTTP 200 与 state 一致)；第一个 MobileGym 真实可逆补偿证据 |
 
 ### 本轮核心结论（honest）
 
