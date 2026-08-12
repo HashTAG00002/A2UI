@@ -1,30 +1,34 @@
 """X app toggle kill-test — the VM-moment existence proof for MobileGym (E14).
 
-This is the FIRST non-wechat MobileGym write-path kill-test. X's
-``toggleLike`` / ``toggleRetweet`` / ``toggleBookmark`` are DISCRETE one-click
-writes (vs. wechat's type+send sequence), so they're the natural existence
-proof that the TaskVM grounding loop (``gui_act_async``) can drive MobileGym
-when the harness coordinate pipeline is correct.
+E17-A Option B (2026-08-12): the verifier is now ALIGNED with the instruction.
+Prior to E17 the task was ill-posed (.mrules E17 §0-B): the instruction told
+the CUA "find ANY un-toggled post and tap it" while the verifier required a
+SPECIFIC post_id to appear in the toggle list — on a fresh reset with 3
+un-toggled posts the model had no screenshot-visible way to know which post
+was "expected", so the test measured 1/3 blind-guess luck, not CUA ability.
 
-What this tests (E16-complete, pure-vision CUA — NO content_hint of any kind):
-  - **toggle_like**: can the model, given ONLY a screenshot of the X timeline
-    + a goal-level instruction naming no post_id / no post text, find an
-    un-toggled post, locate the heart icon in its action bar, and tap it
-    precisely enough for ``toggleLike(postId)`` to fire on the EXPECTED post?
-  - **toggle_retweet / toggle_bookmark**: same, for the repost/bookmark icons.
-  - **success criterion**: the EXPECTED post id appears in ``likedPostIds`` /
-    ``retweetedPostIds`` / ``bookmarkedPostIds`` after the gesture loop
-    (trusted ``get_state`` read — NOT a screenshot heuristic, NOT model
-    self-judge).
+E17-A Option B fix: ``verify_mode='any_new'`` — the bridge captures a
+SERVER-SIDE before-snapshot of the toggle list (never leaked to the prompt —
+that was the E16 bug; this does not repeat it) and verifies that SOME post
+transitioned (the list grew for a write / shrank for a rollback). The
+instruction is unchanged ("find an un-toggled post and tap it") — now the
+verifier matches it. The ill-posed contradiction is resolved.
 
-Honest difficulty (E16-complete, must NOT be masked): on a 3-post timeline
-where NONE are toggled, the model has no screenshot-visible way to know WHICH
-un-toggled post the task is about (a real CUA on a real phone would face the
-same ambiguity without a post_id hint). So success is only possible when the
-model happens to tap the expected post — this is the real CUA task and the
-expected success rate is LOWER than the backdoor-assisted E15 run (which
-injected the target post's text into the prompt). A drop below E15's 94.4%
-is expected + honest, not a new bug.
+What this tests (E16-complete pure-vision + E17-A Option B verifier):
+  - **toggle_like / toggle_retweet / toggle_bookmark**: can the model, given
+    ONLY a screenshot + a goal-level instruction naming no post_id, find an
+    un-toggled post, locate the right action-bar icon, and tap it precisely
+    enough for the store toggle to fire on ANY post?
+  - **success criterion (Option B)**: the toggle list GREW by ≥1 vs the
+    before-snapshot (trusted ``get_state`` read — NOT model self-judge). The
+    ``toggled_post_id`` field records WHICH post the model actually chose, so
+    the per-post distribution reveals position bias (does it always tap
+    post[0]?) without that bias being scored as failure.
+
+The strong discriminating task is MG-1 ``social_morning_brief`` (visible-
+uniqueness: instruction names the target by content). THIS killtest is the
+easy aligned baseline — Option B makes it a clean "can the CUA toggle any
+post" existence proof, no longer a 1/3-guess lottery.
 
 Lands a PERSISTED JSON artifact at
 ``eval_results/x_toggle_killtest_<ts>.json`` — the repo artifact anyone can
@@ -88,15 +92,57 @@ def _health_check(host: str) -> bool:
     return True
 
 
-def _run_one_toggle(host: str, sid: str, post_id: str, operator: str) -> dict:
+def _run_one_toggle(host: str, sid: str, post_id: str, operator: str,
+                    *, use_driver: bool = False) -> dict:
     """Run one toggle operation via the bridge and return the result record.
 
-    Each call: reset → toggle → record HTTP status + trace + verification.
-    The bridge's ``mutate_x`` already verifies the toggle landed via
-    ``get_state`` (trusted read path), so HTTP 200 = success.
+    E17-A Option B: passes ``verify_mode='any_new'`` so the bridge verifier
+    checks that SOME post transitioned (list grew), not that the specific
+    ``post_id`` did — aligning the verifier with the any-post instruction.
+    The ``toggled_post_id`` (which post the model actually tapped) is captured
+    for the per-post distribution.
+
+    E17-B ``use_driver``: route through ScriptedUserDriver + GovernanceInterpreter
+    to produce the CUA instruction (the "完整链路" — user behavior → governance →
+    CUA, not the segmented intent → f-string → CUA). The subgoal's
+    natural_language is passed to the bridge via ``instruction_override``,
+    skipping the inline f-string. When False (default), the bridge builds its
+    own f-string (unchanged — zero regression).
     """
     url = f"http://{host}:{BRIDGE_PORT}/api/x/{sid}/{post_id}"
-    payload = {"operator": operator, "value": True}
+    payload = {"operator": operator, "value": True,
+               "verify_mode": "any_new"}  # E17-A Option B
+    instruction_override = None
+    driver_nl = None
+    if use_driver:
+        # Build a one-shot ScriptedUserDriver event for this toggle + interpret
+        # it through GovernanceInterpreter to get the subgoal NL. This is the
+        # de-segmentation: the instruction comes from the governance layer's
+        # interpretation of a user-behavior event, not a hardcoded f-string.
+        from taskvm.governance.scripted_driver import ScriptedUserDriver
+        from taskvm.governance.governance_interpreter import GovernanceInterpreter
+        from taskvm.governance.vm_state import VMStateSnapshot
+        from taskvm.execution.rollback import RollbackLog
+        from taskvm.benchmark.mobilegym_fixtures import MORNING_BRIEF_POST_ID
+        from taskvm.task_state.entity_binding import TaskBinding
+        # minimal binding for this one toggle op (no compiler call)
+        binding = TaskBinding(
+            task_id="x_toggle_driver",
+            variables=[{"var_id": "x_toggle", "label": "x_toggle",
+                        "value": "", "editable": True,
+                        "bindings": [{"var_id": "x_toggle", "app": "x",
+                                      "entity_id": post_id, "field": "liked",
+                                      "operator": operator}]}])
+        vm_state = VMStateSnapshot(
+            sid=sid, binding=binding, adapters={}, rollback_log=RollbackLog())
+        ev = __import__("taskvm.governance.user_behavior_driver",
+                        fromlist=["UserBehaviorEvent"]).UserBehaviorEvent(
+            "edit_field", {"var_id": "x_toggle", "new_value": True})
+        subgoals = GovernanceInterpreter().interpret(ev, vm_state)
+        if subgoals:
+            instruction_override = subgoals[0].natural_language
+            driver_nl = instruction_override
+            payload["instruction_override"] = instruction_override
     t0 = time.time()
     try:
         r = requests.post(url, json=payload, timeout=180)
@@ -105,7 +151,10 @@ def _run_one_toggle(host: str, sid: str, post_id: str, operator: str) -> dict:
             d = r.json()
             trace = d.get("trace", {})
             return {
-                "post_id": post_id,
+                "post_id": post_id,             # the requested (session-label) post
+                "toggled_post_id": d.get("toggled_post_id"),  # E17: which post the model actually tapped
+                "before_count": d.get("before_count"),
+                "after_count": d.get("after_count"),
                 "operator": operator,
                 "http_status": 200,
                 "success": True,
@@ -113,6 +162,8 @@ def _run_one_toggle(host: str, sid: str, post_id: str, operator: str) -> dict:
                 "steps": trace.get("steps"),
                 "done": trace.get("done"),
                 "actions": [a.get("desc", "") for a in trace.get("actions", [])],
+                "instruction_source": "governance_driver" if use_driver else "bridge_fstring",
+                "driver_nl": (driver_nl or "")[:200],
                 "error": None,
             }
         else:
@@ -125,6 +176,9 @@ def _run_one_toggle(host: str, sid: str, post_id: str, operator: str) -> dict:
                 err_msg = r.text[:300]
             return {
                 "post_id": post_id,
+                "toggled_post_id": None,
+                "before_count": None,
+                "after_count": None,
                 "operator": operator,
                 "http_status": r.status_code,
                 "success": False,
@@ -132,12 +186,17 @@ def _run_one_toggle(host: str, sid: str, post_id: str, operator: str) -> dict:
                 "steps": None,
                 "done": None,
                 "actions": [],
+                "instruction_source": "governance_driver" if use_driver else "bridge_fstring",
+                "driver_nl": (driver_nl or "")[:200],
                 "error": err_msg,
             }
     except Exception as e:
         elapsed = round(time.time() - t0, 1)
         return {
             "post_id": post_id,
+            "toggled_post_id": None,
+            "before_count": None,
+            "after_count": None,
             "operator": operator,
             "http_status": 0,
             "success": False,
@@ -145,6 +204,8 @@ def _run_one_toggle(host: str, sid: str, post_id: str, operator: str) -> dict:
             "steps": None,
             "done": None,
             "actions": [],
+            "instruction_source": "governance_driver" if use_driver else "bridge_fstring",
+            "driver_nl": (driver_nl or "")[:200],
             "error": f"{type(e).__name__}: {e}",
         }
 
@@ -160,6 +221,12 @@ def main(argv=None):
                         help="toggle operators to test")
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--out", default=None)
+    parser.add_argument("--use-driver", action="store_true",
+                        help="E17-B: route the CUA instruction through "
+                             "ScriptedUserDriver + GovernanceInterpreter "
+                             "(instruction_override) — the full user-behavior → "
+                             "governance → CUA pipeline. Default off (bridge "
+                             "f-string, zero regression).")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO,
@@ -186,7 +253,8 @@ def main(argv=None):
                 except Exception:
                     pass
                 logger.info(f"  {operator} on {post_id} ...")
-                rec = _run_one_toggle(args.host, sid, post_id, operator)
+                rec = _run_one_toggle(args.host, sid, post_id, operator,
+                                      use_driver=args.use_driver)
                 rec["sample"] = sample_i
                 rec["sid"] = sid
                 all_samples.append(rec)
@@ -216,9 +284,10 @@ def main(argv=None):
     # E15 run (94.4%); a FAIL here is honest, not a regression to mask.
     passed = success_rate >= PASS_THRESHOLD
 
-    # per-post breakdown (E16-complete): which expected-post the model could
-    # vs couldn't identify from the screenshot alone — surfaces the honest
-    # difficulty that success depends on which un-toggled post gets tapped.
+    # per-post breakdown — under E17-A Option B the verifier is any_new, so
+    # per_post by REQUESTED post_id is no longer a pass/fail discriminator
+    # (any post toggled = success). We keep it for continuity but it now just
+    # shows the success rate is uniform across requested labels (sanity).
     per_post: dict[str, dict] = {}
     for pid in args.posts:
         ps = [s for s in all_samples if s["post_id"] == pid]
@@ -229,24 +298,39 @@ def main(argv=None):
             "success_rate": round(ps_ok / len(ps), 4) if ps else 0.0,
         }
 
+    # E17-A Option B: the MEANINGFUL per-post signal — which post did the
+    # model ACTUALLY tap (toggled_post_id)? A strong position bias (always
+    # post[0], never post[2]) would show the model isn't discriminating, even
+    # though any_new scores it PASS. This is descriptive (not scored) — it
+    # surfaces whether the CUA explores or always picks the top post.
+    per_toggled_post: dict[str, int] = {}
+    for s in all_samples:
+        tp = s.get("toggled_post_id")
+        if tp:
+            per_toggled_post[tp] = per_toggled_post.get(tp, 0) + 1
+
     report = {
         "ts": ts,
         "test": "x_toggle_killtest",
-        "e16_note": (
-            "E16-COMPLETE pure-vision CUA run (2026-08-12): the model's "
-            "instruction names NO post_id, NO post text, NO current toggle "
-            "state — it must find an un-toggled post from the screenshot "
-            "alone. The prior content_hint backdoor (posts.json read, then "
-            "DOM textContent read) is fully removed. This number is NOT "
-            "comparable to E15's 94.4% (that run injected the target post's "
-            "text into the prompt). A lower rate here is expected + honest."),
+        "user_behavior_driver": "scripted" if args.use_driver else "none",
+        "governance_interpreter": "dynamic" if args.use_driver else "none",
+        "instruction_source": "governance_driver" if args.use_driver else "bridge_fstring",
+        "e17_note": (
+            "E17-A Option B (2026-08-12): verifier now ALIGNED with the "
+            "any-post instruction (verify_mode='any_new' — bridge checks the "
+            "toggle list grew, not that a specific post_id entered). Resolves "
+            "the .mrules E17 §0-B ill-posed-task contradiction (instruction "
+            "said 'any untoggled post' but verifier required a specific post). "
+            "The before-snapshot is SERVER-SIDE only (verification) — NEVER "
+            "leaked to the prompt (that was the E16 bug; this does not repeat "
+            "it). NOT comparable to E16's 38.9% (that was the ill-posed "
+            "specific-post verifier on an any-post instruction — a 1/3-guess "
+            "lottery). This number measures 'can the CUA toggle ANY post'."),
         "description": (
-            "X app toggle (like/retweet/bookmark) via gui_act_async — the "
-            "FIRST non-wechat MobileGym write path, E16-complete pure-vision "
-            "(no content_hint, no post_id injection). Proves the TaskVM "
-            "grounding loop can drive MobileGym when the harness coordinate "
-            "pipeline (env.step + norm_0_1000) is correct + the model finds "
-            "the target post by vision alone."),
+            "X app toggle (like/retweet/bookmark) via gui_act_async — E16-"
+            "complete pure-vision + E17-A Option B any-new-post verifier. The "
+            "easy aligned baseline; the strong discriminating task is MG-1 "
+            "social_morning_brief (visible-uniqueness)."),
         "posts_tested": args.posts,
         "operators_tested": args.operators,
         "n_samples_per_post_op": args.samples,
@@ -257,40 +341,36 @@ def main(argv=None):
         "PASS": passed,
         "per_operator": per_op,
         "per_post": per_post,
+        "per_toggled_post": per_toggled_post,
         "samples": all_samples,
         "honest_framing": {
             "what_PASS_means": (
                 ">=80% of toggle operations succeeded — the model can find "
                 "an un-toggled post from the screenshot alone, locate the "
-                "correct action icon, and tap it precisely enough for the "
-                "store toggle to fire on the EXPECTED post. VM MOMENT: the "
-                "TaskVM grounding loop drives a real MobileGym app write via "
-                "vision + gestures, with no set_state backdoor AND no "
-                "content_hint backdoor."),
+                "correct action icon, and tap it precisely enough for SOME "
+                "post's store toggle to fire. VM MOMENT (aligned baseline): "
+                "the TaskVM grounding loop drives a real MobileGym app write "
+                "via vision + gestures, no set_state backdoor, no "
+                "content_hint backdoor, AND the verifier now matches the "
+                "instruction semantics (E17-A Option B)."),
             "what_FAIL_means": (
-                "<80% success — under E16-complete pure vision this is "
-                "EXPECTED and is NOT necessarily a harness bug. The likely "
-                "cause: on a multi-post timeline where none are toggled, the "
-                "model has no screenshot-visible signal for WHICH un-toggled "
-                "post is the expected target, so it may tap the wrong one "
-                "(verifier then correctly fails it — the expected post_id is "
-                "not in the toggle list). Check the per_post breakdown: if "
-                "post[0] succeeds but post[2] fails, that is the ambiguity, "
-                "not a coordinate/calibration bug. ONLY if ALL posts fail at "
-                "all positions should you suspect the coordinate pipeline or "
-                "instruction clarity."),
+                "<80% success means the model could not reliably toggle ANY "
+                "post — this IS a real CUA/grounding signal now (unlike the "
+                "pre-E17 ill-posed version where failure was 1/3-guess "
+                "luck). Likely causes: icon mis-localization, tap-coordinate "
+                "calibration, or the model not finding an un-toggled post. "
+                "Check per_operator to see if one icon type fails more."),
+            "per_toggled_post_interpretation": (
+                "Shows WHICH post the model actually tapped. If one post "
+                "dominates (e.g. always post[0]) the model has a position "
+                "bias — it passes any_new but isn't discriminating content. "
+                "A balanced distribution is stronger evidence of real visual "
+                "grounding. This is descriptive, not scored."),
             "caveats": (
-                "Only tests posts visible without scrolling (the first 3 in "
-                "the X base dataset). Posts requiring scroll may need higher "
-                "max_steps. The READ path (_flatten_x_posts_async) reads the "
-                "DOM for the compiler/verifier observation — that is the "
-                "compliant encoder read path, NOT the write-path model "
-                "instruction (which is pure-vision)."),
-            "expected_under_pure_vision": (
-                "40-80% is the honest expected band for GPT-5.6-sol pure-"
-                "vision CUA on a 3-post timeline with no post-id hint. "
-                "<30% would indicate a deeper grounding/coordinate problem "
-                "worth investigating; >80% would be a strong CUA result."),
+                "Only tests posts visible without scrolling. The strong "
+                "discriminating task (MG-1, visible-uniqueness by content) "
+                "is in run_mg_vm_killtest, not here. This killtest is the "
+                "easy baseline — do not over-claim from a high score here."),
         },
     }
 
@@ -301,22 +381,21 @@ def main(argv=None):
     print(f"\nWrote {out_path}")
     print(f"\n=== X TOGGLE KILL-TEST: {'PASS' if passed else 'FAIL'} ===")
     print(f"  success rate: {n_success}/{n_total} = {success_rate:.1%} "
-          f"(threshold {PASS_THRESHOLD:.0%})  [E16-complete PURE-VISION CUA — "
-          f"expected band 40-80%, NOT comparable to E15's 94.4%]")
+          f"(threshold {PASS_THRESHOLD:.0%})  [E17-A Option B: any-new-post "
+          f"verifier aligned with any-post instruction]")
     for op, stats in per_op.items():
         print(f"  {op}: {stats['n_success']}/{stats['n']} = {stats['success_rate']:.1%}")
-    print(f"  per-post (which expected-post the model identified from vision):")
-    for pid, stats in per_post.items():
-        print(f"    {pid}: {stats['n_success']}/{stats['n']} = {stats['success_rate']:.1%}")
+    print(f"  per_toggled_post (which post the model ACTUALLY tapped):")
+    for pid, cnt in sorted(per_toggled_post.items()):
+        print(f"    {pid}: {cnt}")
     if passed:
-        print(f"\n  VM MOMENT: the TaskVM grounding loop drives MobileGym X app")
-        print(f"  toggle writes via vision + gestures — no set_state backdoor,")
-        print(f"  no content_hint backdoor (pure-vision CUA).")
+        print(f"\n  VM MOMENT (aligned baseline): the TaskVM grounding loop drives")
+        print(f"  MobileGym X app toggle writes via vision + gestures — verifier")
+        print(f"  now matches the any-post instruction (E17-A Option B).")
     else:
-        print(f"\n  [honest: pure-vision CUA on a 3-post timeline is HARD — the")
-        print(f"   model can't know WHICH un-toggled post is the target. See")
-        print(f"   per_post above; if post[0] >> post[2], that's the ambiguity,")
-        print(f"   not a coordinate bug.]")
+        print(f"\n  [honest: under Option B, failure is a REAL CUA signal (not the")
+        print(f"   pre-E17 1/3-guess lottery). Check per_operator for icon-specific")
+        print(f"   failures.]")
     return 0 if passed else 1
 
 

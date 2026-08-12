@@ -65,6 +65,70 @@ app = Flask(__name__,
             template_folder=str(_SCENARIO_DIR / "templates"),
             static_folder=str(_SCENARIO_DIR / "static"))
 
+# ── E17-B: WebSocket endpoint for HumanWebSocketDriver ────────────────────
+# The server gains a flask-socketio WS endpoint (namespace "/governance") that
+# pushes VMStateSnapshot to the browser + receives UserBehaviorEvent dicts back.
+# This is the server side of HumanWebSocketDriver (taskvm/governance/human_driver.py
+# is the client). Recon (area 9) confirmed workspace_ui was pure Flask HTTP —
+# this adds the WS layer the handoff §1.2 requires for the real-human driver.
+# Graceful degradation: if flask_socketio is not installed, ``socketio`` stays
+# None and the server runs unchanged via app.run (the scripted path is unaffected).
+socketio = None
+_governance_namespace = "/governance"
+# inbound human events (per-sid). The governance driver loop reads from here.
+human_event_queues: dict[str, "queue.Queue"] = {}
+
+
+def init_socketio(server_app) -> bool:
+    """Initialize the WS endpoint. Returns True if socketio is available,
+    False if flask_socketio is not installed (graceful degradation)."""
+    global socketio
+    if socketio is not None:
+        return True
+    try:
+        from flask_socketio import SocketIO  # type: ignore
+    except ImportError:
+        logger.warning("flask_socketio not installed — WebSocket endpoint "
+                       "disabled (HumanWebSocketDriver unavailable; "
+                       "ScriptedUserDriver unaffected). pip install flask-socketio.")
+        return False
+    import queue as _queue
+    socketio = SocketIO(server_app, cors_allowed_origins="*", async_mode="threading",
+                        logger=False, engineio_logger=False)
+
+    @socketio.on("connect", namespace=_governance_namespace)
+    def _on_connect():
+        logger.info("[ws] governance client connected")
+
+    @socketio.on("disconnect", namespace=_governance_namespace)
+    def _on_disconnect():
+        logger.info("[ws] governance client disconnected")
+
+    @socketio.on("user_event", namespace=_governance_namespace)
+    def _on_user_event(data):
+        """Receive a UserBehaviorEvent from the browser. ``data`` may carry a
+        ``sid`` to route to the right session's queue."""
+        from flask import request as _req
+        sid = (data or {}).get("sid") or next(iter(human_event_queues), None)
+        if sid and sid in human_event_queues:
+            human_event_queues[sid].put(data)
+        logger.info("[ws] user_event for sid=%s: %s", sid,
+                    {k: v for k, v in (data or {}).items() if k != "sid"})
+    return True
+
+
+def push_vm_state(sid: str, vm_state_dict: dict) -> None:
+    """Push a VMStateSnapshot to all connected governance clients (the human
+    driver's on_state_update triggers this server-side push). No-op if the WS
+    endpoint is not initialized."""
+    if socketio is None:
+        return
+    try:
+        socketio.emit("vm_state", {"sid": sid, "snapshot": vm_state_dict},
+                      namespace=_governance_namespace)
+    except Exception as e:
+        logger.warning("[ws] failed to push vm_state: %s", e)
+
 
 @dataclass
 class WorkspaceSession:
@@ -523,6 +587,11 @@ def main(argv=None):
                              "Default off (f-string) for backward compat + to avoid a "
                              "model call per page render unless explicitly opted in.")
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--ws", action="store_true",
+                        help="E17-B: enable the WebSocket endpoint (namespace "
+                             "/governance) for HumanWebSocketDriver. Requires "
+                             "flask_socketio. Default off (the scripted path "
+                             "does not need it).")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s")
@@ -541,9 +610,19 @@ def main(argv=None):
                            f"or the mobilegym bridge on :3019)")
     sess = seed_session(fixture, adapters, host=args.app_host)
     sess.use_genui = args.genui   # Task5: wire GenUI decoder into the live render
+    if args.ws:
+        # create the per-sid inbound event queue for HumanWebSocketDriver
+        import queue as _queue
+        human_event_queues[sess.sid] = _queue.Queue()
     logger.info(f"workspace_ui on :{args.port} (task={args.task}) → open "
                 f"http://127.0.0.1:{args.port}/{sess.sid}")
-    app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
+    if args.ws and init_socketio(app):
+        logger.info(f"[ws] WebSocket endpoint enabled on namespace "
+                    f"{_governance_namespace} (HumanWebSocketDriver ready)")
+        socketio.run(app, host=args.host, port=args.port,
+                     debug=args.debug, allow_unsafe_werkzeug=True)
+    else:
+        app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
 
 
 if __name__ == "__main__":

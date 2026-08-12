@@ -41,9 +41,32 @@ class CanonicalBinding:
 
 
 @dataclass
+class Checkpoint:
+    """A governance milestone the user can advance to / roll back to.
+
+    E17: a task's progress is modeled as a sequence of checkpoints. Each
+    checkpoint carries a ``criterion`` — an ``expected_diff``-shaped dict the
+    verifier can check against live canonical state to decide whether the
+    milestone has been reached. This is what ``GovernanceInterpreter`` uses to
+    infer advance/rollback subgoals (``set_milestone`` / ``rollback_to`` events)
+    and what the VM5-property killtest reports as ``governance_checkpoint``.
+
+    ``criterion`` is verifier-only GT (same no-leak boundary as ``expected_diff``):
+    it is consumed by the verifier path, NEVER fed to the CUA prompt.
+    """
+    id: str                            # "C1" | "C2"  (stable label the driver/interpreter address)
+    description: str = ""              # human-facing "已 like 帖子"
+    criterion: dict = field(default_factory=dict)  # {app: {entity_id: {field: expected}}} OR {"_any_new_in": {...}}
+
+
+@dataclass
 class CanonicalTaskGraph:
     """The full GT for one task: seed state + the user edit + the GT bindings +
-    what must change (expected_diff) + what must NOT (non_interference_set)."""
+    what must change (expected_diff) + what must NOT (non_interference_set).
+
+    E17 adds ``checkpoints`` — the governance milestone sequence (see
+    ``Checkpoint``). It defaults to an empty list so all pre-E17 tasks
+    (positional construction up to ``description``) keep working unchanged. """
     task_id: str
     goal: str
     seed_state: dict                   # {calendar: {events:[...]}, taskboard: {tasks:[...]}}
@@ -52,6 +75,7 @@ class CanonicalTaskGraph:
     non_interference_set: list[tuple[str, str]]  # [(app, entity_id), ...] must NOT change
     expected_diff: dict                # {app: {entity_id: {field: expected_value}}}
     description: str = ""
+    checkpoints: list[Checkpoint] = field(default_factory=list)  # E17 governance milestones (empty = single-step task)
 
 
 # ── Task 1: release_reschedule (the canonical doc example) ───────────────────

@@ -1078,7 +1078,51 @@ E17 和 E10 一样，揭示的是系统性问题而非局部 bug：
 
 E16 的工作（移除后门）是必要的，但它使这个建模缺失变得更加可见：当没有后门撑着，CUA 的 38.9% SR 才真正暴露了"instruction 质量与 GenUI 完全脱节"这个架构问题。这是一个非常有价值的暴露——**后门不只是非侵入性原则的违规，它还在掩盖一个架构设计缺陷**。
 
-**给后续 agent 的一条新原则**：**任何 killtest/evaluation 脚本如果直接从"意图层"（`{operator, value}`）开始驱动执行，而不经过 GenUI 界面和用户行为建模，都应该被视为"测试了流水线的一段，但不是整个流水线"——这类测试有价值（测 CUA 的执行能力），但不能被声称为"端到端 VM 流水线的验证"**。两者的区别必须在报告里明确标注。
+**给后续 agent 的一条新原则**：**任何 killtest/evaluation 脚本如果直接从"意图层"（`{operator, value}`）开始驱动执行，而不经过 GenUI 界面和用户行为建模，都应该被视为"测试了流水线的一段，但不是整个流水线"——这类测试有价值（测 CUA 的执行能力），但不能被声称为"端到端 VM 流水的验证"**。两者的区别必须在报告里明确标注。
+
+---
+
+### E17 实施结果（2026-08-12，coding agent 执行完成）
+
+**三个任务包全部完成，CI 三层全绿。** 本节是诚实的实施记录 + 对 HANDOFF_E17.md 假设的偏离（recon 发现 handoff 在未验证实际 API 的情况下写就，有多处与代码现实不符——下面逐条记录）。
+
+#### E17-A：新任务设计 + x_toggle 修复
+1. **`Checkpoint` dataclass 新建**（`benchmark/fixtures.py`）+ `CanonicalTaskGraph.checkpoints` 字段（`field(default_factory=list)`，插在 `description` 之后——8 个已有 task 全用 kw/positional 构造，加默认值保证零 break）。
+2. **MG-1 `social_morning_brief`**（visible-uniqueness 强任务）：like 真实存在的 CPI 帖子 `p_1879539450872778943`（posts.json 里 content="…核心CPI意外下降…"）+ 发微信给黄勇。2 checkpoint（C1 liked, C2 messaged）。
+3. **MG-2 `expense_and_notify`**（top3 + 双 checkpoint + honest-409）：发 V1 → checkpoint C1 → rollback_to C0（诚实 409）→ 重发 V2（C2）。
+4. **x_toggle Option B**（用户选）：`bridge.mutate_x` 新增 `verify_mode` 参数（`"specific"` 默认=旧行为零回归，`"any_new"`=Option B）。any_new 路径在 gesture 前**服务端**读 before-snapshot（**不进 prompt**——E16 的 leak 是把 state 告诉 model；这里只用于验证），验证 toggle list 增长（write）/缩减（rollback）。killtest 传 `verify_mode=any_new` + 记录 `toggled_post_id`（model 实际点了哪条帖子，揭示位置偏置）。
+
+#### E17-B：governance/ 层（L3+L4，全新）
+新建 `taskvm/governance/`（7 文件）：`subgoal.py`（SubgoalInstruction，**verification_criterion 是结构化 dict 不是 string**——recon 确认 `check_round_trip` 收 fixture+snapshot 不收 string）、`user_behavior_driver.py`（UserBehaviorDriver ABC + UserBehaviorEvent + EVENT_TYPES）、`vm_state.py`（VMStateSnapshot，组合 binding+adapters+rollback_log+checkpoints+checkpoint_saga_map）、`checkpoint_graph.py`、`scripted_driver.py`（ScriptedUserDriver + 3 task 的 canonical event sequence + `--dry-run` CLI）、`governance_interpreter.py`（edit_field 确定性 + rollback_to 动态 LLM NL）、`human_driver.py`（HumanWebSocketDriver）。
+- **bridge `instruction_override` 参数**：`mutate_x` + handler 接受 `instruction_override`，set 时跳过 inline f-string 用 governance NL——这是"完整链路"的接入点。
+- **WS endpoint**：`workspace_ui/server.py` 加 `init_socketio` + `/governance` namespace + `push_vm_state` + `--ws` flag（flask-socketio 已安装到 senseact env；graceful degradation：未装则 server 仍走 app.run）。
+- **`--use-driver` flag**（`run_x_toggle_killtest`）：route through ScriptedUserDriver + GovernanceInterpreter → instruction_override。
+
+#### E17-C：模块化重构（零功能变化）
+- `taskvm/substrate/` 新建：`base.py`（state_adapter.py 全文移入）+ `mobilegym/bridge.py`（mobilegym_bridge.py 全文移入）+ `osworld/README_placeholder.py`（接口预留未实现）+ `builtin/__init__.py`。
+- **file-level re-export shim**（recon area 8 关键发现：13 个 caller 都用 `from taskvm.harness.state_adapter import X` 子模块路径，所以 `__init__.py` re-export 不够，必须 file-level shim）：`harness/state_adapter.py` → `from taskvm.substrate.base import *`；`harness/mobilegym_bridge.py` → re-import + `if __name__=='__main__': main()`（保 `python -m taskvm.harness.mobilegym_bridge` 可运行，ablation 脚本依赖）。
+- `taskvm/vm_state/` 新建为 **re-export package**（不物理移动 task_state/verifier——它们的 import 面太大，re-export 是零回归选择；未来可物理迁移）。
+- `tests/test_imports.py`：17 个 L0 测试（旧路径 re-export + 新路径 + governance 接口签名 + mutate_x 签名 + dry-run mock pipeline）。
+
+#### CI 验证结果（三层全绿）
+- **L0 Import & Interface**：`pytest tests/test_imports.py` → **17/17 PASS**（0.63s）。handoff §5.3 Step 1 的 5 个 import check 全 OK（governance + 旧路径 re-export + 新路径）。
+- **L1 Mock Pipeline**：`run_w1_killtest --mock` → **3/3 task PASS**（release_reschedule / design_review_delay / doc_handoff 各 3/3，score=1.0，binding_f1=1.0，neg-control=0.3）——E17-C 重构对 builtin 路径零回归。
+- **L2 Real-model End-to-end**（live bridge :3019 + Vite :3000 + gpt-5.6-sol）：
+  - `--use-driver`（governance NL via instruction_override）：**1/1 PASS**，2 steps / 16.4s，bridge log 确认 `instruction_override=yes verify_mode=any_new`——**"拦腰截断"已修复**，流水线从用户行为层完整走通。
+  - 默认路径（bridge f-string + any_new）：**1/1 PASS**，2 steps，`instruction_override=no`——f-string 路径零回归。
+  - 证据文件：`eval_results/x_toggle_killtest_20260812_150712.json`（driver）、`..._150752.json`（default）、`eval_results/w1_20260812_150205.json`（L1）。
+
+#### 诚实的偏离与边界（不可过度声称）
+1. **MG-1 不是 bidirectional-binding 任务**（handoff §2.2 想用 1 var→2 bindings，但 toggle_like 要 value=True 而 send_message 要 message TEXT——不同语义量不同值，compile_patch 把单个 new 传给所有 binding 会把 toggle_like.value 设成文本）。MG-1 用**两个 var_id**（morning_brief_liked + morning_brief_message）。bidirectional-binding（1 var→N bindings 同值）由 **release_reschedule** 体现（release_date → calendar E1.date + taskboard T1/T2.deadline 全是 "2026-08-18"）。这是对 handoff 设计的诚实修正。
+2. **MG-1 丢弃了 handoff 的 alipay portfolio_value seed**（`{"alipay":{"portfolio_value":52860}}`）——recon 确认 (a) X posts 不能经 inject_task seed（bridge 从 posts.json 加载，seed_state['x']['posts'] 被忽略），(b) alipay portfolio_value 不是验证过的 set_state 字段（现有 top3 fixture 故意不 seed alipay）。MG-1 用真实存在的 CPI 帖子 + 跨 app 由 x+wechat 体现。
+3. **L2 是单样本存在性证明，不是统计数字**：1/1 只证明管线打通，不证明 SR。per_toggled_post 揭示真实位置偏置（default 路径请求 post[1] 但 model 点了 post[0]——Option B 下这是 PASS 因为 list 增长，但偏置被如实记录）。要拿统计 SR 需 `--samples 5` 以上（未跑，因 QPM 限流 + token 预算）。
+4. **`GovernanceInterpreter.rollback_to` 的动态 LLM NL 路径未在 L2 跑通**（dry-run 走的是 `enable_llm_rollback_nl=False` 的确定性模板 + 空 rollback_log）。dynamic LLM（complete_json）代码已写 + manual_review flag 已设，但首次真实 rollback 的 LLM 输出未经 manual review——这是 handoff §6 boundary 3 的未竟事项，留给下一轮。
+5. **HumanWebSocketDriver 代码完整 + WS endpoint 已加，但未做真人端到端 demo**（需要浏览器客户端 + 真人操作，超出本轮 coding 范围）。ScriptedUserDriver 路径已端到端验证。
+6. **vm_state/ 是 re-export package 不是物理迁移**（task_state/verifier 的 import 面太大，re-export 是零回归选择）。handoff §3.2 的 `vm_state/compiler.py` 等物理位置未实现，只是 alias。
+7. **handoff §5.3 Step 4 的 `run_mg_vm_killtest` 未新建**（MG-1/MG-2 的跨 app 真实执行 killtest）——MG-1 的 x-toggle 部分由 x_toggle killtest 覆盖，但 wechat send_message + 跨 app 编排的完整 MG-1/MG-2 killtest 是下一轮工作。本轮聚焦管线打通（E17-B 的 --use-driver 证明）+ 重构零回归（E17-C）。
+
+#### 对 handoff 假设的 recon 修正记录（供后续 agent）
+recon workflow（10 agent，529K tokens）发现 HANDOFF_E17.md 在未验证实际 API 的情况下写就，主要不符：(a) `bridge.mutate` 不存在（是 HTTP POST /api/x/{sid}/{eid} → mutate_x）；(b) `verifier.check(string)` 不存在（是 `check_round_trip(fixture, snapshots)` 结构化）；(c) `Checkpoint`/`VMStateSnapshot`/`SubgoalInstruction`/`governance/` 全不存在（greenfield）；(d) workspace_ui 纯 Flask 无 WS；(e) harness/__init__.py 是裸 docstring（re-export 必须 file-level 不是 __init__）；(f) X posts 不能 seed。本轮按代码现实实施，所有偏离上面已记录。
 
 ---
 
