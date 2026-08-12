@@ -965,3 +965,117 @@ E15 的 94.4%/100% 数字是在 posts.json + get_state 双重信息泄露的条�
 它揭示了一个被 E14-core 以"消融实验缺失"名义指出、但根源更深的问题：**"哪个修复贡献最大"这个问题的框架本身就是错的**——我们不应该在"哪种泄露方式效果最好"上做消融，而应该先问"哪些信息是 agent 被允许从外部看到的"。E14-core 批评的是"没有分离贡献"，但 E16 的教训更根本：**分离贡献的前提是每个"修复"本身都是合规的；如果某个"修复"实际上是一个隐蔽的非侵入性原则违规，消融实验得到的因果分解是对一个不正确系统的精确描述**。
 
 **给后续所有 agent 的强制规则（呼应 E7 的推论）**：任何往 model prompt 里注入信息的地方，都必须问一遍：**"这个信息，在真实 CUA 环境（没有 debug 权限、没有后端 API 访问）里，agent 能从屏幕上看到吗？"** 如果不能，就不该出现在 prompt 里。
+
+---
+
+## E17 — 流水线被拦腰截断 + ill-posed 任务 + MobileGym VM五性质缺失：三个同源的根本问题，以及 UserBehaviorDriver 架构的引入
+
+**[session: 2026-08-12，用户在审查 E16 的 38.9% 纯视觉 SR 之后，发现 SR 下降不只是"纯视觉代价"，而是暴露了三个更深的问题]**
+
+### 错在哪（三层问题，从表象到根因）
+
+#### 第一层（表象）：38.9% SR 看起来太低，不应该
+
+用户的直觉是对的。CUA 的视觉 grounding 能力不至于连 40% 都做不到。但这个直觉本身就是线索——如果模型能力不是瓶颈，那瓶颈是什么？
+
+#### 第二层（任务层 bug）：X toggle 任务在"无后门"条件下是 ill-posed（语义矛盾）
+
+E16 修复了代码层的后门，但暴露了任务层的矛盾：
+- **verifier 判据**：特定 `post_id`（如 `p_1879539450872778943`）出现在 `likedPostIds` 里
+- **instruction**：找一条未 toggle 的帖子，点它的 like 图标
+- **矛盾**：fresh reset 之后三条帖子全是 outline 状态，视觉上**完全一致**，模型无法从截图判断"哪条是预期目标帖子"，任务退化为 1/3 概率猜测
+
+这不是 CUA 能力问题，是**任务设计在语义层自相矛盾**：verifier 关心"哪条被 toggle"，instruction 却不告诉 CUA"这条帖子有什么视觉特征"。per_post 数据（post0=66.7%, post1=50%, post2=0%）完美验证了这是位置偏置 + 随机猜测的组合，不是模型能力上限。
+
+**好任务的判断标准（用户原话）**：让人去做也能一下做对——如果连人都看不出"要点哪条帖子"，任务就是坏任务。
+
+#### 第三层（架构层 bug）：整个流水线从"意图层"开始，完全跳过了 GenUI 界面和用户行为建模
+
+这是本次最根本的发现，也是前两层问题的共同根源：
+
+```
+当前（拦腰截断的）：
+  killtest 脚本 → bridge.mutate(post_id, operator, value=True) → f-string instruction → CUA
+  ↑
+  从这里直接开始，跳过了：
+    - GenUI 解码出来的界面（用户实际看到的）
+    - 用户在界面上做的操作（点了哪个控件）
+    - 从用户操作到 CUA subgoal 的语义翻译
+```
+
+这意味着：
+1. **无法无缝切换到真实人类**：真实人类面对的是 GenUI 界面，不是 `{operator, value}` 字典
+2. **CUA instruction 质量与 GenUI 完全脱节**：f-string 是 bridge 硬编码的，不是从 GenUI 的语义里推导出来的
+3. **测出来的 SR 测的是错误的东西**：是"给定一个精心设计的 f-string，CUA 能不能执行"，不是"给定 GenUI 界面上的一次用户操作，整个链路能不能端到端工作"
+
+### MobileGym VM五性质缺失（第四个同源问题）
+
+用户同时指出：MobileGym 上目前没有任何任务体现 VM 五性质。当前唯一的任务（`top3_expense_to_wechat`）是单变量单写操作，缺少：
+- **bidirectional binding**：一个 VM 变量绑多个 app 的对象
+- **cross-app fanout**：一次变更引发多个 app 同步
+- **governance + checkpoint**：用户设定目标深度的能力
+- **reversibility spectrum**：可逆 + 诚实不可逆的混合测试
+- **substrate-independence**：同一 VM 操作在不同 substrate 语义一致
+
+### 纠正后变成什么：UserBehaviorDriver 架构（网络协议栈类比）
+
+用户提出了一个非常精准的架构类比——把整个系统想象成一个网络协议栈，不同层级可以独立替换：
+
+```
+L4: 用户行为层 (UserBehaviorDriver)
+    程序化脚本 ←── 无缝切换 ──→ 真实人类 (WebSocket)
+L3: 治理解释层 (GovernanceInterpreter)
+    用户行为事件 → CUA subgoal（动态推断 or 静态预生成）
+L2: GenUI 界面层 (workspace_ui)
+    只读区 + 可读可写区 + A2UI 解码器 + 进度/回退控件
+L1: VM 状态层 (task_state + verifier)
+    binding compiler + verifier + reconciliation
+L0: Substrate 层 (harness)
+    自建平台 ←── 可插拔 ──→ MobileGym ←── ──→ OSWorld
+```
+
+**核心原则（直接继承 E1 的 governance over autonomy 原则）**：
+- L4 和 L0 各自独立可替换，**互不知道对方的存在**
+- L3 是新增的关键层：`GovernanceInterpreter` 把"用户在 L2 界面上做了什么"翻译成"CUA 应该执行什么 subgoal"
+- instruction 的质量不再由 bridge 里的 f-string 决定，而是由 GovernanceInterpreter 从用户行为的语义里推导出来
+- 真实人类和程序化脚本的唯一区别是 L4 的实现不同，L3 以下完全透明
+
+**动态推断 vs 静态预生成**：
+用户提出了两种策略（"用空间换时间 or 时间换空间"）。最终选择**动态推断**（runtime LLM 调用），因为：
+- checkpoint 空间是动态的（内容取决于任务），无法静态枚举所有可能的转换
+- 用户明确说"这个调用开销相对小，因为只是生成意图"
+- 静态预生成在"进度条 free-form 回退"场景下无法做到完备
+
+### 三类任务设计的新原则（本次用户明确要求，固化为项目规范）
+
+1. **可视唯一性**：任务目标对象必须在 GenUI 界面上有唯一可视的识别特征（文字/颜色/位置），不能依赖内部 ID（这是"让人也能做对"的直接翻译）
+2. **跨 app 绑定**：每个 MobileGym 任务至少涉及 2 个 app，至少有一个 VM 变量绑多个 app 的写回
+3. **checkpoint 粒度**：每个任务至少设 2 个 checkpoint，以便测试 governance 行为（进度回退 + 推进）
+4. **reversibility 混合**：每个任务必须包含可逆 + 诚实不可逆两种写操作（完整测 reversibility spectrum）
+5. **verifier-instruction 对齐**：verifier 的判据必须和 instruction 在语义上等价——如果任务说"找帖子 X 点 like"，verifier 就判"帖子 X 在 likedPostIds"，不是"任意帖子在列表里"
+
+### 代码模块化重构方向
+
+用户要求按"网络协议栈"的类比重构目录结构，见 `docs/HANDOFF_E17.md §3`。核心约束：
+- **不删除任何已实现功能**，旧 import 路径通过 re-export 保持兼容
+- 新增 `taskvm/substrate/` 替代 `harness/` 的 substrate-specific 部分
+- 新增 `taskvm/governance/` 对应 L3/L4 层
+- 旧 `harness/`、`task_state/`、`workspace_ui/` 保留作为 re-export 壳
+
+### 遗留问题（供下一轮 coding agent）
+
+完整任务清单见 `docs/HANDOFF_E17.md`，三个任务包按优先级：
+1. **E17-A（最高优先级）**：新 MobileGym 任务设计（满足 VM 五性质，可视唯一性）
+2. **E17-B（次高优先级）**：UserBehaviorDriver + GovernanceInterpreter 实现，打通完整链路
+3. **E17-C（最低优先级）**：目录结构模块化重构（零功能变化，保证 re-export 兼容）
+
+### 为什么这次纠错重要
+
+E17 和 E10 一样，揭示的是系统性问题而非局部 bug：
+
+- E10 说"GUI 执行器和 GenUI 解码器从未被真正实现过"——那是实现层的空白
+- **E17 说"即使实现层填上了，流水线的建模层还是错的"**——我们建模了"意图执行"，但没有建模"用户行为 → 意图推断 → 执行"这个完整链路
+
+E16 的工作（移除后门）是必要的，但它使这个建模缺失变得更加可见：当没有后门撑着，CUA 的 38.9% SR 才真正暴露了"instruction 质量与 GenUI 完全脱节"这个架构问题。这是一个非常有价值的暴露——**后门不只是非侵入性原则的违规，它还在掩盖一个架构设计缺陷**。
+
+**给后续 agent 的一条新原则**：**任何 killtest/evaluation 脚本如果直接从"意图层"（`{operator, value}`）开始驱动执行，而不经过 GenUI 界面和用户行为建模，都应该被视为"测试了流水线的一段，但不是整个流水线"——这类测试有价值（测 CUA 的执行能力），但不能被声称为"端到端 VM 流水线的验证"**。两者的区别必须在报告里明确标注。
