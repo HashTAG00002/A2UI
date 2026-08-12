@@ -1253,3 +1253,33 @@ recon workflow（10 agent，529K tokens）发现 HANDOFF_E17.md 在未验证实�
 2. **rollback_to LLM NL 的 manual_review UI**：`SubgoalInstruction.manual_review_needed=True` 目前只是字段，没有 workspace_ui 层的呈现（进度条/标记显示"这一步操作的 governance 描述需人工确认"）。
 3. **MG-2 V1 后验证 C1 criterion 的 _contains 模式**：`expense_and_notify` 的 C2 criterion 需要 `_contains` 语义（wechat append-only messages），当前 `run_mg_vm_killtest._check_criterion` 已支持 `_contains` 字段，但 MG-2 fixture 的 criterion 是 `exact_equality`（因为 C1 时 chat 是空的，V1 是第一条消息，exact 成立）。后续如果增加 V1+V2 双消息场景需改用 `_contains`。
 4. **X toggle 位置偏置问题**：`per_toggled_post` 显示模型倾向选第2个帖子，不均匀分布。这是 any_new 下的已知偏置（不影响 PASS），但 MG-1 `social_morning_brief` 用 `visible_token="核心CPI"` 做 specific-content 识别，位置偏置不影响它（模型需找特定内容的帖子）。
+
+---
+
+## E19 — EE 阶段执行（2026-08-12，coding agent 按交接 prompt EE.1-EE.10 顺序执行）
+
+**[session: EE 阶段 coding agent，分支 `ee-phase`，每 EE.X 一个 commit]**
+
+环境基线核实（开工前）：L0 `pytest tests/test_imports.py` = **20 passed**；L1 `run_w1_killtest --mock` = **W1 PASS 3/3**（release_reschedule / design_review_delay / doc_handoff 各 3/3，neg=0.3）。**环境坑**：`conda run -n taskvm` 在本机误解析到 `/home/sankuai/conda/envs/codelab`（codelab 无 pytest），必须用绝对路径 `/mnt/dolphinfs/.../conda/envs/taskvm/bin/python` 跑 taskvm 命令——这是新会话第一个易踩的坑。
+
+### EE.1 — 默认执行器改为 gui_agent（关闭 §12.16 后门）
+
+**改了什么**（`taskvm/workspace_ui/server.py`，4 处）：
+1. `_get_fixture_and_adapters(task_id, host, executor='gui_agent')` 加 executor 参数，core + mobilegym 两条分支都透传 `make_adapters(..., executor=executor)`。
+2. `seed_route()` 读 body 里的 `executor`（默认 `gui_agent`，向后兼容）。
+3. `main()` 加 `--executor {api,gui_agent}` argparse（默认 `gui_agent`）。
+4. `main()` 启动时按 executor 值打 log：`gui_agent`→info "§12.16-compliant"；`api`→warning "LEGACY BACKDOOR PATH, NOT §12.16-compliant, mock/debug only"。
+
+**为什么改**：`make_adapters` 早已接受 `executor` 参数（E11 遗留问题4），但 `server.py::_get_fixture_and_adapters` 从不传它 → demo/server 默认走 `requests.post` 后门，§12.16 判定标准全线失守。EE.1 把 demo 入口默认翻成 gui_agent，让真实浏览器手势成为默认写/回退路径。
+
+**证据**（`/tmp/ee1_verify.py`，非仓库产物）：
+- `_get_fixture_and_adapters("doc_handoff")` 默认 → `{calendar:True, taskboard:True, drive:True}` 全 use_gui_executor=True ✓
+- `executor='api'` → 全 False（legacy 向后兼容）✓
+- mobilegym 分支 `top3_expense_to_wechat` 默认 → `{wechat:True, alipay:True}` ✓（透传到位）
+- `python -m taskvm.workspace_ui.server --help` 显示 `--executor {api,gui_agent}` default gui_agent ✓
+- L0 回归：20 passed（零回归）✓
+
+**已知局限（不美化）**：
+1. **`make_adapter`/`make_adapters` 自身默认仍是 `executor='api'`**——EE.1 只改了 server 入口默认，没改 factory 默认。这是有意的：killtest 脚本（`run_w1_killtest --mock` 等）直接调 `make_adapters` 走 mock/api 路径，改 factory 默认会让它们无声切到 gui_agent（需要真实浏览器+模型）而崩。E11 遗留问题4 的"无声退回 api 陷阱"靠 server 入口的 warning log 缓解，但 factory 层仍是 api 默认。
+2. **未 live 启动 server 实测**（需 calendar:3013+taskboard:3014 在线）——只做了 import/argparse/wiring 的静态+单元验证。live demo 验证留到 EE.3 四步弧（需要全套 app 在线时统一跑）。
+3. **gui_agent 模式下 server 启动不崩溃**（seed_session 不调 mutate），但实际 edit/undo 需要 app 在线 + 浏览器 + gpt-5.6-sol 可用，否则 edit 时才报错——这是诚实的延迟失败，不是启动失败。

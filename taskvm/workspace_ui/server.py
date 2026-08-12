@@ -417,19 +417,25 @@ def seed_session(fixture, adapters: dict[str, StateAdapter],
     return sess
 
 
-def _get_fixture_and_adapters(task_id: str, host: str = "localhost"):
+def _get_fixture_and_adapters(task_id: str, host: str = "localhost",
+                              executor: str = "gui_agent"):
     """Resolve a task_id to (fixture, adapters). MobileGym demo tasks route to
     the mobilegym fixture + bridge-backed wechat/alipay adapters; core tasks use
     ``benchmark.fixtures.get_task`` + the core adapters. This keeps the two
     worlds disjoint: a core kill-test never health-checks the bridge, and the
-    mobilegym demo never touches the calendar/drive apps."""
+    mobilegym demo never touches the calendar/drive apps.
+
+    EE.1 (§12.16 backdoor fix): ``executor`` defaults to ``gui_agent`` so the
+    demo/server write+rollback path drives a real browser (non-invasive real
+    gestures) instead of ``requests.post`` to the app's internal Flask API.
+    Pass ``executor='api'`` explicitly for the legacy mock/debug path only."""
     from taskvm.benchmark.mobilegym_fixtures import MOBILEGYM_TASKS
     if task_id in MOBILEGYM_TASKS:
         from taskvm.benchmark.mobilegym_fixtures import get_mobilegym_task
         return get_mobilegym_task(task_id), make_adapters(
-            apps=["wechat", "alipay"], host=host)
+            apps=["wechat", "alipay"], host=host, executor=executor)
     from taskvm.benchmark.fixtures import get_task
-    return get_task(task_id), make_adapters(host=host)
+    return get_task(task_id), make_adapters(host=host, executor=executor)
 
 
 # ── routes ───────────────────────────────────────────────────────────────────
@@ -445,7 +451,8 @@ def seed_route():
     data = request.get_json(silent=True) or {}
     task_id = data.get("task_id") or "doc_handoff"
     host = data.get("host", "localhost")
-    fixture, adapters = _get_fixture_and_adapters(task_id, host)
+    executor = data.get("executor", "gui_agent")   # EE.1: default gui_agent
+    fixture, adapters = _get_fixture_and_adapters(task_id, host, executor=executor)
     sess = seed_session(fixture, adapters, host=host)
     return redirect(f"/{sess.sid}")
 
@@ -577,6 +584,13 @@ def main(argv=None):
                              "MobileGym demo: top3_expense_to_wechat")
     parser.add_argument("--app-host", default="localhost",
                         help="host the apps run on (localhost or a docker service name)")
+    parser.add_argument("--executor", default="gui_agent",
+                        choices=["api", "gui_agent"],
+                        help="EE.1 (§12.16 backdoor fix): write/rollback executor. "
+                             "Default 'gui_agent' — non-invasive real browser gestures "
+                             "via the GUI executor (the honest write path). Use 'api' "
+                             "ONLY for the legacy mock/debug path (requests.post to the "
+                             "app's internal Flask API = the backdoor, not for demo).")
     parser.add_argument("--sim-url", default="",
                         help="MobileGym sim URL for the split-screen phone iframe "
                              "(mobilegym demo only; e.g. http://localhost:3000)")
@@ -597,7 +611,17 @@ def main(argv=None):
                         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s")
     global SIM_URL
     SIM_URL = args.sim_url
-    fixture, adapters = _get_fixture_and_adapters(args.task, args.app_host)
+    fixture, adapters = _get_fixture_and_adapters(args.task, args.app_host,
+                                                  executor=args.executor)
+    # EE.1: log the executor so it's never silently on the backdoor path. When
+    # 'api' is chosen, warn loudly (§12.16: API writes are backdoors, not demo).
+    if args.executor == "api":
+        logger.warning("executor=api — LEGACY BACKDOOR PATH (requests.post to the "
+                       "app's internal Flask API). NOT §12.16-compliant. Use only "
+                       "for mock/debug. Demo must run with --executor gui_agent.")
+    else:
+        logger.info("executor=gui_agent — write/rollback drives a real browser "
+                    "(non-invasive gestures, §12.16-compliant).")
     # health-check the apps (warn, don't crash — a demo can start before apps)
     for name, ad in adapters.items():
         try:
