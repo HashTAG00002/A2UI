@@ -512,9 +512,10 @@ class MobileGymBridge:
                     f"x operator must be toggle_like / toggle_retweet / "
                     f"toggle_bookmark, got {operator}"))
             post_id = eid
-            # Open X app FIRST so we can read the target post's content from
-            # the DOM (needed to build a content-based instruction — the model
-            # can't see post ids in the screenshot).
+            # Open X app FIRST so the timeline is visible on screen — the
+            # grounding loop screenshots THIS view + the model finds the
+            # target post purely by what it sees (E16-complete: NO content
+            # hint, NO post_id injection — pure vision CUA).
             await self.env.open_app("x", wait_stable=True)
             # Wait for timeline to render post action buttons.
             for _ in range(8):
@@ -564,40 +565,38 @@ class MobileGymBridge:
                 target_state_desc = "OUTLINE/uncolored (inactive)"
                 fail_hint = f"still {done_color} and FILLED"
 
-            # content_hint: read from the LIVE DOM (non-invasive — the X app
-            # is already open above).  We do NOT read posts.json here.
+            # ── E16-complete (.mrules E16, 2026-08-12) ──────────────────────
+            # Pure-vision CUA: NO content_hint of any kind. The first E16 round
+            # (commit 8959463) replaced the posts.json read with a DOM
+            # ``page.evaluate('[data-post-id]' + textContent)`` read — but that
+            # was only half the fix: reading the rendered DOM is STILL a
+            # backdoor, because a real native-app CUA has no DOM (it sees only
+            # the rendered pixels). MobileGym is a web sim, so the DOM exists
+            # here, but exploiting it would be using the sim's web-implementation
+            # privilege — not a capability a real CUA has. GPT-5.6-sol's vision
+            # is strong enough to read post text + icon color straight off the
+            # screenshot, so the hint is unnecessary AND dishonest.
             #
-            # Why posts.json was wrong here (E16 bug):
-            #   posts.json is MobileGym's internal data-seed file — the
-            #   simulated "remote database".  A real CUA cannot open a JSON
-            #   file on the server; it can only see what is rendered on screen.
-            #   Reading posts.json and injecting its content into the prompt
-            #   is equivalent to giving the model a cheat-sheet from the
-            #   "backend database" — it bypasses the visual grounding that CUA
-            #   is supposed to exercise.
-            #
-            # Alternative (E16): read content_hint from the DOM via
-            # page.evaluate('[data-post-id]' + textContent) — the same path
-            # that _flatten_x_posts_async uses.  This is purely observational
-            # (what is visible on screen) and is therefore non-invasive.
+            # The instruction below names NO post_id, NO post text, NO current
+            # toggle state — the model must find an un-toggled post by looking
+            # at the screenshot, tap its action-bar icon, and verify the color
+            # change. This is the real CUA task (with its real difficulty: on a
+            # 3-post timeline the model cannot tell WHICH un-toggled post the
+            # task is about — that difficulty is honest and must not be masked).
             ablation_instr = os.environ.get("TASKVM_ABLATION_INSTRUCTION", "new")
-            content_hint = ""
-            try:
-                dom_text = await self.env.page.evaluate(
-                    f"() => {{"
-                    f"  const card = document.querySelector('[data-post-id=\"{post_id}\"]');"
-                    f"  return card ? (card.textContent || '').substring(0, 120) : '';"
-                    f"}}")
-                content_hint = (dom_text or "").strip()[:100]
-            except Exception as e:
-                logger.warning(f"[bridge] DOM content_hint read failed: {e}")
+            content_hint = ""   # E16-complete: always empty (kept only so the
+                                # old ablation path below references it without
+                                # a NameError; both paths lose the backdoor)
             logger.info(f"[bridge] mutate_x: post={post_id} want_active={_want_active} "
-                        f"content_hint={content_hint[:60]!r} ablation_instr={ablation_instr}")
+                        f"ablation_instr={ablation_instr} (pure-vision, no content_hint)")
             if ablation_instr == "old":
                 # E14-core ablation baseline: old single-tap instruction
                 # (no verification step, no icon ordering hint).
                 # Kept for ablation reproducibility only — not used in
-                # normal operation.
+                # normal operation. content_hint is "" under E16-complete, so
+                # this path no longer carries a text hint either (both paths
+                # lose the backdoor equally; the ablation now isolates
+                # instruction STYLE only, not hint presence).
                 instruction = (
                     f"On this X (Twitter) app timeline, {verb} a specific post. "
                     f"The target post contains this text: \"{content_hint}\". "
@@ -610,29 +609,25 @@ class MobileGymBridge:
                     f"On this X (Twitter) app timeline, your goal is to make the "
                     f"{icon_desc} on a specific post reach its TARGET STATE: "
                     f"{target_state_desc}. "
-                    f"The target post contains this text (read from the screen): "
-                    f"\"{content_hint}\". "
-                    f"Find that post on the timeline. Below the post text there is "
-                    f"an action bar with a row of small icons. The icons from left "
-                    f"to right are: comment (speech bubble), repost (green arrows), "
+                    f"The post you need to find is one of the posts currently visible "
+                    f"on the timeline. Look at the action bar below each post — it has "
+                    f"icons: comment (speech bubble), repost (green arrows), "
                     f"like (heart), views (chart), bookmark (ribbon). "
-                    f"Look at the {icon_desc} (third icon from left) on that post. "
-                    f"If it is ALREADY in the target state ({target_state_desc}), "
-                    f"output {{\"action\":\"done\"}} immediately — no tap needed. "
-                    f"Otherwise tap it once, then verify the icon reached the target "
-                    f"state. If it is {fail_hint} after tapping, your tap may have "
-                    f"missed OR double-toggled — check carefully and tap again. "
+                    f"Find the post whose {icon_desc} is NOT yet in the target state "
+                    f"({target_state_desc}) and tap it. "
+                    f"After tapping, verify the icon reached {target_state_desc}. "
+                    f"If it is {fail_hint} after tapping, tap again carefully. "
                     f"Only output {{\"action\":\"done\"}} once you can clearly see "
                     f"the icon in {target_state_desc}. "
-                    f"If the post is not visible, scroll to find it. "
-                    f"If you cannot find the post after scrolling, output "
+                    f"If you cannot identify the correct post, output "
                     f"{{\"action\":\"fail\",\"reason\":\"...\"}}.")
 
             from taskvm.execution.gui_executor_async import (
                 gui_act_async, GuiExecutorFailure)
-            # X app is already open + timeline is ready (we did it above to
-            # fetch post content), so navigate/wait_ready are None — the
-            # grounding loop starts immediately on the current view.
+            # X app is already open + the timeline readiness poll above
+            # passed, so navigate=None / wait_ready=None — the grounding loop
+            # starts immediately on the current timeline view (screenshot →
+            # model, pure vision).
             trace = await gui_act_async(
                 env=self.env, page=self.env.page, instruction=instruction,
                 navigate=None, wait_ready=None,
