@@ -366,6 +366,25 @@ class MobileGymBridge:
             })
         return rows
 
+    async def x_state(self, sid: str) -> dict:
+        """Read-only: the X app's toggle lists (liked/retweeted/bookmarked
+        post ids) for the given session. Used by ``run_x_toggle_rollback_
+        killtest.py`` (Task E, .mrules E15) to independently VERIFY that a
+        toggle write/rollback actually landed via ``get_state`` — the same
+        trusted read path ``mutate_x`` itself uses. This is a plain read (no
+        mutation, no set_state), so it does not touch the non-invasive
+        write/rollback boundary documented above."""
+        await self._activate(sid)
+        state = self._sid_live.get(sid) or await self.env.get_state(required_apps=APPS)
+        x_state = state.get("apps", {}).get("x", {}) or {}
+        user = x_state.get("user", {}) or {}
+        return {
+            "sid": sid,
+            "likedPostIds": user.get("likedPostIds", []) or [],
+            "retweetedPostIds": user.get("retweetedPostIds", []) or [],
+            "bookmarkedPostIds": user.get("bookmarkedPostIds", []) or [],
+        }
+
     async def session_state(self, sid: str) -> dict:
         await self._activate(sid)
         state = self._sid_live.get(sid) or await self.env.get_state(required_apps=APPS)
@@ -516,6 +535,42 @@ class MobileGymBridge:
             }
             verb, icon_desc, done_color = verb_map[operator]
 
+            # ── Task E fix (.mrules E15): read CURRENT toggle state BEFORE
+            # building the instruction, so a rollback call (post already
+            # liked -> tap again to UNLIKE) gets a "verify it goes back to
+            # OUTLINE" instruction instead of the write-path's "verify it
+            # turns FILLED" instruction. Bug this replaces: the instruction
+            # was hardcoded to always expect outline->filled, so on a
+            # rollback (filled->outline) the model's own success check was
+            # checking for the WRONG direction -- it would see the icon was
+            # (or briefly stayed) filled and either declare premature done
+            # without really un-toggling, or double-tap back to filled while
+            # "confirming". Root cause found via E15 Task E killtest: 9/9
+            # rollback attempts had write_ok=True, rollback_ok=False in one
+            # continuous run (systematic, not random) -- see
+            # eval_results/x_toggle_rollback_killtest_*.json.
+            _pre_state = await self.env.get_state(required_apps=APPS)
+            _pre_x = _pre_state.get("apps", {}).get("x", {}) or {}
+            _pre_user = _pre_x.get("user", {}) or {}
+            _field_map = {
+                "toggle_like": "likedPostIds",
+                "toggle_retweet": "retweetedPostIds",
+                "toggle_bookmark": "bookmarkedPostIds",
+            }
+            _currently_on = post_id in (_pre_user.get(_field_map[operator], []) or [])
+            if _currently_on:
+                # rollback direction: filled -> outline
+                direction_verb = f"un-{verb}" if verb != "retweet" else "un-retweet"
+                target_state_desc = "OUTLINE/uncolored (its ORIGINAL, un-toggled state)"
+                current_state_desc = f"currently {done_color} and FILLED"
+                fail_hint = "still colored/filled"
+            else:
+                # normal write direction: outline -> filled
+                direction_verb = verb
+                target_state_desc = f"{done_color} and FILLED"
+                current_state_desc = "currently outline/uncolored"
+                fail_hint = "still outline/uncolored"
+
             # Fetch the target post's content from the base dataset JSON
             # (posts.json). We can't use the DOM textContent because the
             # post card's closest selector picks up sibling posts' text,
@@ -569,7 +624,9 @@ class MobileGymBridge:
                         f"ablation_posts={ablation_posts} ablation_instr={ablation_instr}")
             if ablation_instr == "old":
                 # pre-E14 instruction: single tap, no post-tap verification
-                # step, no explicit action-bar icon ordering/count hint.
+                # step, no explicit action-bar icon ordering/count hint, and
+                # (like all pre-Task-E instructions) no current-state
+                # awareness -- kept verbatim for the E14-core ablation.
                 instruction = (
                     f"On this X (Twitter) app timeline, {verb} a specific post. "
                     f"The target post contains this text: \"{content_hint}\". "
@@ -579,7 +636,8 @@ class MobileGymBridge:
                     f"{{\"action\":\"fail\",\"reason\":\"...\"}}.")
             else:
                 instruction = (
-                    f"On this X (Twitter) app timeline, {verb} a specific post. "
+                    f"On this X (Twitter) app timeline, {direction_verb} a specific "
+                    f"post (it is {current_state_desc} right now). "
                     f"The target post contains this text: \"{content_hint}\". "
                     f"Find that post on the timeline. Below the post text there is "
                     f"an action bar with a row of small icons. The icons from left "
@@ -587,12 +645,13 @@ class MobileGymBridge:
                     f"like (heart), views (chart), bookmark (ribbon). "
                     f"You need to tap the {icon_desc} — it is the THIRD icon from "
                     f"the left in that action bar row. Tap it once. "
-                    f"IMPORTANT: after tapping, take a moment to look at the heart "
-                    f"icon again — if the {verb} succeeded, the {icon_desc} should "
-                    f"turn {done_color} and change from outline to FILLED. If it is "
-                    f"still outline/uncolored, your tap may have missed — try tapping "
-                    f"it again more precisely. Only output {{\"action\":\"done\"}} "
-                    f"when you can see the {done_color} filled state. "
+                    f"IMPORTANT: after tapping, take a moment to look at the {icon_desc} "
+                    f"again — if the {direction_verb} succeeded, it should now be "
+                    f"{target_state_desc}. If it is {fail_hint}, your tap may have "
+                    f"missed OR landed twice (toggling back) — check carefully and "
+                    f"tap again if needed to reach the target state. Only output "
+                    f"{{\"action\":\"done\"}} once you can clearly see the {icon_desc} "
+                    f"in the target state described above. "
                     f"If the post is not visible, scroll to find it. "
                     f"If you cannot find the post after scrolling, output "
                     f"{{\"action\":\"fail\",\"reason\":\"...\"}}.")
@@ -611,7 +670,21 @@ class MobileGymBridge:
                     f"gui_executor could not complete {operator} via the UI "
                     f"(model did not report done after {trace['steps']} steps); "
                     f"no set_state backdoor. trace={trace['actions'][-3:]}"))
-            # verify the toggle landed (trusted read path)
+            # verify the toggle landed (trusted read path).
+            #
+            # Task E fix (.mrules E15): must check against the EXPECTED
+            # direction (_currently_on before this call), not hardcode
+            # "must now be in the list". Bug this replaces: the old check
+            # was `if not now_liked: raise` unconditionally — correct for
+            # the write path (outline->filled, expect now_in_list=True) but
+            # WRONG for a rollback call (filled->outline, expect
+            # now_in_list=False). On rollback the gesture genuinely
+            # succeeded (post correctly left the list) but this stale check
+            # still raised, turning a real success into a spurious HTTP 500
+            # — caught by the Task E killtest: every rollback call returned
+            # http_status=500 even though the independent trusted-read
+            # verification (``run_x_toggle_rollback_killtest.py``'s own
+            # get_state check) confirmed the post really left the list.
             state = await self.env.get_state(required_apps=APPS)
             self._sid_live[sid] = state
             x_state = state.get("apps", {}).get("x", {}) or {}
@@ -622,18 +695,21 @@ class MobileGymBridge:
                 "toggle_bookmark": "bookmarkedPostIds",
             }
             ids_list = user.get(field_map[operator], []) or []
-            now_liked = post_id in ids_list
+            now_in_list = post_id in ids_list
+            expected_in_list = not _currently_on  # toggle flips the prior state
             logger.info(f"[bridge] {operator} via gui_act_async: "
-                        f"post={post_id} now_in_list={now_liked} "
-                        f"steps={trace['steps']}")
-            if not now_liked:
+                        f"post={post_id} now_in_list={now_in_list} "
+                        f"expected={expected_in_list} steps={trace['steps']}")
+            if now_in_list != expected_in_list:
                 raise RuntimeError(
-                    f"{operator} on post {post_id} did not land — the post id "
-                    f"is not in {field_map[operator]} after the GUI gesture "
-                    f"loop. trace={trace['actions'][-3:]}")
+                    f"{operator} on post {post_id} did not land as expected — "
+                    f"expected now_in_list={expected_in_list} (was "
+                    f"{_currently_on} before this call) but got "
+                    f"{now_in_list} after the GUI gesture loop. "
+                    f"trace={trace['actions'][-3:]}")
             return {"status": "ok", "operator": operator,
-                    "old": False, "new": True, "post_id": post_id,
-                    "trace": trace}
+                    "old": _currently_on, "new": expected_in_list,
+                    "post_id": post_id, "trace": trace}
 
     async def _send_message(self, sid: str, chat_id: str, text: str) -> dict:
         """Send a message via the app's OWN write pipeline — NO set_state on
@@ -827,6 +903,10 @@ def build_app(bridge: MobileGymBridge) -> web.Application:
         sid = request.match_info["sid"]
         return web.json_response(await bridge.session_state(sid))
 
+    async def api_x_state(request):
+        sid = request.match_info["sid"]
+        return web.json_response(await bridge.x_state(sid))
+
     async def api_resource(request):
         sid = request.match_info["sid"]
         resource = request.match_info["resource"]
@@ -851,6 +931,7 @@ def build_app(bridge: MobileGymBridge) -> web.Application:
     app.router.add_post("/api/reset/{sid}", api_reset)
     app.router.add_post("/api/inject_task/{sid}", api_inject_task)
     app.router.add_get("/api/session_state/{sid}", api_session_state)
+    app.router.add_get("/api/x_state/{sid}", api_x_state)
     app.router.add_get("/api/{resource}/{sid}", api_resource)
     app.router.add_post("/api/wechat/{sid}/{eid}", api_wechat_mutate)
     app.router.add_post("/api/x/{sid}/{eid}", api_x_mutate)
