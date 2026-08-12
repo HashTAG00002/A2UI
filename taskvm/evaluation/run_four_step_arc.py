@@ -317,8 +317,20 @@ def main(argv=None):
     executor = "gui_agent" if live else "api"
     ts = time.strftime("%Y%m%d_%H%M%S")
     shot_dir = EVAL_DIR / f"four_step_arc_{ts}"
-    out_path = Path(args.out) if args.out else EVAL_DIR / f"four_step_arc_{ts}.json"
+    out_path = Path(args.out) if args.out else (
+        EVAL_DIR / (f"four_step_arc_live_{ts}.json" if live else f"four_step_arc_{ts}.json"))
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _write(report, interrupted=False, steps_completed=None):
+        """FF.8: write the report JSON INCREMENTALLY after each step so a
+        foreground-window timeout (Step1 launch_full + Step3 rollback exceed
+        the 555s bash limit on this box) still yields a partial JSON with
+        execution_mode=gui_agent + the steps that completed + an honest
+        `interrupted` flag (§12: don't hide a timeout behind silence)."""
+        report["interrupted"] = interrupted
+        if steps_completed is not None:
+            report["steps_completed"] = steps_completed
+        out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2))
 
     # ── Step 1-3: launch_full on Stack A ─────────────────────────────────────
     fixture = get_task("launch_full")
@@ -337,20 +349,43 @@ def main(argv=None):
         ad.reset(sid)
     replay.seed_apps(fixture, adapters, sid)
 
+    base_report = {
+        "ts": ts, "test": "four_step_arc",
+        "mode": "gui_agent" if live else "dry_run(api)",
+        "execution_mode": "gui_agent" if live else "api",
+        "shot_dir": str(shot_dir),
+        "honest_framing": (
+            "dry_run mode uses executor='api' (app API writes = the §12.16 backdoor) — "
+            "it validates the arc wiring + produces real round_trip/conflict/rollback "
+            "numbers, but is NOT the §12.16-compliant GUI-gesture path. For the paper's "
+            "teaser figure, re-run WITHOUT --dry-run (gui_agent, gpt-5.6-sol). Step 3's "
+            "partial_failure reflects that T2 was externally changed in step 2 — its "
+            "compensation overwrites the external edit, reported honestly."
+        ) if args.dry_run else (
+            "gui_agent mode: write/rollback drive a real browser via the GUI executor "
+            "(§12.16-compliant). This is the teaser-figure evidence path."
+        ),
+    }
+
     logger.info("\n=== STEP 1: bidirectional write-back (launch_full 4-App fanout) ===")
     s1 = step1_write(fixture, adapters, sid, rb, shot_dir=shot_dir, live=live)
     logger.info(f"[step1] round_trip={s1['round_trip']} non_interference={s1['non_interference']} "
                 f"n_ops={s1['n_ops']} apps={s1['apps_written']} pass={s1['pass']}")
+    _write({**base_report, "step1_write": s1}, interrupted=True, steps_completed=["step1_write"])
 
     logger.info("\n=== STEP 2: reconciliation (external T2.deadline→8/20) ===")
     s2 = step2_reconciliation(fixture, adapters, sid, args.host)
     logger.info(f"[step2] conflict_detected={s2['conflict_detected']} "
                 f"n_conflicts={s2['n_conflicts']} vars={s2['conflict_vars']} pass={s2['pass']}")
+    _write({**base_report, "step1_write": s1, "step2_reconciliation": s2},
+           interrupted=True, steps_completed=["step1_write", "step2_reconciliation"])
 
     logger.info("\n=== STEP 3: rollback (saga undo, honest partial_failure) ===")
     s3 = step3_rollback(fixture, adapters, sid, rb, shot_dir=shot_dir)
     logger.info(f"[step3] saga={s3.get('saga_id')} n_reverted={s3.get('n_reverted')}/"
                 f"{s3.get('n_targets')} partial_failure={s3.get('partial_failure')} pass={s3.get('pass')}")
+    _write({**base_report, "step1_write": s1, "step2_reconciliation": s2, "step3_rollback": s3},
+           interrupted=True, steps_completed=["step1_write", "step2_reconciliation", "step3_rollback"])
 
     for ad in adapters.values():
         ad.reset(sid)
@@ -364,29 +399,11 @@ def main(argv=None):
                     f"trajectory={s4['trajectory_apps']} neg={s4['neg_control']} pass={s4['pass']}")
 
     overall_pass = s1["pass"] and s2["pass"] and s3.get("pass", False) and (s4["pass"] if s4 else True)
-    report = {
-        "ts": ts,
-        "test": "four_step_arc",
-        "mode": "gui_agent" if live else "dry_run(api)",
-        "shot_dir": str(shot_dir),
-        "step1_write": s1,
-        "step2_reconciliation": s2,
-        "step3_rollback": s3,
-        "step4_jvm_moment": s4,
-        "overall_PASS": overall_pass,
-        "honest_framing": (
-            "dry_run mode uses executor='api' (app API writes = the §12.16 backdoor) — "
-            "it validates the arc wiring + produces real round_trip/conflict/rollback "
-            "numbers, but is NOT the §12.16-compliant GUI-gesture path. For the paper's "
-            "teaser figure, re-run WITHOUT --dry-run (gui_agent, gpt-5.6-sol). Step 3's "
-            "partial_failure reflects that T2 was externally changed in step 2 — its "
-            "compensation overwrites the external edit, reported honestly."
-        ) if args.dry_run else (
-            "gui_agent mode: write/rollback drive a real browser via the GUI executor "
-            "(§12.16-compliant). This is the teaser-figure evidence path."
-        ),
-    }
-    out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2))
+    report = {**base_report, "step1_write": s1, "step2_reconciliation": s2,
+              "step3_rollback": s3, "step4_jvm_moment": s4, "overall_PASS": overall_pass}
+    _write(report, interrupted=False,
+           steps_completed=(["step1_write","step2_reconciliation","step3_rollback","step4_jvm_moment"]
+                            if s4 else ["step1_write","step2_reconciliation","step3_rollback"]))
     print(f"\nWrote {out_path}")
     print(f"\n=== FOUR-STEP ARC: {'PASS' if overall_pass else 'FAIL'} ===")
     print(f"  step1 write:          {'PASS' if s1['pass'] else 'FAIL'} (round_trip={s1['round_trip']}, {s1['n_ops']} ops, {len(s1['apps_written'])} apps)")
