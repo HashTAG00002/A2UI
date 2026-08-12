@@ -3,16 +3,20 @@
 {% block content %}
 <div class="meta">session: <code>{{ sid }}</code>{% if task_id %} · task: <code>{{ task_id }}</code>{% endif %}</div>
 {% if goal %}<div class="meta">goal: {{ goal }}</div>{% endif %}
-{% if moved %}<div class="toast" data-toast="moved">✓ appointment <code>{{ moved_aid }}</code> rescheduled to <code>{{ moved_value }}</code>.</div>{% endif %}
+{% if moved %}<div class="toast" data-toast="moved">✓ appointment rescheduled to <code>{{ moved_value }}</code>.</div>{% endif %}
 
 <table id="appointment-list">
   <thead>
-    <tr><th>AID</th><th>Subject</th><th>Scheduled for</th><th>Time</th><th>Calendar</th><th>Response</th><th></th></tr>
+    <tr><th>Subject</th><th>Scheduled for</th><th>Time</th><th>Calendar</th><th>Response</th><th></th></tr>
   </thead>
   <tbody>
   {% for a in appointments %}
-    <tr class="appointment-row" data-appointment-id="{{ a.aid }}" data-scheduled_for="{{ a.scheduled_for }}">
-      <td data-field="aid"><code>{{ a.aid }}</code></td>
+    {# GG: no data-appointment-id row attr + no visible AID column — entity_id is
+       a DB primary key, never rendered on a real calendar screen. The row is
+       identified by its visible Subject. data-field stays on cells as the
+       parser's field-key contract (HTML attr, not screen-visible; raw DOM is
+       not fed to the compiler). #}
+    <tr class="appointment-row">
       <td data-field="subject">{{ a.subject }}</td>
       <td data-field="scheduled_for" class="appt-date">{{ a.scheduled_for }}</td>
       <td data-field="time">{{ a.time }}</td>
@@ -21,7 +25,7 @@
       <td><a class="btn view" href="{{ sid }}/appointment/{{ a.aid }}">View</a></td>
     </tr>
   {% else %}
-    <tr><td colspan="7" class="muted">no appointments</td></tr>
+    <tr><td colspan="6" class="muted">no appointments</td></tr>
   {% endfor %}
   </tbody>
 </table>

@@ -4,7 +4,8 @@ W4 held-out **reskin** of ``apps/calendar``. Same conceptual semantics (move a
 meeting to a new date) but a renamed substrate the model has never seen in
 training-on-this-bench:
   - entity kind = ``appointment`` (not ``event``)
-  - id field / DOM attribute = ``aid`` / ``data-appointment-id`` (not eid)
+  - id field = ``aid`` (not eid) — GG: internal only, NEVER a DOM attribute;
+    entities are addressed by their visible ``subject`` (the ``locator``)
   - the load-bearing field = ``scheduled_for`` (not ``date``)
   - the operator = ``reschedule_appointment`` (not ``move_event``)
   - the mutate route = ``/api/appointment/<sid>/reschedule`` with body
@@ -21,7 +22,7 @@ under the new skin, and does the same user operation produce a stable interface
 Routes (reset/seed/read-canonical contract; per-app success judgment lives in
 ``verifier/round_trip_checks.py``, NOT here):
     GET  /health                         → {"status":"ok","site":"outlook_cal"}
-    GET  /<sid>                          → outlook_cal HTML view (data-appointment-id DOM)
+    GET  /<sid>                          → outlook_cal HTML view (visible title-keyed rows)
     GET  /api/appointments/<sid>         → JSON appointment list (visible app state)
     POST /api/appointment/<sid>/reschedule → reschedule_appointment(aid, new_scheduled_for)
     POST /api/inject_task/<sid>          → seed appointments from seed_state (no-leak entry)

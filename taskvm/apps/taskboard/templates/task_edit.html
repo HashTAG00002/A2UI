@@ -1,11 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Edit {{ task.tid }} · {{ sid }}{% endblock %}
+{% block title %}Edit task · {{ sid }}{% endblock %}
 {% block content %}
-<a class="back-link" href="/{{ sid }}/task/{{ task.tid }}">← back to {{ task.tid }}</a>
-<div class="meta">session: <code>{{ sid }}</code> · editing task <code>{{ task.tid }}</code></div>
+<a class="back-link" href="/{{ sid }}/task/{{ task.tid }}">← back to task</a>
+<div class="meta">session: <code>{{ sid }}</code> · editing task</div>
 
-<form class="edit-form" method="post" action="/{{ sid }}/task/{{ task.tid }}/mutate"
-      data-task-id="{{ task.tid }}">
+{# GG: no data-task-id attr + no visible tid. The hidden <input name="tid"> +
+   the form action URL carry the entity_id for SERVER ROUTING (control-plane —
+   the model sees the rendered form via screenshot, not the hidden field or
+   URL; raw DOM is not fed to the compiler). #}
+<form class="edit-form" method="post" action="/{{ sid }}/task/{{ task.tid }}/mutate">
   <div class="field">
     <label for="op_deadline">Deadline (set_deadline operator)</label>
     <input type="date" name="set_deadline" value="{{ task.deadline }}" id="op_deadline">
@@ -34,7 +37,7 @@
   <dialog id="confirm-mutate">
     <div class="dlg-head">Confirm task edit</div>
     <div class="dlg-body">
-      Apply the changes to task <code>{{ task.tid }}</code> ({{ task.title }})?
+      Apply the changes to task "{{ task.title }}"?
       <div class="diff" id="diff-rows"></div>
     </div>
     <div class="dlg-actions">

@@ -28,6 +28,14 @@ from taskvm.governance.scripted_driver import (
 # vs. ScriptedUserDriver's direct intent emission.
 from taskvm.governance.ui_sim_driver import UISimDriver
 from taskvm.governance.governance_interpreter import GovernanceInterpreter
+# GG: translation layer — entity_id ↔ visible locator (control-plane bridge so
+# entity_id never enters a model input; see governance/translate.py docstring).
+from taskvm.governance.translate import (
+    TITLE_FIELD, INTERNAL_ID_RE, OPERATOR_JARGON_RE,
+    build_locator_index, build_locator_index_strict, resolve_locator,
+    entity_id_to_locator, visible_entity_titles, assert_no_internal_id,
+    assert_no_operator_jargon, eid_to_title_in_seed,
+)
 
 __all__ = [
     "UserBehaviorDriver", "UserBehaviorEvent", "EVENT_TYPES",
@@ -37,4 +45,8 @@ __all__ = [
     "ScriptedUserDriver", "make_scripted_driver", "get_task_event_sequence",
     "UISimDriver",
     "GovernanceInterpreter",
+    "TITLE_FIELD", "INTERNAL_ID_RE", "OPERATOR_JARGON_RE",
+    "build_locator_index", "build_locator_index_strict", "resolve_locator",
+    "entity_id_to_locator", "visible_entity_titles", "assert_no_internal_id",
+    "assert_no_operator_jargon", "eid_to_title_in_seed",
 ]

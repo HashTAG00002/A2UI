@@ -1,13 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Edit {{ event.eid }} · {{ sid }}{% endblock %}
+{% block title %}Edit event · {{ sid }}{% endblock %}
 {% block content %}
-<a class="back-link" href="/{{ sid }}/event/{{ event.eid }}">← back to {{ event.eid }}</a>
-<div class="meta">session: <code>{{ sid }}</code> · editing event <code>{{ event.eid }}</code></div>
+<a class="back-link" href="/{{ sid }}/event/{{ event.eid }}">← back to event</a>
+<div class="meta">session: <code>{{ sid }}</code> · editing event</div>
 
-<form class="edit-form" method="post" action="/{{ sid }}/event/{{ event.eid }}/move"
-      data-event-id="{{ event.eid }}">
+{# GG: no data-event-id attr + no visible eid. The hidden <input name="eid"> +
+   the form action URL carry the entity_id for SERVER ROUTING (control-plane —
+   the model sees the rendered form via screenshot, not the hidden field or
+   URL; raw DOM is not fed to the compiler). #}
+<form class="edit-form" method="post" action="/{{ sid }}/event/{{ event.eid }}/move">
   <div class="field">
-    <label for="new_date">Date (move_event operator — the only writable field)</label>
+    <label for="new_date">Date (the only writable field)</label>
     <input type="date" name="new_date" value="{{ event.date }}" id="new_date" required>
     <input type="hidden" name="eid" value="{{ event.eid }}">
   </div>
@@ -39,7 +42,7 @@
   <dialog id="confirm-move">
     <div class="dlg-head">Confirm move</div>
     <div class="dlg-body">
-      Move event <code>{{ event.eid }}</code> ({{ event.title }})?
+      Move event "{{ event.title }}"?
       <div class="diff">
         <div class="row"><span>From</span><span class="v" id="old-date">{{ event.date }}</span></div>
         <div class="row"><span>To</span><span class="v" id="new-date-display">{{ event.date }}</span></div>

@@ -44,6 +44,11 @@ from taskvm.verifier import canonical_state as cs
 from taskvm.verifier.round_trip_checks import (check_round_trip, binding_accuracy,
                                                 map_gt_var_id_to_compiler)
 from taskvm.workspace_ui.renderer import render
+# GG: translation layer — locator (visible title) ↔ entity_id. The model emits
+# locator; the orchestrator resolves it to entity_id (control-plane) between
+# validate and patch compilation, so downstream speaks entity_id unchanged.
+from taskvm.governance.translate import (build_locator_index, resolve_locator,
+                                         eid_to_title_in_seed, assert_no_internal_id)
 
 logger = logging.getLogger(__name__)
 
@@ -86,8 +91,16 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
     obs = replay.capture_obs(adapters, sid, with_screenshot=(with_screenshot or vision))
     replay.assert_obs_matches_state(adapters, sid, obs)
     trace = TraceFixture(task_id=fixture.task_id, goal=fixture.goal, final_obs=obs)
-    observed_ids = {app: set(replay.parse_dom_entities(o.dom_html).keys())
-                    for app, o in obs.items()}
+    # GG: build the locator_index {app: {visible_title: entity_id}} from canonical
+    # state (title IS screen-visible → not a GT leak). The model emits locator
+    # (a visible title); this index resolves it to entity_id (control-plane).
+    # observed_ids (legacy {app: {eid}}) kept for the GT/mock entity_id path.
+    observed_ids: dict[str, set[str]] = {}
+    locator_index: dict[str, dict[str, str]] = {}
+    for app, ad in adapters.items():
+        canon = ad.read_canonical(sid)["entities"]
+        locator_index[app] = build_locator_index(canon, app)
+        observed_ids[app] = set(canon.keys())
 
     # EE.10: build the screenshots dict (app → data_url) for the vision path
     screenshots = None
@@ -103,7 +116,7 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
 
     # compile the binding (gate-critical model step) — or use GT in mock mode
     if mock:
-        compiled = _mock_compiler_output(fixture, observed_ids)
+        compiled = _mock_compiler_output(fixture, locator_index)
     else:
         compiled = compile_binding(trace, observed_ids, model=model,
                                    temperature=temperature, cost_model=cost_model,
@@ -116,6 +129,43 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
     binding = parse_compiler_output(raw, parsed)
     valid, bind_errs = (False, ["no binding parsed"]) if binding is None \
         else validate_binding(binding, observed_ids, fixture.task_id)
+
+    # GG: resolve locator → entity_id (control-plane). The model emitted locator
+    # (visible title); inject entity_id so downstream compile_patch/dispatch/
+    # verifier speak entity_id unchanged. resolve errors are recorded (honest)
+    # but do NOT by themselves fail validation (a miss shows up as entity_id=None
+    # → dispatch.n_ops=0, a real binding failure).
+    resolve_errors: list[str] = []
+    if binding is not None:
+        binding, resolve_errors = resolve_locator(binding, locator_index)
+
+    # GG no-leak gate: scan the model-facing INPUTS (a11y text) for internal ids.
+    # A leak in the a11y (what the model is GIVEN) is an automatic FAIL — that is
+    # the red-line. The raw compiler OUTPUT is scanned separately: a real model
+    # emits ONLY locator (no entity_id), so any entity_id in the output binding
+    # without a locator is a leak; but the mock/GT path legitimately carries BOTH
+    # (entity_id for the control-plane, locator for the contract) — that is NOT a
+    # leak (entity_id there is harness-resolved, not model-invented).
+    no_leak_leaks: list[str] = []
+    for app, o in obs.items():
+        no_leak_leaks += assert_no_internal_id(o.a11y_text)
+    # output-side: flag entity_id tokens that appear WITHOUT a sibling locator
+    # (a real model leak — it invented an entity_id instead of a visible title).
+    output_leaks: list[str] = []
+    if binding is not None:
+        for v in (binding.get("variables") or []):
+            for b in (v.get("bindings") or []):
+                if b.get("entity_id") and not b.get("locator"):
+                    output_leaks.append(b["entity_id"])
+    if no_leak_leaks:
+        valid = False
+        bind_errs.append(f"GG no-leak gate FAILED (a11y input): internal ids "
+                         f"found in model input: {no_leak_leaks[:10]}")
+    if output_leaks:
+        valid = False
+        bind_errs.append(f"GG no-leak gate FAILED (binding output): entity_id "
+                         f"emitted without locator (model invented an id): "
+                         f"{output_leaks[:10]}")
 
     # build a TaskBinding for patch compilation (from the compiler's output)
     tb = _to_task_binding(binding, fixture) if (binding and valid) else None
@@ -179,6 +229,9 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
         "compile_error": compiled.get("error"),
         "binding_valid": valid,
         "binding_errors": bind_errs,
+        "resolve_errors": resolve_errors,   # GG: locator→entity_id resolution errors
+        "no_leak_leaks": no_leak_leaks,     # GG §0: internal-id leaks in a11y (model INPUT)
+        "no_leak_output_leaks": output_leaks,  # GG §0: entity_id emitted w/o locator (model OUTPUT)
         "a2ui_valid": a2ui_ok,
         "a2ui_errors": a2ui_errs,
         "binding_accuracy": bacc,
@@ -235,13 +288,22 @@ def run_neg_control(fixture: CanonicalTaskGraph, adapters: dict, *,
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 def _gt_task_binding(fixture: CanonicalTaskGraph) -> TaskBinding:
-    """Build a TaskBinding from the GT fixture (for neg-control + mock)."""
+    """Build a TaskBinding from the GT fixture (for neg-control + mock).
+
+    GG: emits BOTH ``locator`` (the visible title, translated from the fixture's
+    seed_state — the VISIBLE app state, not hidden GT) AND ``entity_id`` (the
+    control-plane key). The mock path thus exercises the same locator→resolve
+    contract as a real model; neg-control (which bypasses the compiler) keeps
+    entity_id so dispatch/verifier work directly."""
     var_groups: dict[str, dict] = {}
     for b in fixture.bindings:
         g = var_groups.setdefault(b.var_id, {
             "var_id": b.var_id, "label": b.var_id, "value": fixture.user_edit.get("old"),
             "editable": True, "bindings": []})
-        g["bindings"].append({"var_id": b.var_id, "app": b.app, "entity_id": b.entity_id,
+        title = eid_to_title_in_seed(fixture.seed_state, b.app, b.entity_id)
+        g["bindings"].append({"var_id": b.var_id, "app": b.app,
+                              "entity_id": b.entity_id,
+                              "locator": (f"title:{title}" if title else None),
                               "field": b.field, "operator": b.operator})
     return TaskBinding(task_id=fixture.task_id, variables=list(var_groups.values()))
 
@@ -270,9 +332,14 @@ def _png_to_data_url(path: str) -> str:
 
 
 def _mock_compiler_output(fixture: CanonicalTaskGraph,
-                          observed_ids: dict[str, set[str]]) -> dict:
+                          locator_index: dict[str, dict[str, str]]) -> dict:
     """Mock the compiler with a GT-shaped binding (smoke the chain without API).
-    Used by ``--mock`` to verify the orchestrator wiring before spending API."""
+    Used by ``--mock`` to verify the orchestrator wiring before spending API.
+
+    GG: emits locator (visible title) like a real model; the orchestrator's
+    resolve_locator step then turns it into entity_id. ``locator_index`` is
+    accepted for signature symmetry but the GT binding already carries the
+    resolved entity_id (so mock exercises resolve as a no-op pass-through)."""
     tb = _gt_task_binding(fixture)
     binding_dict = tb.to_dict()
     return {"raw": json.dumps({"task_binding": binding_dict}, ensure_ascii=False),

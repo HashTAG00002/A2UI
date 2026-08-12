@@ -13,7 +13,7 @@ verifier-only and are NEVER sent to this app). Per-app success judgment lives in
 
 Routes (reset/seed/read-canonical contract):
     GET  /health                         → {"status":"ok","site":"drive"}
-    GET  /<sid>                          → drive HTML view (data-file-id DOM)
+    GET  /<sid>                          → drive HTML view (visible title-keyed rows)
     GET  /api/files/<sid>                → JSON file list (visible app state)
     POST /api/file/<sid>/<fid>           → move_file / rename / set_owner
     POST /api/inject_task/<sid>          → seed files from seed_state (no-leak entry)

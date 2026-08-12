@@ -8,7 +8,7 @@ The canonical task graph lives in ``benchmark/fixtures.py`` (verifier-only).
 Routes (reset/seed/read-canonical contract; per-app success judgment lives in
 ``verifier/round_trip_checks.py``, NOT in this app):
     GET  /health                         → {"status":"ok","site":"taskboard"}
-    GET  /<sid>                          → taskboard HTML view (data-task-id DOM)
+    GET  /<sid>                          → taskboard HTML view (visible title-keyed rows)
     GET  /api/tasks/<sid>                → JSON task list (visible app state)
     POST /api/task/<sid>/<tid>           → set_deadline / set_status / set_assignee
     POST /api/inject_task/<sid>          → seed tasks from seed_state (no-leak entry)

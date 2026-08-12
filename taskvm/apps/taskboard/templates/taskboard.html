@@ -3,16 +3,20 @@
 {% block content %}
 <div class="meta">session: <code>{{ sid }}</code>{% if task_id %} · task: <code>{{ task_id }}</code>{% endif %}</div>
 {% if goal %}<div class="meta">goal: {{ goal }}</div>{% endif %}
-{% if moved %}<div class="toast" data-toast="moved">✓ task <code>{{ moved_tid }}</code> {{ moved_op }} → <code>{{ moved_value }}</code>.</div>{% endif %}
+{% if moved %}<div class="toast" data-toast="moved">✓ task {{ moved_op }} → <code>{{ moved_value }}</code>.</div>{% endif %}
 
 <table id="task-list">
   <thead>
-    <tr><th>TID</th><th>Title</th><th>Status</th><th>Assignee</th><th>Deadline</th><th>Depends on</th><th></th></tr>
+    <tr><th>Title</th><th>Status</th><th>Assignee</th><th>Deadline</th><th>Depends on</th><th></th></tr>
   </thead>
   <tbody>
   {% for t in tasks %}
-    <tr class="task-row" data-task-id="{{ t.tid }}" data-deadline="{{ t.deadline }}" data-status="{{ t.status }}">
-      <td data-field="tid"><code>{{ t.tid }}</code></td>
+    {# GG: no data-task-id row attr + no data-deadline/data-status + no visible
+       TID column — entity_id is a DB primary key, never rendered on a real
+       taskboard screen. The row is identified by its visible Title. data-field
+       stays on cells as the parser's field-key contract (HTML attr, not
+       screen-visible; raw DOM is not fed to the compiler). #}
+    <tr class="task-row">
       <td data-field="title">{{ t.title }}</td>
       <td data-field="status"><span class="pill {{ t.status }}">{{ t.status }}</span></td>
       <td data-field="assignee">{{ t.assignee }}</td>
@@ -21,7 +25,7 @@
       <td><a class="btn view" href="{{ sid }}/task/{{ t.tid }}">View</a></td>
     </tr>
   {% else %}
-    <tr><td colspan="7" class="muted">no tasks</td></tr>
+    <tr><td colspan="6" class="muted">no tasks</td></tr>
   {% endfor %}
   </tbody>
 </table>

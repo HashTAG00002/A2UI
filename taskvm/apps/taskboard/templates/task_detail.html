@@ -2,13 +2,15 @@
 {% block title %}{{ task.title }} · {{ sid }}{% endblock %}
 {% block content %}
 <a class="back-link" href="/{{ sid }}">← back to taskboard</a>
-{% if moved %}<div class="toast" data-toast="moved">✓ task <code>{{ moved_tid }}</code> {{ moved_op }} → <code>{{ moved_value }}</code>.</div>{% endif %}
+{% if moved %}<div class="toast" data-toast="moved">✓ task {{ moved_op }} → <code>{{ moved_value }}</code>.</div>{% endif %}
 <div class="meta">session: <code>{{ sid }}</code>{% if task_id %} · task: <code>{{ task_id }}</code>{% endif %}</div>
 
-<div class="detail" data-task-id="{{ task.tid }}">
-  <h2>{{ task.title }} <code>{{ task.tid }}</code></h2>
+{# GG: no data-task-id attr + no visible TID — the detail card shows the
+   visible Title as the heading. data-field on cells = parser field-key
+   contract (not screen-visible; raw DOM not fed to the compiler). #}
+<div class="detail">
+  <h2>{{ task.title }}</h2>
   <dl>
-    <dt>TID</dt><dd data-field="tid"><code>{{ task.tid }}</code></dd>
     <dt>Title</dt><dd data-field="title">{{ task.title }}</dd>
     <dt>Status</dt><dd data-field="status"><span class="pill {{ task.status }}">{{ task.status }}</span></dd>
     <dt>Assignee</dt><dd data-field="assignee">{{ task.assignee }}</dd>

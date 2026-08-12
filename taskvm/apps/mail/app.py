@@ -8,12 +8,14 @@ canonical "send the scheduled announcement" OOD task edits ``state``.
 
 **Why this is a held-out OOD app (not a reskin)**: the entity shape (a message
 with a lifecycle *state* field), the operator semantics (``set_state`` mutates a
-finite-state machine, not a scalar like a date/folder), and the DOM id attribute
-(``data-mail-id``) are all genuinely new. The A2UI compiler system prompt
-(``benchmark/a2ui_spec.py``) names ONLY calendar/taskboard/drive id attributes —
-mail is never mentioned — so the model must generalize from the supplied
-tool-schema + valid-ids + DOM, exactly the OOD generalization the W4 kill-test
-measures.
+finite-state machine, not a scalar like a date/folder), and its visible identity
+column (``subject``) are all genuinely new. GG: the DOM carries NO id attribute
+— entities are addressed by their visible subject (the ``locator``), the same
+contract as every other app. The A2UI compiler system prompt
+(``benchmark/a2ui_spec.py``) names NO app-specific id attributes (GG removed
+them all) — mail is never mentioned — so the model must generalize from the
+supplied tool-schema + visible observations, exactly the OOD generalization the
+GG.6 open-world kill-test measures.
 
 Structurally a twin of ``apps/drive`` (in-memory ``user_sessions`` dict; the
 canonical task graph / expected_diff live in ``benchmark/ood_fixtures.py``
@@ -22,7 +24,7 @@ verifier-only and are NEVER sent to this app). Per-app success judgment lives in
 
 Routes (reset/seed/read-canonical contract):
     GET  /health                         → {"status":"ok","site":"mail"}
-    GET  /<sid>                          → mail HTML view (data-mail-id DOM)
+    GET  /<sid>                          → mail HTML view (visible subject-keyed rows)
     GET  /api/messages/<sid>             → JSON message list (visible app state)
     POST /api/mail/<sid>/<mid>           → set_state / set_priority / set_to
     POST /api/inject_task/<sid>          → seed messages from seed_state (no-leak entry)

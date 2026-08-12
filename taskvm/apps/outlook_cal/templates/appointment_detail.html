@@ -2,13 +2,15 @@
 {% block title %}{{ appointment.subject }} · {{ sid }}{% endblock %}
 {% block content %}
 <a class="back-link" href="/{{ sid }}">← back to outlook calendar</a>
-{% if moved %}<div class="toast" data-toast="moved">✓ appointment <code>{{ moved_aid }}</code> rescheduled to <code>{{ moved_value }}</code>.</div>{% endif %}
+{% if moved %}<div class="toast" data-toast="moved">✓ appointment rescheduled to <code>{{ moved_value }}</code>.</div>{% endif %}
 <div class="meta">session: <code>{{ sid }}</code>{% if task_id %} · task: <code>{{ task_id }}</code>{% endif %}</div>
 
-<div class="detail" data-appointment-id="{{ appointment.aid }}">
-  <h2>{{ appointment.subject }} <code>{{ appointment.aid }}</code></h2>
+{# GG: no data-appointment-id attr + no visible AID — the detail card shows the
+   visible Subject as the heading. data-field on cells = parser field-key
+   contract (not screen-visible; raw DOM not fed to the compiler). #}
+<div class="detail">
+  <h2>{{ appointment.subject }}</h2>
   <dl>
-    <dt>AID</dt><dd data-field="aid"><code>{{ appointment.aid }}</code></dd>
     <dt>Subject</dt><dd data-field="subject">{{ appointment.subject }}</dd>
     <dt>Scheduled for</dt><dd data-field="scheduled_for" class="appt-date">{{ appointment.scheduled_for }}</dd>
     <dt>Time</dt><dd data-field="time">{{ appointment.time }}</dd>

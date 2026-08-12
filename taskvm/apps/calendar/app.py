@@ -9,7 +9,7 @@ the executor writes via ``POST /api/event/<sid>/move``.
 Routes (reset/seed/read-canonical contract; per-app success judgment lives in
 ``verifier/round_trip_checks.py``, NOT in this app):
     GET  /health                         → {"status":"ok","site":"calendar"}
-    GET  /<sid>                          → calendar HTML view (data-event-id DOM)
+    GET  /<sid>                          → calendar HTML view (visible title-keyed rows)
     GET  /api/events/<sid>               → JSON event list (visible app state)
     POST /api/event/<sid>/move           → move_event(eid, new_date) — mutate
     POST /api/inject_task/<sid>          → seed events from seed_state (no-leak entry)

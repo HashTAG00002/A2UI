@@ -19,15 +19,28 @@ from typing import Any
 class EntityBinding:
     """One edge: a task variable bound to one real app entity + operator.
     Emitted by the compiler (discovered from observations); mirrored in shape by
-    the verifier-only ``CanonicalBinding`` (GT)."""
+    the verifier-only ``CanonicalBinding`` (GT).
+
+    GG red-line §0: the model emits ``locator`` (the VISIBLE TITLE of the
+    entity — what a user sees on screen), NEVER ``entity_id`` (a DB primary
+    key, not on screen). The harness resolves ``locator`` → ``entity_id``
+    control-plane-side (``governance.translate.resolve_locator``) before patch
+    compilation, so ``entity_id`` is populated downstream but is NOT a
+    model-input field. Either ``locator`` (model-emitted, pre-resolve) or
+    ``entity_id`` (harness-resolved / GT mock path) must be present."""
     var_id: str
     app: str           # "calendar" | "taskboard" | "drive"
-    entity_id: str     # "E1" | "T1" | "F1"  (must appear in the DOM)
     field: str         # "date" | "deadline" | "status" | "assignee" | "parent" | ...
     operator: str      # one of OPERATOR_REGISTRY keys
+    entity_id: str | None = None   # "E1" | "T1" | ... — harness-resolved (control-plane), NOT model-input
+    locator: str | None = None     # "title:项目发布会议" — the VISIBLE TITLE (model-input)
 
     def to_dict(self) -> dict:
+        # emit BOTH (locator for the model-facing contract, entity_id for the
+        # control-plane downstream). A model-emitted binding has locator set +
+        # entity_id None (until resolved); a GT/mock binding has entity_id set.
         return {"var_id": self.var_id, "app": self.app,
+                "locator": self.locator,
                 "entity_id": self.entity_id, "field": self.field,
                 "operator": self.operator}
 
@@ -38,12 +51,14 @@ class Dependency:
     sync (e.g. a deadline tracks a release date)."""
     from_var: str
     to_app: str
-    to_entity_id: str
+    to_entity_id: str | None = None   # harness-resolved (control-plane)
+    to_locator: str | None = None     # model-emitted visible title
     relation: str = "tracks"   # "deadline_tracks_release_date" | ...
 
     def to_dict(self) -> dict:
         return {"from_var": self.from_var,
-                "to_entity": {"app": self.to_app, "entity_id": self.to_entity_id},
+                "to_entity": {"app": self.to_app, "locator": self.to_locator,
+                              "entity_id": self.to_entity_id},
                 "relation": self.relation}
 
 
@@ -63,7 +78,8 @@ class TaskBinding:
             if v.get("var_id") == var_id:
                 for b in v.get("bindings") or []:
                     out.append(EntityBinding(
-                        var_id=var_id, app=b["app"], entity_id=b["entity_id"],
+                        var_id=var_id, app=b["app"],
+                        entity_id=b.get("entity_id"), locator=b.get("locator"),
                         field=b["field"], operator=b["operator"]))
         return out
 

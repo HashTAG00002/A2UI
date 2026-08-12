@@ -158,9 +158,16 @@ A2UI_V08_SPEC = A2UI_V09_SPEC  # noqa: N816 - intentional compat alias, see docs
 
 # ── TaskVM binding-discovery contract (the gate-critical extension) ──────────
 # The model must ALSO emit a typed task_binding: each task variable bound to the
-# real app entities (identified by the data-event-id / data-task-id attributes
-# visible in the DOM) with an executable operator. This is the output W1 tests
-# (PASS requires "no hand-written binding" — the model discovers it).
+# real app entities (identified by their VISIBLE TITLE — what a user sees on
+# screen) with an executable operator. This is the output W1 tests (PASS
+# requires "no hand-written binding" — the model discovers it).
+#
+# GG red-line §0: the model NEVER sees or emits an internal entity_id (E1/T1/
+# wxid_* — a DB primary key, not on screen). Instead it emits a `locator`: the
+# screen-visible title of the entity (the `title`/`name`/`subject`/`peer_name`
+# column). The harness translates locator → entity_id control-plane-side
+# (governance.translate.resolve_locator), so downstream patch/dispatch/verifier
+# speak entity_id unchanged.
 TASKVM_BINDING_CONTRACT = """\
 ## TaskVM Task-Binding Contract (CRITICAL — gate-critical output)
 
@@ -169,11 +176,16 @@ task-state graph that binds each task variable to the real application entities
 you can observe, with the executable operator that would change each.
 
 You are given: (a) the task goal, (b) rendered observations of one or more
-running web apps (screenshot + DOM HTML + accessibility-tree text), and (c) a
-tool schema listing the executable operators each app exposes. The DOM marks
-every entity with a stable id attribute: Calendar events carry
-`data-event-id="E1"`, TaskBoard tasks carry `data-task-id="T3"`, Drive files
-carry `data-file-id="F1"`. USE THESE ids as `entity_id` — do not invent new ones.
+running web apps (screenshot + accessibility-tree text), and (c) a tool schema
+listing the executable operators each app exposes.
+
+**You address entities by their VISIBLE TITLE — the text a user reads on
+screen (the `title`/`name`/`subject`/`peer_name` column value), NEVER by an
+internal database id.** There are no id attributes on the page; a real user
+finds an event by its title ("项目发布会议"), not by an opaque primary key.
+Emit a `locator` for each binding: the exact visible title string, optionally
+prefixed with the field name (`title:项目发布会议`). The harness resolves the
+title to the real entity internally.
 
 ### Output shape (add a `task_binding` key alongside `text_response` and `a2ui`)
 
@@ -189,14 +201,14 @@ carry `data-file-id="F1"`. USE THESE ids as `entity_id` — do not invent new on
         "value": "2026-08-14",
         "editable": true,
         "bindings": [
-          {"app": "calendar",   "entity_id": "E1", "field": "date",     "operator": "move_event"},
-          {"app": "taskboard",  "entity_id": "T1", "field": "deadline", "operator": "set_deadline"}
+          {"app": "calendar",   "locator": "title:项目发布会议", "field": "date",     "operator": "move_event"},
+          {"app": "taskboard",  "locator": "title:整理发布材料",   "field": "deadline", "operator": "set_deadline"}
         ]
       }
     ],
     "dependencies": [
       {"from_var": "release_date",
-       "to_entity": {"app": "taskboard", "entity_id": "T1"},
+       "to_entity": {"app": "taskboard", "locator": "title:整理发布材料"},
        "relation": "deadline_tracks_release_date"}
     ]
   }
@@ -206,9 +218,9 @@ carry `data-file-id="F1"`. USE THESE ids as `entity_id` — do not invent new on
 1. `var_id` is a stable snake_case identifier for a task quantity the user might
    edit (e.g. release_date, owner, meeting_time). `value` is its current value
    read from the observed app state.
-2. Each binding's `entity_id` MUST be one of the `data-event-id` / `data-task-id`
-   / `data-file-id` values present in the supplied DOM. Do not use an id that
-   does not appear.
+2. Each binding's `locator` MUST be the VISIBLE TITLE of a real entity you can
+   see in the observations (the `title`/`name`/`subject`/`peer_name` value).
+   Do not invent a title that does not appear; do not use any internal id.
 3. Each binding's `operator` MUST be one of the operators listed in the tool
    schema supplied to you. `app` and `field` identify where the entity lives.
 4. `editable: true` for quantities a user can directly change; `false` for
@@ -217,8 +229,8 @@ carry `data-file-id="F1"`. USE THESE ids as `entity_id` — do not invent new on
    `to_entity` must sync. Use this for deadlines that track a date, statuses that
    track a milestone, etc.
 6. Compile ONLY from the observations — do not assume entities you cannot see.
-   If the task references an entity not visible in the DOM, omit it from bindings
-   (do not hallucinate an id).
+   If the task references an entity not visible in the observations, omit it
+   from bindings (do not hallucinate a title).
 7. Keep the A2UI surface minimal: a structured view of the variables (a Text
    label + value per variable is sufficient). Do NOT generate fancy UI. The
    binding is what matters.
@@ -231,14 +243,16 @@ carry `data-file-id="F1"`. USE THESE ids as `entity_id` — do not invent new on
    - MERGE under ONE shared `var_id` when several entities are assigned the SAME
      target value by the same user instruction AND they semantically track that
      one quantity. Example: the user moves "the release date" 8/14→8/18; the
-     release meeting (calendar.E1.date) and every dependent task deadline
-     (taskboard.T1/T2.deadline) all track that one date and all become 8/18 →
-     ONE `var_id` `release_date` bound to E1 + T1 + T2.
+     release meeting (Calendar "项目发布会议".date) and every dependent task
+     deadline (TaskBoard "整理发布材料"/"通知团队".deadline) all track that one
+     date and all become 8/18 → ONE `var_id` `release_date` bound to those
+     visible-titled entities.
    - SPLIT into SEPARATE `var_id`s when two entities take DIFFERENT target
      values, or the same value for semantically-independent reasons. Example:
      "raise the announcement's priority to high and lower the digest's priority
-     to low" → two independent quantities → `announcement_priority` (→M1) and
-     `digest_priority` (→M2), NOT one merged `mail_priority`.
+     to low" → two independent quantities → `announcement_priority` (bound to
+     the Mail message titled "发布通知") and `digest_priority` (bound to the
+     message titled "本周摘要"), NOT one merged `mail_priority`.
    - Heuristic: would the user say "I changed THE X" (one quantity → one shared
      var_id) or "I changed X AND Y" (two quantities → two var_ids)? When a
      single `new` value is meant for several entities that all track it, prefer

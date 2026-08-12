@@ -1,11 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Edit {{ appointment.aid }} · {{ sid }}{% endblock %}
+{% block title %}Edit appointment · {{ sid }}{% endblock %}
 {% block content %}
-<a class="back-link" href="/{{ sid }}/appointment/{{ appointment.aid }}">← back to {{ appointment.aid }}</a>
-<div class="meta">session: <code>{{ sid }}</code> · editing appointment <code>{{ appointment.aid }}</code></div>
+<a class="back-link" href="/{{ sid }}/appointment/{{ appointment.aid }}">← back to appointment</a>
+<div class="meta">session: <code>{{ sid }}</code> · editing appointment</div>
 
-<form class="edit-form" method="post" action="/{{ sid }}/appointment/{{ appointment.aid }}/reschedule"
-      data-appointment-id="{{ appointment.aid }}">
+{# GG: no data-appointment-id attr + no visible aid. The hidden
+   <input name="aid"> + the form action URL carry the entity_id for SERVER
+   ROUTING (control-plane — the model sees the rendered form via screenshot,
+   not the hidden field or URL; raw DOM is not fed to the compiler). #}
+<form class="edit-form" method="post" action="/{{ sid }}/appointment/{{ appointment.aid }}/reschedule">
   <div class="field">
     <label for="new_scheduled_for">Scheduled for (reschedule_appointment operator)</label>
     <input type="date" name="new_scheduled_for" value="{{ appointment.scheduled_for }}" id="new_scheduled_for" required>
@@ -27,7 +30,7 @@
   <dialog id="confirm-reschedule">
     <div class="dlg-head">Confirm reschedule</div>
     <div class="dlg-body">
-      Reschedule appointment <code>{{ appointment.aid }}</code> ({{ appointment.subject }})?
+      Reschedule appointment "{{ appointment.subject }}"?
       <div class="diff">
         <div class="row"><span>From</span><span class="v" id="old-date">{{ appointment.scheduled_for }}</span></div>
         <div class="row"><span>To</span><span class="v" id="new-date-display">{{ appointment.scheduled_for }}</span></div>

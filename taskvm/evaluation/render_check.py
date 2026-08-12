@@ -38,13 +38,18 @@ def parse_compiler_output(raw: str | None, parsed: Any) -> dict | None:
     return obj
 
 
-def validate_binding(binding: dict, observed_entity_ids: dict[str, set[str]],
+def validate_binding(binding: dict, observed_entity_ids: dict[str, set[str]] | None,
                      task_id: str | None = None) -> tuple[bool, list[str]]:
     """Structural validation of the compiler's task_binding (NO GT comparison).
 
-    ``observed_entity_ids``: {app_name: {entity_id, ...}} — the ids the compiler
-    COULD have seen in the DOM (parsed by ``replay_engine.parse_dom_entities``).
-    A binding's entity_id MUST be in this set (the #1 reliability check).
+    GG red-line §0: the model emits ``locator`` (a VISIBLE TITLE), NOT
+    ``entity_id``. A binding must carry a ``locator`` that names a real visible
+    entity OR an already-resolved ``entity_id`` (the GT/mock path). The #1
+    reliability check is now "does the locator resolve to a real visible entity"
+    — ``observed_entity_ids`` is repurposed to accept either a ``{app: {eid}}``
+    set (legacy/GT path, entity_id checked) OR ``None`` (model path: locator
+    presence is checked here; resolution happens upstream in the orchestrator
+    via ``governance.translate.resolve_locator`` against the locator_index).
 
     Returns (is_valid, errors). errors is empty iff valid.
     """
@@ -79,15 +84,22 @@ def validate_binding(binding: dict, observed_entity_ids: dict[str, set[str]],
             if not isinstance(b, dict):
                 errors.append(f"variables[{vi}].bindings[{bi}] is not a dict")
                 continue
-            for key in ("app", "entity_id", "field", "operator"):
+            for key in ("app", "field", "operator"):
                 if not b.get(key):
                     errors.append(f"variables[{vi}].bindings[{bi}] missing {key}")
+            # GG: a binding must identify its entity via locator (model path) or
+            # entity_id (GT/mock path). At least one must be present.
+            if not b.get("locator") and not b.get("entity_id"):
+                errors.append(f"variables[{vi}].bindings[{bi}] missing both locator "
+                              f"and entity_id (need a visible locator or resolved id)")
             app = b.get("app")
             eid = b.get("entity_id")
             op = b.get("operator")
-            if app and app not in observed_entity_ids:
-                errors.append(f"variables[{vi}].bindings[{bi}]: unknown app {app!r}")
-            elif eid and eid not in observed_entity_ids.get(app, set()):
+            # legacy entity_id existence check (only when observed_entity_ids is
+            # the old {app: {eid}} shape AND the binding carries entity_id)
+            if (observed_entity_ids and eid and app
+                    and app in observed_entity_ids
+                    and eid not in observed_entity_ids.get(app, set())):
                 errors.append(f"variables[{vi}].bindings[{bi}]: entity_id {eid!r} "
                               f"not present in observed {app} DOM")
             if op and op not in OPERATOR_REGISTRY:

@@ -3,16 +3,20 @@
 {% block content %}
 <div class="meta">session: <code>{{ sid }}</code>{% if task_id %} · task: <code>{{ task_id }}</code>{% endif %}</div>
 {% if goal %}<div class="meta">goal: {{ goal }}</div>{% endif %}
-{% if moved %}<div class="toast" data-toast="moved">✓ event <code>{{ moved_eid }}</code> moved to <code>{{ moved_date }}</code>.</div>{% endif %}
+{% if moved %}<div class="toast" data-toast="moved">✓ event moved to <code>{{ moved_date }}</code>.</div>{% endif %}
 
 <table id="event-list">
   <thead>
-    <tr><th>EID</th><th>Title</th><th>Date</th><th>Time</th><th>Calendar</th><th>RSVP</th><th></th></tr>
+    <tr><th>Title</th><th>Date</th><th>Time</th><th>Calendar</th><th>RSVP</th><th></th></tr>
   </thead>
   <tbody>
   {% for e in events %}
-    <tr class="event-row" data-event-id="{{ e.eid }}" data-date="{{ e.date }}">
-      <td data-field="eid"><code>{{ e.eid }}</code></td>
+    {# GG: no data-event-id row attr + no visible EID column — entity_id is a
+       DB primary key, never rendered on a real calendar screen. The row is
+       identified by its visible Title. data-field stays on cells as the
+       parser's field-key contract (HTML attr, not screen-visible; raw DOM is
+       not fed to the compiler). #}
+    <tr class="event-row">
       <td data-field="title">{{ e.title }}</td>
       <td data-field="date" class="event-date">{{ e.date }}</td>
       <td data-field="time">{{ e.time }}</td>
@@ -21,7 +25,7 @@
       <td><a class="btn view" href="{{ sid }}/event/{{ e.eid }}">View</a></td>
     </tr>
   {% else %}
-    <tr><td colspan="7" class="muted">no events</td></tr>
+    <tr><td colspan="6" class="muted">no events</td></tr>
   {% endfor %}
   </tbody>
 </table>

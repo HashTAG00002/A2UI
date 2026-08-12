@@ -2,13 +2,15 @@
 {% block title %}{{ event.title }} · {{ sid }}{% endblock %}
 {% block content %}
 <a class="back-link" href="/{{ sid }}">← back to calendar</a>
-{% if moved %}<div class="toast" data-toast="moved">✓ event <code>{{ moved_eid }}</code> moved to <code>{{ moved_date }}</code>.</div>{% endif %}
+{% if moved %}<div class="toast" data-toast="moved">✓ event moved to <code>{{ moved_date }}</code>.</div>{% endif %}
 <div class="meta">session: <code>{{ sid }}</code>{% if task_id %} · task: <code>{{ task_id }}</code>{% endif %}</div>
 
-<div class="detail" data-event-id="{{ event.eid }}">
-  <h2>{{ event.title }} <code>{{ event.eid }}</code></h2>
+{# GG: no data-event-id attr + no visible EID — the detail card shows the
+   visible Title as the heading. data-field on cells = parser field-key
+   contract (not screen-visible; raw DOM not fed to the compiler). #}
+<div class="detail">
+  <h2>{{ event.title }}</h2>
   <dl>
-    <dt>EID</dt><dd data-field="eid"><code>{{ event.eid }}</code></dd>
     <dt>Title</dt><dd data-field="title">{{ event.title }}</dd>
     <dt>Date</dt><dd data-field="date" class="event-date">{{ event.date }}</dd>
     <dt>Time</dt><dd data-field="time">{{ event.time }}</dd>

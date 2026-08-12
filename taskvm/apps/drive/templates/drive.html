@@ -3,16 +3,20 @@
 {% block content %}
 <div class="meta">session: <code>{{ sid }}</code>{% if task_id %} · task: <code>{{ task_id }}</code>{% endif %}</div>
 {% if goal %}<div class="meta">goal: {{ goal }}</div>{% endif %}
-{% if moved %}<div class="toast" data-toast="moved">✓ file <code>{{ moved_fid }}</code> {{ moved_op }} → <code>{{ moved_value }}</code>.</div>{% endif %}
+{% if moved %}<div class="toast" data-toast="moved">✓ file {{ moved_op }} → <code>{{ moved_value }}</code>.</div>{% endif %}
 
 <table id="file-list">
   <thead>
-    <tr><th>FID</th><th>Name</th><th>Type</th><th>Folder</th><th>Owner</th><th>Modified</th><th>Content</th><th>Publish</th><th></th></tr>
+    <tr><th>Name</th><th>Type</th><th>Folder</th><th>Owner</th><th>Modified</th><th>Content</th><th>Publish</th><th></th></tr>
   </thead>
   <tbody>
   {% for f in files %}
-    <tr class="file-row" data-file-id="{{ f.fid }}" data-parent="{{ f.parent }}" data-owner="{{ f.owner }}">
-      <td data-field="fid"><code>{{ f.fid }}</code></td>
+    {# GG: no data-file-id row attr (+ no data-parent/data-owner) + no visible
+       FID column — entity_id is a DB primary key, never rendered on a real
+       drive screen. The row is identified by its visible Name. data-field
+       stays on cells as the parser's field-key contract (HTML attr, not
+       screen-visible; raw DOM is not fed to the compiler). #}
+    <tr class="file-row">
       <td data-field="name">{{ f.name }}</td>
       <td data-field="type"><span class="pill {{ f.type }}">{{ f.type }}</span></td>
       <td data-field="parent" class="file-parent">{{ f.parent }}</td>
@@ -23,7 +27,7 @@
       <td><a class="btn view" href="{{ sid }}/file/{{ f.fid }}">View</a></td>
     </tr>
   {% else %}
-    <tr><td colspan="9" class="muted">no files</td></tr>
+    <tr><td colspan="8" class="muted">no files</td></tr>
   {% endfor %}
   </tbody>
 </table>

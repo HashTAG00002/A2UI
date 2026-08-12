@@ -1,11 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Edit {{ message.mid }} · {{ sid }}{% endblock %}
+{% block title %}Edit message · {{ sid }}{% endblock %}
 {% block content %}
-<a class="back-link" href="/{{ sid }}/message/{{ message.mid }}">← back to {{ message.mid }}</a>
-<div class="meta">session: <code>{{ sid }}</code> · editing message <code>{{ message.mid }}</code></div>
+<a class="back-link" href="/{{ sid }}/message/{{ message.mid }}">← back to message</a>
+<div class="meta">session: <code>{{ sid }}</code> · editing message</div>
 
-<form class="edit-form" method="post" action="/{{ sid }}/message/{{ message.mid }}/mutate"
-      data-mail-id="{{ message.mid }}">
+{# GG: no data-mail-id attr + no visible mid. The hidden <input name="mid"> +
+   the form action URL carry the entity_id for SERVER ROUTING (control-plane —
+   the model sees the rendered form via screenshot, not the hidden field or
+   URL; raw DOM is not fed to the compiler). #}
+<form class="edit-form" method="post" action="/{{ sid }}/message/{{ message.mid }}/mutate">
   <div class="field">
     <label>State (set_state operator — click a state to select it)</label>
     <div id="op_state" class="radio-group" style="display:flex; gap:12px; padding:6px 0;">
@@ -34,7 +37,7 @@
   </div>
   <div class="field">
     <label for="op_send_date">Send date (set_send_date operator)</label>
-    <input type="date" name="set_send_date" value="{{ message.send_date or '' }}" id="op_send_date" data-var="send_date">
+    <input type="date" name="set_send_date" value="{{ message.send_date or '' }}" id="op_send_date">
   </div>
   <input type="hidden" name="mid" value="{{ message.mid }}">
   <div class="actions">
@@ -45,7 +48,7 @@
   <dialog id="confirm-mutate">
     <div class="dlg-head">Confirm message edit</div>
     <div class="dlg-body">
-      Apply the changes to message <code>{{ message.mid }}</code> ({{ message.subject }})?
+      Apply the changes to message "{{ message.subject }}"?
       <div class="diff" id="diff-rows"></div>
     </div>
     <div class="dlg-actions">

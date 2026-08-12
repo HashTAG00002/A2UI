@@ -31,34 +31,35 @@ logger = logging.getLogger(__name__)
 MODEL_ROLE = "compiler"   # role 1 (UI-gen); role 2 = "compute_use" (W2+)
 
 
-def build_user_prompt(trace: TraceFixture, observed_entity_ids: dict[str, set[str]]) -> str:
-    """The user-message body: task goal + per-app observations + tool schema +
-    the entity-id whitelist (so the model knows which ids are valid)."""
+def build_user_prompt(trace: TraceFixture, observed_entity_ids: dict[str, set[str]] | None = None) -> str:
+    """The user-message body: task goal + per-app observations + tool schema.
+
+    GG red-line §0: the prompt contains ONLY what a user sees on screen — the
+    accessibility-tree text (visible title + visible fields). The raw DOM HTML
+    is NO LONGER included (it carried data-field attrs + URL entity_id paths —
+    not screen-visible). The old ``# Valid entity ids`` whitelist is GONE (it
+    leaked entity_id into the model input); the model addresses entities by
+    their visible title (``locator``), which it reads from the a11y.
+
+    ``observed_entity_ids`` is kept in the signature for backward-compat but is
+    IGNORED (GG removed the whitelist). Callers still pass it; it is unused."""
     lines = [f"# Task", f"task_id: {trace.task_id}", f"goal: {trace.goal}", ""]
     lines.append("# Observed application states (read-only — compile from these)")
     for app, obs in trace.final_obs.items():
         lines.append(f"\n## App: {app}")
-        lines.append("### Accessibility tree (primary text input):")
+        lines.append("### Accessibility tree (primary text input — visible screen content):")
         lines.append(obs.a11y_text)
-        lines.append("### DOM (rendered, with data-event-id/data-task-id + data-field):")
-        # truncate very long DOMs to keep the call bounded (a11y is the primary input)
-        dom = obs.dom_html
-        if len(dom) > 8000:
-            dom = dom[:8000] + "\n<!-- ...truncated... -->"
-        lines.append(dom)
     lines.append("")
     lines.append(build_tool_schema(list(trace.final_obs.keys())))
     lines.append("")
-    lines.append("# Valid entity ids (use ONLY these as entity_id):")
-    for app, ids in observed_entity_ids.items():
-        lines.append(f"- {app}: {sorted(ids)}")
-    lines.append("")
-    lines.append("Compile the task_binding now. Output ONLY the JSON object: "
-                 '{"text_response": "...", "a2ui": [...], "task_binding": {...}}')
+    lines.append("Compile the task_binding now. Address each entity by its VISIBLE "
+                 "TITLE (the `locator` field), NOT any internal id. Output ONLY the "
+                 'JSON object: {"text_response": "...", "a2ui": [...], '
+                 '"task_binding": {...}}')
     return "\n".join(lines)
 
 
-def compile_binding(trace: TraceFixture, observed_entity_ids: dict[str, set[str]],
+def compile_binding(trace: TraceFixture, observed_entity_ids: dict[str, set[str]] | None = None,
                     *, model: str | None = None, temperature: float | None = None,
                     max_tokens: int = 3072, cost_model: CostModel | None = None,
                     binding_only: bool = True,

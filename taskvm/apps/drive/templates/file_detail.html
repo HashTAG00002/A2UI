@@ -2,13 +2,15 @@
 {% block title %}{{ file.name }} · {{ sid }}{% endblock %}
 {% block content %}
 <a class="back-link" href="/{{ sid }}">← back to drive</a>
-{% if moved %}<div class="toast" data-toast="moved">✓ file <code>{{ moved_fid }}</code> {{ moved_op }} → <code>{{ moved_value }}</code>.</div>{% endif %}
+{% if moved %}<div class="toast" data-toast="moved">✓ file {{ moved_op }} → <code>{{ moved_value }}</code>.</div>{% endif %}
 <div class="meta">session: <code>{{ sid }}</code>{% if task_id %} · task: <code>{{ task_id }}</code>{% endif %}</div>
 
-<div class="detail" data-file-id="{{ file.fid }}">
-  <h2>{{ file.name }} <code>{{ file.fid }}</code></h2>
+{# GG: no data-file-id attr + no visible FID — the detail card shows the
+   visible Name as the heading. data-field on cells = parser field-key
+   contract (not screen-visible; raw DOM not fed to the compiler). #}
+<div class="detail">
+  <h2>{{ file.name }}</h2>
   <dl>
-    <dt>FID</dt><dd data-field="fid"><code>{{ file.fid }}</code></dd>
     <dt>Name</dt><dd data-field="name">{{ file.name }}</dd>
     <dt>Type</dt><dd data-field="type"><span class="pill {{ file.type }}">{{ file.type }}</span></dd>
     <dt>Folder</dt><dd data-field="parent" class="file-parent">{{ file.parent }}</dd>

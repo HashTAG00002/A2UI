@@ -1,11 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Edit {{ file.fid }} · {{ sid }}{% endblock %}
+{% block title %}Edit {{ file.name }} · {{ sid }}{% endblock %}
 {% block content %}
-<a class="back-link" href="/{{ sid }}/file/{{ file.fid }}">← back to {{ file.fid }}</a>
-<div class="meta">session: <code>{{ sid }}</code> · editing file <code>{{ file.fid }}</code></div>
+<a class="back-link" href="/{{ sid }}/file/{{ file.fid }}">← back to {{ file.name }}</a>
+<div class="meta">session: <code>{{ sid }}</code> · editing file</div>
 
-<form class="edit-form" method="post" action="/{{ sid }}/file/{{ file.fid }}/mutate"
-      data-file-id="{{ file.fid }}">
+{# GG: no data-file-id attr + no visible fid. The hidden <input name="fid"> +
+   the form action URL carry the entity_id for SERVER ROUTING (control-plane —
+   the model sees the rendered form via screenshot, not the hidden field or
+   URL; raw DOM is not fed to the compiler). #}
+<form class="edit-form" method="post" action="/{{ sid }}/file/{{ file.fid }}/mutate">
   <div class="field">
     <label>Folder (move_file operator — click a folder to select it)</label>
     <div id="op_parent" class="radio-group" style="display:flex; gap:16px; padding:6px 0;">
@@ -27,7 +30,7 @@
   </div>
   <div class="field">
     <label for="op_publish_date">Publish date (set_publish_date operator)</label>
-    <input type="date" name="set_publish_date" value="{{ file.publish_date or '' }}" id="op_publish_date" data-var="publish_date">
+    <input type="date" name="set_publish_date" value="{{ file.publish_date or '' }}" id="op_publish_date">
   </div>
   <input type="hidden" name="fid" value="{{ file.fid }}">
   <div class="actions">
@@ -38,7 +41,7 @@
   <dialog id="confirm-mutate">
     <div class="dlg-head">Confirm file edit</div>
     <div class="dlg-body">
-      Apply the changes to file <code>{{ file.fid }}</code> ({{ file.name }})?
+      Apply the changes to file "{{ file.name }}"?
       <div class="diff" id="diff-rows"></div>
     </div>
     <div class="dlg-actions">
