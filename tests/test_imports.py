@@ -176,5 +176,40 @@ def test_scripted_driver_dry_run_release_reschedule():
     assert n_subgoals >= 3  # release_reschedule: 1 edit → ≥3 patch-op subgoals
 
 
+# ── E18: run_mg_vm_killtest new killtest ───────────────────────────────────
+def test_mg_vm_killtest_importable():
+    """run_mg_vm_killtest must be importable (E18 sanity)."""
+    from taskvm.evaluation.run_mg_vm_killtest import run_one_sample, main
+    assert callable(run_one_sample)
+    assert callable(main)
+
+
+def test_mg_vm_killtest_dry_run_mg1():
+    """MG-1 dry-run: social_morning_brief produces ≥3 subgoals incl. toggle_like
+    + send_message (no bridge needed)."""
+    from taskvm.evaluation.run_mg_vm_killtest import run_one_sample
+    result = run_one_sample("social_morning_brief", "localhost", sample_i=0,
+                            dry_run=True)
+    assert result["PASS"], f"MG-1 dry-run failed: {result.get('error')}"
+    ops = [op["operator"]
+           for s in result["subgoals"]
+           for op in s.get("patch_ops", [])]
+    assert "toggle_like" in ops
+    assert "send_message" in ops
+
+
+def test_mg_vm_killtest_dry_run_mg2():
+    """MG-2 dry-run: expense_and_notify produces rollback_to subgoal
+    (no bridge needed)."""
+    from taskvm.evaluation.run_mg_vm_killtest import run_one_sample
+    result = run_one_sample("expense_and_notify", "localhost", sample_i=0,
+                            dry_run=True)
+    assert result["PASS"], f"MG-2 dry-run failed: {result.get('error')}"
+    event_types = [s["source_event_type"] for s in result["subgoals"]]
+    assert "rollback_to" in event_types, (
+        f"MG-2 must have a rollback_to subgoal; got: {event_types}")
+    assert "checkpoint" in event_types
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-x", "-q"])
