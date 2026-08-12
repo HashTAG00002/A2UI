@@ -27,16 +27,38 @@ def _esc(s: Any) -> str:
             ).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def readonly_card_html(app: str, entities: dict[str, dict[str, Any]]) -> str:
+def readonly_card_html(app: str, entities: dict[str, dict[str, Any]],
+                       card_index: int = 0,
+                       changed: set[tuple[str, str, str]] | None = None) -> str:
     """One read-only card per app: lists its entities + fields as TEXT only.
-    No forms/inputs → no mutate operator reachable (the read-only zone)."""
+    No forms/inputs → no mutate operator reachable (the read-only zone).
+
+    FF.1 §2.2 A: ``card_index`` injects ``style="--card-index: N"`` so the
+    staggered card-enter animation (style.css ``@keyframes card-enter``) plays
+    each card 40ms after the previous.
+    FF.1 §2.2 B: each field value is wrapped in a ``<span class="ro-value"
+    data-app data-entity data-field>`` so the value-flash animation can target
+    it. When ``(app, entity_id, field)`` is in ``changed``, the span also gets
+    the ``changed`` class → ``@keyframes value-flash`` plays on render. The
+    ``readonly_partial`` route (server.py) computes the changed set from
+    ``sess.last_changed`` / projection diff and passes it here."""
+    style = f' style="--card-index:{int(card_index)}"' if card_index else ""
     if not entities:
-        return f'<div class="card ro"><h3>{_esc(app)}</h3><p class="muted">no entities</p></div>'
+        return (f'<div class="card ro"{style}><h3>{_esc(app)}</h3>'
+                f'<p class="muted">no entities</p></div>')
     rows = []
     for eid, fields in entities.items():
-        fv = " ".join(f"{_esc(k)}={_esc(v)}" for k, v in fields.items())
+        parts = []
+        for k, v in fields.items():
+            is_changed = changed is not None and (app, eid, k) in changed
+            cls = "ro-value changed" if is_changed else "ro-value"
+            parts.append(
+                f'{_esc(k)}=<span class="{cls}" data-app="{_esc(app)}" '
+                f'data-entity="{_esc(eid)}" data-field="{_esc(k)}">'
+                f'{_esc(v)}</span>')
+        fv = " ".join(parts)
         rows.append(f'<div class="ro-row"><code>{_esc(eid)}</code> {fv}</div>')
-    return f'<div class="card ro"><h3>{_esc(app)}</h3>{"".join(rows)}</div>'
+    return f'<div class="card ro"{style}><h3>{_esc(app)}</h3>{"".join(rows)}</div>'
 
 
 def editable_field_html(var_id: str, label: str, value: Any,

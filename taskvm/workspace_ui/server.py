@@ -160,6 +160,17 @@ class WorkspaceSession:
     # governance chrome is structural). Set via --genui at startup.
     use_genui: bool = False
     last_genui: dict | None = None   # the last decode_genui result (traceability)
+    # FF.1 §2.2 B: the (app, entity_id, field) tuples touched by the most recent
+    # edit/resolve/undo. Consumed (read + cleared) by render_two_zone_html AND
+    # the GET /<sid>/readonly_partial route to inject the `.changed` class on
+    # matching read-only value spans → the value-flash animation plays once per
+    # edit. None = no flash pending (subsequent renders don't re-flash).
+    last_changed: list[tuple[str, str, str]] | None = None
+    # FF.1 §2.2 D / FF.6: the task's predefined milestones (Checkpoint.id +
+    # .description), set at seed time. The /<sid>/checkpoint route names a
+    # milestone for the celebrate badge by mapping the checkpoint count to
+    # this list (C1/C2/…). Empty for tasks with no predefined milestones.
+    task_milestones: list = field(default_factory=list)
 
 
 user_sessions: dict[str, WorkspaceSession] = {}
@@ -212,6 +223,8 @@ _PAGE_TPL = """\
     </aside>
     {% endif %}
   </main>
+  <script src="/static/confetti.min.js" defer></script>
+  <script src="/static/workflow_anim.js" defer></script>
   <script src="/static/timeline.js" defer></script>
   <script>
     // EE.8: SSE-based dynamic reconciliation polling (§0 property 1 — live
@@ -323,10 +336,16 @@ def render_two_zone_html(sess: WorkspaceSession) -> str:
     conflicts (re-read vs the cached projection) and renders them AMBER with
     merge options — no silent overwrite, no human-block (handoff §5 inv 4-5)."""
     canonical = canonical_snapshot(sess.adapters, sess.sid)
-    # read-only zone: one card per app, text only (no forms)
-    ro_cards = [readonly_card_html(name, (snap or {}).get("entities") or {})
-                for name, snap in canonical.items()]
+    # FF.1 §2.2 A: card_index → staggered card-enter animation (style.css).
+    # FF.1 §2.2 B: changed set (from sess.last_changed, set by edit/resolve/
+    #   undo) → .changed class on matching ro-value spans → value-flash anim.
+    #   Consumed here (flash fires once per edit; subsequent renders don't).
+    changed_set = set(sess.last_changed) if sess.last_changed else None
+    ro_cards = [readonly_card_html(name, (snap or {}).get("entities") or {},
+                                   card_index=i, changed=changed_set)
+                for i, (name, snap) in enumerate(canonical.items())]
     ro_html = "".join(ro_cards)
+    sess.last_changed = None   # consume — value-flash fires once per edit
 
     # read-write zone + reconciliation: the projection Y = the LAST values the
     # user was looking at (cached from the previous render, or a fresh project on
@@ -436,6 +455,9 @@ def seed_session(fixture, adapters: dict[str, StateAdapter],
     replay.seed_apps(fixture, adapters, sid)
     sess = WorkspaceSession(sid=sid, task_id=fixture.task_id, goal=fixture.goal,
                             binding=_gt_binding(fixture), adapters=adapters)
+    # FF.1 §2.2 D / FF.6: surface the task's predefined milestones so the
+    # /<sid>/checkpoint route can name a celebrate badge (C1/C2/…).
+    sess.task_milestones = list(getattr(fixture, "checkpoints", []) or [])
     user_sessions[sid] = sess
     logger.info(f"[workspace_ui] seeded sid={sid} task={fixture.task_id}")
     return sess
@@ -459,10 +481,33 @@ def _get_fixture_and_adapters(task_id: str, host: str = "localhost",
         return get_mobilegym_task(task_id), make_adapters(
             apps=["wechat", "alipay"], host=host, executor=executor)
     from taskvm.benchmark.fixtures import get_task
-    return get_task(task_id), make_adapters(host=host, executor=executor)
+    fixture = get_task(task_id)
+    # FF.1 (honest pre-existing-fix): build the adapter set from the TASK's
+    # seed_state apps ∪ binding apps, not ``make_adapters()``'s default
+    # (calendar+taskboard+drive). The default omits mail/outlook_cal, so
+    # launch_full (needs mail) was serving 4/5 apps (n_applied=4, no mail card)
+    # — exposed by FF.1's launch_full render evidence, and a blocker for FF.8
+    # (the four-step arc serves launch_full). Same union pattern EE.2 applied
+    # to run_w1_killtest. For 3-app tasks (release_reschedule/design_review/
+    # doc_handoff) the union is unchanged (byte-identical regression).
+    apps = sorted(set(fixture.seed_state.keys())
+                  | {b.app for b in fixture.bindings})
+    return fixture, make_adapters(apps=apps, host=host, executor=executor)
 
 
 # ── routes ───────────────────────────────────────────────────────────────────
+def _wants_json() -> bool:
+    """FF.1: the edit/checkpoint/adopt_milestone routes serve TWO clients —
+    the human (HTML form → redirect to the re-rendered page) and the UISimDriver
+    / programmatic caller (JSON body). A request is JSON when it sends
+    ``format=json`` in the form body OR ``Accept: application/json``. Otherwise
+    the route redirects (the browser form-submit flow)."""
+    if request.form.get("format") == "json":
+        return True
+    accept = request.headers.get("Accept", "")
+    return "application/json" in accept and "text/html" not in accept
+
+
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "site": SITE})
@@ -489,6 +534,45 @@ def view(sid: str):
     return render_two_zone_html(sess)
 
 
+@app.route("/<sid>/readonly_partial")
+def readonly_partial(sid: str):
+    """FF.1 §2.2 B + §2.3 item 4: HTMX-style partial refresh — return ONLY the
+    read-only zone HTML (app cards) so the frontend can swap it in after an
+    edit without a full page reload. Changed fields (from ``sess.last_changed``
+    set by /edit, or the projection diff for the SSE-conflict case) get the
+    ``.changed`` class so the value-flash animation plays on the swapped-in
+    spans. The conflict cards (if any) are rendered above the ro cards.
+
+    Consumes ``sess.last_changed`` (flash fires once per edit). Read-only w.r.t.
+    other session state (does not mutate ``last_projection`` — that stays the
+    main render's job)."""
+    sess = user_sessions.get(sid)
+    if sess is None:
+        return ("session not found", 404)
+    canonical = canonical_snapshot(sess.adapters, sess.sid)
+    changed_set = set(sess.last_changed) if sess.last_changed else None
+    ro_cards = [readonly_card_html(name, (snap or {}).get("entities") or {},
+                                   card_index=i, changed=changed_set)
+                for i, (name, snap) in enumerate(canonical.items())]
+    ro_html = "".join(ro_cards)
+    sess.last_changed = None   # consume — value-flash fires once per edit
+    # surface conflicts (read-only: no sess.last_projection mutation) so a
+    # partial refresh after an SSE conflict-push also AMBER-marks.
+    if sess.last_projection is not None:
+        _updated, recon = resync_with_conflicts(
+            sess.binding, sess.last_projection, sess.adapters, sess.sid)
+        if recon.has_conflicts:
+            conflict_html = "".join(
+                conflict_row_html(vid, info.get("label", vid),
+                                  info.get("conflict") or {})
+                for vid, info in _updated.items() if info.get("conflict"))
+            ro_html = (f'<div class="notice resolve">{recon.n_conflicts} '
+                       f'conflict(s) detected (underlying changed since your '
+                       f'last projection) — pick a merge option.</div>'
+                       + conflict_html + ro_html)
+    return Response(ro_html, mimetype="text/html")
+
+
 @app.route("/<sid>/edit", methods=["POST"])
 def edit(sid: str):
     sess = user_sessions.get(sid)
@@ -504,10 +588,23 @@ def edit(sid: str):
     sess.last_undo = None
     sess.last_undo_saga = None
     sess.last_resolve = None
+    # FF.1 §2.2 B: record the (app, entity_id, field) tuples this edit touched
+    # so the read-only zone flashes them on the next render / readonly_partial.
+    # Also exposed as `changed_vars` in the JSON response (FF.2 UISimDriver reads
+    # this to verify the GenUI form submit actually reached the binding).
+    changed_tuples = [(op.app, op.entity_id, op.field) for op in ops]
+    sess.last_changed = changed_tuples or None
     # the user's own action reconciles → refresh the projection cache so the next
     # render's Y = the new post-edit state (only EXTERNAL changes then conflict)
     sess.last_projection = resync_values(sess.binding, sess.adapters, sid)
     logger.info(f"[workspace_ui] edit {var_id}={new_value!r} → {rep.n_applied}/{len(ops)} applied")
+    if _wants_json():
+        return jsonify({
+            "ok": True, "sid": sid, "var_id": var_id, "new_value": new_value,
+            "n_ops": len(ops), "n_applied": rep.n_applied,
+            "changed_vars": [{"app": a, "entity_id": e, "field": f}
+                             for a, e, f in changed_tuples],
+        })
     return redirect(f"/{sid}")
 
 
@@ -532,6 +629,9 @@ def undo_latest(sid: str):
         return redirect(f"/{sid}")
     sres = sess.rollback_log.undo_saga(saga_id, sid, sess.adapters)
     sess.last_undo_saga = sres
+    # FF.1 §2.2 B: the reverted fields flash on the next render (value-flash).
+    sess.last_changed = [(s.app, s.entity_id, s.field)
+                         for s in sres.steps] or None
     first = (sres.steps[0] if sres.steps else None)
     if first is not None:
         sess.last_undo = {"app": first.app, "entity_id": first.entity_id,
@@ -575,6 +675,9 @@ def undo(sid: str, app: str):
         return redirect(f"/{sid}")
     sres = sess.rollback_log.undo_saga(saga_id, sid, sess.adapters)
     sess.last_undo_saga = sres
+    # FF.1 §2.2 B: the reverted fields flash on the next render (value-flash).
+    sess.last_changed = [(s.app, s.entity_id, s.field)
+                         for s in sres.steps] or None
     # keep a short legacy notice too (the timeline carries the full detail)
     first = (sres.steps[0] if sres.steps else None)
     if first is not None:
@@ -594,13 +697,32 @@ def undo(sid: str, app: str):
 
 @app.route("/<sid>/checkpoint", methods=["POST"])
 def checkpoint(sid: str):
+    """FF.1 §2.2 D + FF.6 §7.2: record a checkpoint snapshot (governance
+    restore point) AND fire the celebration. The response carries
+    ``checkpoint_reached`` (FF.1) + ``milestone_reached`` (FF.6 — the {id, name}
+    the celebrate badge shows). For the HTML form-submit flow, the redirect
+    carries ``?celebrate=<name>`` so timeline.js's ``celebrateCheckpoint`` pops
+    the confetti + badge (timeline.js reads the query on DOMContentLoaded)."""
     sess = user_sessions.get(sid)
     if sess is None:
         return ("session not found", 404)
     snap = canonical_snapshot(sess.adapters, sid)
     sess.checkpoints.append(snap)
-    logger.info(f"[workspace_ui] checkpoint #{len(sess.checkpoints)} for sid={sid}")
-    return redirect(f"/{sid}")
+    n = len(sess.checkpoints)
+    # name the milestone: map the checkpoint count to the task's predefined
+    # milestones (C1/C2/…); else a generic "checkpoint N".
+    ms = sess.task_milestones[n - 1] if 0 < n <= len(sess.task_milestones) else None
+    ms_id = getattr(ms, "id", None) or f"C{n}"
+    ms_name = getattr(ms, "description", None) or f"checkpoint {n}"
+    milestone_reached = {"id": ms_id, "name": ms_name}
+    logger.info(f"[workspace_ui] checkpoint #{n} for sid={sid} (milestone={ms_id})")
+    if _wants_json():
+        return jsonify({
+            "ok": True, "sid": sid, "checkpoint_index": n,
+            "checkpoint_reached": True, "milestone_reached": milestone_reached,
+        })
+    from urllib.parse import quote
+    return redirect(f"/{sid}?celebrate={quote(ms_name)}")
 
 
 @app.route("/<sid>/poll")
@@ -672,6 +794,9 @@ def resolve(sid: str):
                          "field": conflict.field, "option": option,
                          "value": result.get("value"),
                          "wrote": result.get("wrote", False)}
+    # FF.1 §2.2 B: the resolved field flashes on the next render.
+    if result.get("wrote"):
+        sess.last_changed = [(conflict.app, conflict.entity_id, conflict.field)]
     sess.last_dispatch = None
     sess.last_undo = None
     sess.last_undo_saga = None

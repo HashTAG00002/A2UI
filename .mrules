@@ -1533,3 +1533,691 @@ recon workflow（10 agent，529K tokens）发现 HANDOFF_E17.md 在未验证实�
 这 4 项 live 跑的共同阻塞：gpt-5.6-sol QPM ~10/min + 每写操作 ~16 calls（E13 测过）+ token 预算。脚本都就位（`run_four_step_arc`/`run_substrate_invariance_killtest`/`run_model_ablation`/`run_w1_killtest --vision`），final 阶段（QPM 宽松或预算充足时）可一键跑出落盘 JSON。
 
 **关键诚实定性**：EE 阶段把 handoff 的 10 个战场全部**实现 + 结构验证**了，其中 EE.5 reconciliation（规则逻辑）+ EE.9 interaction_compression（action-count 模型）是**完全验证**（非仅结构），EE.3/EE.4 是 **api-path 真数字验证**（非 §12.16 gui_agent），EE.10 是 **1-sample live vision 验证**。只有 EE.3/EE.4/EE.6 的大规模 live gui_agent 统计跑延后。**不声称 gui_agent 大规模 SR 数字**——那些数字得 live 跑才算数（E19 各 EE.X 的"已知局限"逐条记录了边界）。
+
+---
+
+## E20 — FF 阶段完整交接文档（用户友好前端 + 完整自动化 Benchmark + 工作流扩展）
+
+**[session: 2026-08-12，审计 agent 综合 EI 审计结论 + 用户新增 feature 需求，生成 FF 阶段交接 prompt]**
+
+> **本条是 FF 阶段的唯一权威交接文档，coding agent 开工前必须通读本条以及 E1-E19 全部内容（尤其 E7/E8/E10/E11/E16 的核心原则）。**
+> **绝对禁止任何保留、任何妥协、任何"先简单版本再后续补"——要么完整实现，要么报告技术上不可行并给出替代方案。**
+
+---
+
+### § 0. 开工前基线核实（每次新会话必须先跑，全绿才能开工）
+
+```bash
+PYTHON=/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/conda/envs/taskvm/bin/python
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui
+
+# L0: import 完整性（30 passed）
+$PYTHON -m pytest tests/test_imports.py -v
+
+# L1: W1 mock 四任务全 PASS
+$PYTHON -m taskvm.evaluation.run_w1_killtest --mock
+
+# L2: governance dry-run
+$PYTHON -m taskvm.governance.scripted_driver --task release_reschedule --dry-run
+```
+
+分支：`ee-phase`（当前，直接在上面继续，每个 FF.X 一个 commit，message 格式 `FF.X: <描述>`）。
+
+---
+
+### § 1. 现状诚实盘点（FF 阶段开工基础，不再重复 E19 的内容，只列差距）
+
+| 层 | 已有 | 缺失（FF 要补） |
+|---|---|---|
+| L4 用户行为层 | `ScriptedUserDriver`（意图直驱） | **通过 GenUI HTML 解析模拟用户在界面操作的 `UISimDriver`** |
+| L3 意图翻译层 | `GovernanceInterpreter.interpret()` 支持 `edit_field/rollback_to/checkpoint` | **工作流 planner：PARALLEL/LOOP 两种新 event_type + 对应翻译逻辑** |
+| L2 界面层 | GenUI 解码器已接入 server，form-wired，SSE 动态重投影 | **UI 视觉质量=终端风格，无流畅动画，无正反馈，需完全重设计** |
+| L1 VM 状态层 | binding/verifier/reconciliation 完整 | milestone 初始化：seed 时无 LLM 建议 checkpoint |
+| L0 Substrate 层 | 5 自建 app + MobileGym 完整 | 无差距 |
+| Benchmark | 10 个 killtest 脚本（全 api-path 或 dry-run） | gui_agent 路径 3-sample 统计跑未完成；`run_full_loop_killtest`（L2 界面→L0 完整链路）未建 |
+
+---
+
+### § 2. FF.1 — UI 完全重设计（CHI Award 级别视觉 + "嗑瓜子"正反馈动画）
+
+**动机**：当前 `style.css` 247 行，GitHub 暗色终端风，无任何让用户"想继续操作"的正反馈。CHI Award 的 demo 截图必须让 PC 上做 GUI 研究的审稿人看一眼就觉得"这个界面做得很认真"。
+
+#### 2.1 整体设计方向
+
+抛弃暗色终端风，改为**浅色 glassmorphism + 毛玻璃卡片 + 精细阴影**风格，类 Linear/Notion/Vercel Dashboard：
+
+- **背景**：`#f6f8fa`（极浅灰），不是纯白（纯白太刺眼）
+- **卡片**：白色 + `border-radius: 12px` + `box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 8px 24px rgba(0,0,0,.04)` + `backdrop-filter: blur(8px)`（毛玻璃）
+- **只读区**：左侧边栏绿色渐变标记（`linear-gradient(180deg, #10b981, #34d399)`）
+- **可写区**：左侧蓝色渐变标记（`linear-gradient(180deg, #3b82f6, #60a5fa)`）
+- **冲突（AMBER）**：橙黄卡片边框 + 左侧 `#f59e0b` 渐变标记
+- **文字**：`Inter`（英文）+ `PingFang SC`（中文），`font-size: 14px`，`line-height: 1.6`
+- **按钮**：圆角 `border-radius: 8px`，有 gradient 背景，hover 时 `translateY(-1px)` + 加深阴影
+
+#### 2.2 动画清单（每条都必须实现，不允许省略）
+
+**A. 卡片飞入动画**（页面初次加载/session 更新时）
+```css
+@keyframes card-enter {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.card { animation: card-enter .28s cubic-bezier(.16,1,.3,1) both; }
+/* 每张卡片 animation-delay: calc(var(--card-index) * 40ms) — stagger 效果 */
+```
+实现方式：server 端在渲染 `readonly_card_html` 时注入 `style="--card-index: N"`，N 从 0 递增。
+
+**B. 只读区数值变化动画**（edit 后 canonical re-read → 只读区某个字段变了）
+```css
+@keyframes value-flash {
+  0%   { background: rgba(16,185,129,.18); border-radius: 4px; }
+  100% { background: transparent; }
+}
+.ro-value.changed { animation: value-flash .6s ease-out; }
+```
+实现方式：server 端在 `/_read_only_partial`（新增 HTMX 风格的局部刷新路由）返回只读区 HTML 时，对比 `last_projection` 和新 canonical，对变化的字段注入 `.changed` class，前端 JS 在 SSE conflict 或 edit 完成后局部刷新只读区。
+
+**C. 工作流进度条动画**（核心，见 § 4 工作流 planner）
+
+这是用户描述的"贪吃蛇"动画：
+- 线性工作流：一条彩色进度条从左向右填充，绿色表示已完成步骤，当前步骤有扫光动画（shimmer）
+- 并行工作流：多条进度条并排，同时从各自起点出发，在 barrier 节点汇聚（CSS grid + 连线 SVG）
+- Loop 工作流：一个圆形 / 椭圆轨道，彩色小球在轨道上循环运动，每完成一圈在计数器打勾
+
+具体实现：`timeline.js` 大幅扩充（或新增 `workflow_anim.js`），用 Canvas 或 SVG + CSS animation 实现。
+
+**D. Checkpoint 达成庆祝动画**（正反馈核心）
+
+当 `POST /<sid>/checkpoint` 成功后，服务器返回 `checkpoint_reached: true` 时：
+- 全屏出现一个 2 秒的 confetti 彩带动画（用 `canvas-confetti` CDN 版本，单个 `<script>` 标签引入，无需 npm）
+- 屏幕中央浮现一个大大的 ✅ badge，内容是 checkpoint 名称，`scale 0 → 1.1 → 1` 弹簧动画，2.5 秒后自动消失
+- 声音：可选（`<audio>` 标签预嵌一个短促的成功音效 `.mp3`，用户可静音）
+
+**E. 可写区控件交互动画**
+- `input[type=text/date]` focus 时：`border-color` 从灰 → 蓝，`box-shadow` 渐变扩散（`0 0 0 3px rgba(59,130,246,.2)`），过渡时间 0.15s
+- 提交按钮点击：`transform: scale(0.96)` 下压 80ms，再回弹 `scale(1)`，加 loading spinner（CSS-only，`border-top-color: transparent` 旋转圆圈）
+- 提交后收到响应：按钮变成绿色 ✓ 0.8 秒，再变回原色
+
+**F. AMBER 冲突出现动画**
+- 冲突卡片从右侧 `translateX(20px) opacity(0)` 滑入，0.3s
+- 冲突标记 badge（`⚠ 底层已变`）有呼吸脉冲 `scale 1 → 1.05 → 1`，周期 2s
+
+**G. 进度条"拖不回去"动画（扩展 timeline.js）**
+- 拖到 🔒 位置时，handle 不仅变红，还 shake（`translateX -4px → +4px → 0`，3 次，共 0.3s）
+- 同时锁定的段有一个短暂的"加亮"效果（`filter: brightness(1.4)` 0.2s）
+
+#### 2.3 实现文件清单
+
+1. `taskvm/workspace_ui/static/style.css`：**完全重写**（保留所有 CSS class name 语义，彻底替换视觉）
+2. `taskvm/workspace_ui/static/timeline.js`：扩充 G 动画
+3. `taskvm/workspace_ui/static/workflow_anim.js`（**新建**）：C 动画（进度条 + 并行 barrier + loop 轨道）
+4. `taskvm/workspace_ui/server.py`：
+   - `_PAGE_TPL` 中加入 canvas-confetti CDN + workflow_anim.js 引用
+   - 新增 `GET /<sid>/readonly_partial` 路由：只返回只读区 HTML（用于 edit 后局部刷新）
+   - `/<sid>/checkpoint` 路由响应 JSON 里加 `"checkpoint_reached": true/false`
+   - `/<sid>/edit` 成功后响应 JSON 里加 `"changed_vars": [...]`（前端用来触发 `.changed` 动画）
+5. `taskvm/workspace_ui/static/confetti.min.js`（下载 canvas-confetti v1.9 min 版本到本地，不依赖外网 CDN）
+
+**验收标准**：截图给一个完全不了解本项目的人看，他的反应是"这个界面很精致"而不是"这是一个内部工具"。拖到 🔒 时确实有 shake。达到 checkpoint 确实有彩带。
+
+---
+
+### § 3. FF.2 — GenUI 界面←→用户操作完整闭环（UISimDriver）
+
+**动机**：`ScriptedUserDriver` 直接发 `edit_field` 事件，绕过了 GenUI 界面。真正的 human-centric 评估需要证明"用户通过 GenUI 界面上的控件操作，系统能正确识别意图并执行"。
+
+#### 3.1 架构
+
+新建 `taskvm/governance/ui_sim_driver.py`：
+
+```
+UISimDriver（L4 的新实现，继承 UserBehaviorDriver）
+  工作方式：
+  1. GET /<sid>  → 拿到 GenUI HTML
+  2. BeautifulSoup 解析 <form class="rw-field" action="/<sid>/edit">
+     提取每个 form 里的 <input name="var_id"> + <input name="new_value">
+  3. 按 fixture 的 user_edit 找到目标 var_id
+  4. POST /<sid>/edit {var_id: ..., new_value: ...}  ← 这一步等于"用户在界面上填表单提交"
+  5. 读 HTTP 响应里的 changed_vars 字段（FF.1 新增）验证
+  6. 生成一个 UserBehaviorEvent(edit_field, {var_id, new_value, from_ui: True})
+     （from_ui=True 标记这是通过界面路径，不是直接发意图）
+```
+
+关键区别：这比 `ScriptedUserDriver` 多了一层——它**真的经过了 GenUI HTML 渲染 → 解析 → 表单提交**，证明了 "GenUI 渲染出来的界面 binding 接线是正确的、可操作的"。
+
+#### 3.2 新 killtest
+
+新建 `taskvm/evaluation/run_full_loop_killtest.py`：
+
+```
+完整链路：
+  seed session
+  → UISimDriver 解析 GenUI 界面 → POST /edit
+  → GovernanceInterpreter → PatchOps → dispatch（gui_agent 路径）
+  → GUI Agent 在真实浏览器执行
+  → verifier 读 canonical → PASS/FAIL
+
+指标：
+  - ui_parse_ok: GenUI HTML 里成功找到 var_id 的 form
+  - form_submit_ok: POST /edit 返回 200
+  - dispatch_n_ops: 实际产生的 PatchOps 数量
+  - gui_exec_success_rate: GUI Agent 执行成功率
+  - round_trip_score: verifier 打分
+  - binding_f1: compiler 发现 binding 的准确度
+  - full_loop_pass: 全链路 PASS（ui_parse + form_submit + round_trip ≥ 0.85 + neg ≤ 0.3）
+
+输出：eval_results/full_loop_killtest_<ts>.json
+```
+
+**L0 测试**：在 `tests/test_imports.py` 里加 2 个测试：`test_ui_sim_driver_importable` + `test_full_loop_killtest_importable`。
+
+**验收标准**：`run_full_loop_killtest --task release_reschedule --samples 1 --execution-mode api`（先 api 验证链路通，再 gui_agent）跑通，`full_loop_pass=True`，`ui_parse_ok=True`。
+
+---
+
+### § 4. FF.3 — Milestone 初始化 LLM 建议（governance 的起点）
+
+**动机**：开大纲 §1.3 明确"人在任务起始时主动设定 milestone/checkpoint"，但现在 seed 时没有任何 milestone 建议，用户要自己手动点按钮。这破坏了 governance 的体验——用户打开界面，首先看到的应该是"这个任务有以下建议的里程碑，你想调整吗？"
+
+#### 4.1 实现位置
+
+`taskvm/workspace_ui/server.py::seed_route()` 里，在 `WorkspaceSession` 创建完成后，异步（非阻塞）调用一次 LLM：
+
+```python
+def _suggest_milestones(goal: str, n: int = 3) -> list[dict]:
+    """Call LLM once at seed time to suggest N checkpoints for governance."""
+    system = (
+        "你是 TaskVM 的 governance 规划助手。给定一个跨多个应用的任务目标，"
+        "建议 2-3 个有意义的里程碑 checkpoint，每个 checkpoint 代表任务推进到某个"
+        "可以暂停/回退的中间状态。格式：JSON 数组，每项包含 id(C1/C2/C3)、"
+        "name(简短中文名)、description(一句话描述达到这个 checkpoint 时的状态)。"
+        "不要超过 3 个 checkpoint。不要解释，直接输出 JSON。"
+    )
+    user = f"任务目标：{goal}"
+    parsed, _, _ = complete_json(system=system, user=user,
+                                  max_tokens=400, temperature=0.3,
+                                  model=None, repair_retries=2)
+    if isinstance(parsed, list):
+        return parsed
+    if isinstance(parsed, dict) and "checkpoints" in parsed:
+        return parsed["checkpoints"]
+    return []
+```
+
+建议结果存入 `WorkspaceSession.suggested_milestones: list[dict]`，在 rw-zone 顶部渲染为"系统建议的里程碑"卡片：
+- 每个建议 milestone 有一个"采纳"按钮（`POST /<sid>/adopt_milestone {milestone_id}`）
+- 点击"采纳"后：milestone 被加入 `sess.checkpoints`，按钮变为已采纳状态（✓，不可再次点击）
+- 这个初始化调用的 token 成本是一次性的，不影响后续操作流程
+
+**新增路由**：`POST /<sid>/adopt_milestone {milestone_id: str}` → 把对应建议 milestone 加入 checkpoints，返回更新后的 HTML 片段。
+
+**诚实标注**：milestone 建议由 LLM 生成，是**建议**不是**决定**——用户可以完全忽略它们。如果 LLM 调用失败（429/timeout），graceful degradation 为空建议列表（界面不显示这一块），session 正常使用。
+
+---
+
+### § 5. FF.4 — 工作流 Planner（线性 / 并行 / Loop 三种结构）
+
+这是本 FF 阶段技术含量最高的新增功能，也是用户新增 feature 的核心。
+
+#### 5.1 设计理念
+
+参照结构化编程的三种基本结构：
+- **顺序（Sequential）**：现有的线性执行，一个 subgoal 完成后执行下一个
+- **并行（Parallel）**：多个 subgoal 同时发出，等到所有完成后 barrier 收束（对应"同时操作 4 个 app"）
+- **循环（Loop）**：一个 subgoal 模板重复执行 N 次（对应"对 N 个单元格执行相同操作"）
+
+当前系统只有顺序结构（`GovernanceInterpreter` 返回一个 `list[SubgoalInstruction]` 按顺序执行）。
+
+#### 5.2 数据结构扩展
+
+**扩展 `taskvm/governance/subgoal.py`**：
+
+```python
+from enum import Enum
+
+class WorkflowNodeType(Enum):
+    SEQUENTIAL = "sequential"   # 现有，顺序执行
+    PARALLEL   = "parallel"     # 新：并行 barrier
+    LOOP       = "loop"         # 新：循环 N 次
+
+@dataclass
+class WorkflowNode:
+    """一个执行节点，可以是单个 SubgoalInstruction 或一组（并行/循环）。"""
+    node_type: WorkflowNodeType = WorkflowNodeType.SEQUENTIAL
+    subgoals: list[SubgoalInstruction] = field(default_factory=list)
+    # PARALLEL: subgoals 是并行执行的，所有完成后才继续
+    # LOOP: subgoals[0] 是模板，loop_count 次重复；每次的 var_value 从 loop_values 取
+    loop_count: int = 1
+    loop_values: list[Any] = field(default_factory=list)
+    # 前端渲染提示
+    display_name: str = ""
+    barrier_label: str = ""    # PARALLEL 汇聚点的显示名称
+
+@dataclass
+class WorkflowPlan:
+    """完整的工作流执行计划，替代原来的 list[SubgoalInstruction]。"""
+    task_id: str
+    nodes: list[WorkflowNode]
+    workflow_type: str = "sequential"  # "sequential" / "parallel" / "loop" / "mixed"
+    generated_by: str = "deterministic"  # "deterministic" / "llm_planner"
+```
+
+#### 5.3 扩展 GovernanceInterpreter
+
+**`taskvm/governance/governance_interpreter.py`** 新增：
+
+1. **`interpret_as_workflow(events, vm_state, task) → WorkflowPlan`**：
+   - 输入一批 events（完整任务的 event sequence）
+   - 调用 `_classify_workflow(events, task)` 判断结构
+   - 返回 `WorkflowPlan` 而非 `list[SubgoalInstruction]`
+
+2. **`_classify_workflow(events, task) → WorkflowNodeType`**：
+   - 规则判断（不调 LLM，零延迟）：
+     - 1 个 `edit_field` 且 bindings 跨 ≥2 个 app → `PARALLEL`（一个变量同时写多个 app，barrier 收束）
+     - event_sequence 里有 `loop_field` type（新增）→ `LOOP`
+     - 其他 → `SEQUENTIAL`
+
+3. **新增 `event_type = "loop_field"`**（加入 `EVENT_TYPES`）：
+   - payload: `{var_id, values: [v1, v2, ...], loop_label}`
+   - `_interpret_loop_field`：生成一个 `WorkflowNode(LOOP)`, subgoals[0] 是模板，loop_values = payload["values"]
+
+4. **PARALLEL 执行语义**：
+   - `edit_field` 产生多个 PatchOps（已有，dispatch 已支持 fanout）
+   - `WorkflowNode(PARALLEL, subgoals=[sg_calendar, sg_taskboard, sg_drive, sg_mail])` 表示这 4 个 subgoal 并行发出
+   - 执行引擎（见 5.4）用 `concurrent.futures.ThreadPoolExecutor` 同时执行，barrier 等 `as_completed`
+
+#### 5.4 新执行引擎：WorkflowExecutor
+
+新建 `taskvm/execution/workflow_executor.py`：
+
+```python
+class WorkflowExecutor:
+    """执行 WorkflowPlan，支持 Sequential/Parallel/Loop 三种结构。
+    
+    每个 WorkflowNode 执行完毕后调用 on_node_complete(node_idx, results)，
+    用于前端进度更新（通过 SSE 或 WebSocket push）。
+    """
+    
+    def execute(self, plan: WorkflowPlan, adapters: dict,
+                on_node_complete: Callable = None) -> WorkflowResult:
+        results = []
+        for i, node in enumerate(plan.nodes):
+            if node.node_type == WorkflowNodeType.SEQUENTIAL:
+                r = self._exec_sequential(node, adapters)
+            elif node.node_type == WorkflowNodeType.PARALLEL:
+                r = self._exec_parallel(node, adapters)
+            elif node.node_type == WorkflowNodeType.LOOP:
+                r = self._exec_loop(node, adapters)
+            results.append(r)
+            if on_node_complete:
+                on_node_complete(i, r)
+        return WorkflowResult(nodes=results, overall_pass=all(r.pass_ for r in results))
+    
+    def _exec_parallel(self, node: WorkflowNode, adapters: dict) -> NodeResult:
+        """并行执行所有 subgoals，barrier 收束后汇总。"""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        futures = {}
+        with ThreadPoolExecutor(max_workers=len(node.subgoals)) as pool:
+            for sg in node.subgoals:
+                f = pool.submit(self._exec_one_subgoal, sg, adapters)
+                futures[f] = sg
+            results = []
+            for f in as_completed(futures):
+                results.append(f.result())
+        return NodeResult(subgoal_results=results,
+                         pass_=all(r.pass_ for r in results),
+                         node_type="parallel")
+    
+    def _exec_loop(self, node: WorkflowNode, adapters: dict) -> NodeResult:
+        """循环执行 subgoals[0] 的 loop_count 次，每次替换 loop_values[i]。"""
+        template = node.subgoals[0]
+        results = []
+        for i, val in enumerate(node.loop_values[:node.loop_count]):
+            sg_i = _instantiate_loop_subgoal(template, i, val)
+            results.append(self._exec_one_subgoal(sg_i, adapters))
+        return NodeResult(subgoal_results=results,
+                         pass_=all(r.pass_ for r in results),
+                         node_type="loop")
+```
+
+#### 5.5 WorkflowPlan 感知的 server 路由
+
+`taskvm/workspace_ui/server.py` 的 `/<sid>/edit` 路由扩展：
+- 接收 request body 里可选的 `workflow_hint: "parallel" | "loop" | "sequential"（默认）`
+- 当 binding 跨多 app 时，自动升级为 PARALLEL（用户不需要手动指定）
+- 工作流执行结果通过 SSE（新增 `event: workflow_progress`）实时推送到前端
+
+#### 5.6 三种工作流的 demo 任务设计
+
+为每种结构专门设计一个可在 case study 展示的任务：
+
+| 工作流类型 | 任务 ID | 描述 | 涉及的 app |
+|---|---|---|---|
+| Sequential | `release_reschedule`（已有） | 顺序推进：改日期→任务同步→撤销→验证 | calendar + taskboard |
+| **Parallel（新建）** | `launch_fanout_parallel` | 一次改 release_date → 4 个 app **并行写回**，barrier 收束 verifier | calendar + taskboard + drive + mail |
+| **Loop（新建）** | `batch_task_assign` | 循环：对 taskboard 里的 T1/T2/T3 三个任务逐一 set_assignee 到同一人 | taskboard（3次循环） |
+
+`launch_fanout_parallel` 实际上就是已有的 `launch_full` 任务，只是在执行器侧改用 PARALLEL 工作流（calendar.E1.move_event + taskboard.T1/T2.set_deadline + drive.F1.set_publish_date + mail.M1.set_send_date 四路并行，barrier 在 verifier 处收束）。
+
+`batch_task_assign` 是新任务，需要在 `benchmark/fixtures.py` 里新建：
+- `var_id = "task_assignee"`，绑定 `taskboard.T1.set_assignee`（loop 模板）
+- `loop_values = ["T1", "T2", "T3"]`，三次循环各对一个 task 操作
+- `expected_diff = {taskboard: {T1: {assignee: "Bob"}, T2: {assignee: "Bob"}, T3: {assignee: "Bob"}}}`
+
+---
+
+### § 6. FF.5 — 工作流动画前端（"贪吃蛇"体验）
+
+这是 § 2 的动画 C 的详细规格，单独成节因为是全新功能。
+
+#### 6.1 前端工作流可视化区域
+
+在 `_PAGE_TPL` 的两区界面之上（或之间）新增一个**工作流可视化区**：
+
+```html
+<section class="workflow-viz" id="workflow-viz">
+  <!-- 由 workflow_anim.js 动态渲染，服务器在 seed/edit 时通过 SSE workflow_progress 更新 -->
+</section>
+```
+
+#### 6.2 三种工作流的视觉表现
+
+**Sequential（线性进度条）**：
+- 水平进度条，分 N 段（N = 任务步骤数）
+- 当前执行段：有 CSS shimmer 扫光动画（`linear-gradient` 从左到右移动，`background-size: 200%`）
+- 完成段：绿色 + ✓ 图标，有从灰→绿的 `transition: background-color .4s`
+- 不可逆锁定段：红色 🔒 + 颤抖动画
+
+```
+[✓ 已完成] ──── [▶ shimmer 进行中] ──── [○ 待执行] ──── [🔒 不可逆]
+```
+
+**Parallel（并行 barrier 树）**：
+- 从一个起点节点出发，SVG 路径分叉成 N 条线（用 `<svg>` 绘制贝塞尔曲线），到达各 app 节点
+- 各 app 节点有独立进度指示器（等待中/执行中/完成）
+- 执行中的线有彩色小球从起点流向 app 节点（CSS `@keyframes` 移动 `stroke-dashoffset`）
+- 所有 app 节点完成后，N 条线重新收束到一个 barrier 节点（verifier），有合流动画
+- Barrier 节点完成后有绿色脉冲 + ✓
+
+**Loop（循环轨道）**：
+- 一个圆形轨道（SVG `<circle>`），轨道上有一个彩色小球
+- 小球沿轨道逆时针或顺时针运动，速度可调（CSS `animation-duration`）
+- 每完成一圈（一次循环迭代）：轨道上增加一个绿色 ✓ 刻度，小球继续
+- 轨道外侧有计数器："已完成 2 / 3 次"
+- 全部完成后：轨道变全绿，小球停在 12 点钟位置，中心出现大 ✓
+
+#### 6.3 SSE 协议扩展
+
+server 通过 SSE `event: workflow_progress` 推送工作流状态：
+
+```json
+{
+  "event": "workflow_progress",
+  "data": {
+    "plan_type": "parallel",
+    "nodes": [
+      {"idx": 0, "type": "parallel", "app": "calendar", "status": "running"},
+      {"idx": 1, "type": "parallel", "app": "taskboard", "status": "done"},
+      {"idx": 2, "type": "parallel", "app": "drive", "status": "waiting"},
+      {"idx": 3, "type": "parallel", "app": "mail", "status": "waiting"}
+    ],
+    "barrier_status": "waiting"
+  }
+}
+```
+
+前端 `workflow_anim.js` 监听这个事件，实时更新 SVG 动画状态。
+
+#### 6.4 实现文件
+
+- `taskvm/workspace_ui/static/workflow_anim.js`（**新建**，纯 vanilla JS + SVG 操作，无框架）
+- `taskvm/workspace_ui/server.py`：`/<sid>/poll` 路由扩展，增加 `workflow_progress` event 推送
+- `taskvm/workspace_ui/static/style.css`：追加 `.workflow-viz` 相关样式
+
+---
+
+### § 7. FF.6 — Checkpoint 达成庆祝动画（正反馈终极版）
+
+单独成节，因为这是与用户体验最直接相关的功能。
+
+#### 7.1 confetti 库
+
+将 `canvas-confetti` v1.9.3 minified 版本下载到本地：
+```
+taskvm/workspace_ui/static/confetti.min.js
+```
+（直接从 https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js 下载，约 7KB，存本地以避免外网依赖）
+
+#### 7.2 庆祝逻辑
+
+在 `timeline.js` 末尾（或单独的 `celebrate.js`）实现：
+
+```javascript
+function celebrateCheckpoint(checkpointName) {
+  // 1. confetti 从两侧射出
+  confetti({ particleCount: 120, spread: 70, origin: {x: 0.2, y: 0.6} });
+  confetti({ particleCount: 120, spread: 70, origin: {x: 0.8, y: 0.6} });
+  
+  // 2. 中央 badge 弹出
+  var badge = document.createElement("div");
+  badge.className = "checkpoint-badge";
+  badge.innerHTML = "<span class='ckpt-icon'>✅</span><span class='ckpt-name'>" 
+                    + checkpointName + "</span><span class='ckpt-sub'>里程碑达成</span>";
+  document.body.appendChild(badge);
+  
+  // 3. 弹簧动画：scale 0 → 1.1 → 1
+  badge.style.transform = "scale(0)";
+  requestAnimationFrame(function() {
+    badge.style.transition = "transform .4s cubic-bezier(.34,1.56,.64,1)";
+    badge.style.transform = "scale(1)";
+  });
+  
+  // 4. 2.5 秒后淡出消失
+  setTimeout(function() {
+    badge.style.transition = "opacity .3s, transform .3s";
+    badge.style.opacity = "0";
+    badge.style.transform = "scale(0.9)";
+    setTimeout(function() { document.body.removeChild(badge); }, 300);
+  }, 2500);
+}
+```
+
+触发时机：
+1. `POST /<sid>/checkpoint` 响应 JSON 里含 `"milestone_reached": {"id": "C1", "name": "会议+任务同步"}` → 前端调用 `celebrateCheckpoint(name)`
+2. `POST /<sid>/adopt_milestone` 响应 JSON 里同样可以触发（用户主动采纳里程碑时）
+
+#### 7.3 CSS
+
+```css
+.checkpoint-badge {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  background: linear-gradient(135deg, #10b981, #34d399);
+  color: white; border-radius: 20px;
+  padding: 24px 40px; text-align: center;
+  box-shadow: 0 20px 60px rgba(16,185,129,.4);
+  z-index: 9999; pointer-events: none;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ckpt-icon { font-size: 48px; line-height: 1; }
+.ckpt-name { font-size: 20px; font-weight: 700; letter-spacing: .5px; }
+.ckpt-sub  { font-size: 13px; opacity: .85; }
+```
+
+---
+
+### § 8. FF.7 — 完整自动化 Benchmark Suite（科研严谨性）
+
+#### 8.1 核心原则（从 E4/E8/E11 蒸馏）
+
+1. **每个数字都必须有对应的 `eval_results/*.json` 文件**，不允许只在聊天里汇报
+2. **验收标准一律用 `round_trip_score mean ≥ 0.85`（3 sample majority）**，不用 max
+3. **gui_agent 路径是标准路径**，api 路径只用于 mock 调试
+4. **GT 来自 canonical state，永远不让模型自评**
+
+#### 8.2 需要补全的评估脚本
+
+| 脚本 | 当前状态 | FF.7 目标 |
+|---|---|---|
+| `run_w1_killtest` | api-path 3-sample PASS，vision 1-sample | `--execution-mode gui_agent --samples 3` 跑 4 tasks，落盘 |
+| `run_substrate_invariance_killtest` | mock PASS | `--samples 3` real compiler + gui_agent，落盘 |
+| `run_four_step_arc` | dry-run（api-path）PASS | 默认（gui_agent）模式 live 跑，产出截图 |
+| `run_model_ablation` | 脚本就位，未跑 | `--backend gpt56sol --samples 3` + `--backend glm5v --samples 2`，落盘对比 JSON |
+| `run_full_loop_killtest` | 不存在 | FF.2 新建，`--samples 1` 验证链路，`--samples 3` 统计 |
+| `run_mg_vm_killtest` | dry-run PASS | live `--task all --samples 1` |
+
+#### 8.3 benchmark 任务设计补全
+
+现有任务（builtin）：
+- `release_reschedule`（2 app，Sequential）✅
+- `design_review_delay`（2 app，Sequential）✅
+- `doc_handoff`（1 app，Sequential）✅
+- `launch_full`（4 app，Sequential）✅
+- `outlook_release_reschedule`（2 app，Sequential，Stack B）✅
+
+FF 新增任务（在 `benchmark/fixtures.py` 新建，验收：mock killtest 3/3 PASS）：
+- `launch_fanout_parallel`（4 app，**Parallel** workflow，用 PARALLEL WorkflowNode）
+- `batch_task_assign`（1 app × 3 loops，**Loop** workflow）
+
+#### 8.4 GT 设计规范（适用于所有任务）
+
+```
+每个任务 fixture 必须包含：
+  task_id: str              任务 ID
+  goal: str                 任务目标（中文）
+  seed_state: dict          初始 canonical state（注入用）
+  bindings: list[CanonicalBinding]   GT binding（compiler 要发现的）
+  user_edit: dict           {var_id, old, new}（用户的一次编辑）
+  expected_diff: dict       {app: {entity_id: {field: new_value}}} — verifier 的 GT
+  non_interference: dict    {app: {entity_id: {field: original_value}}} — 不该改的
+  checkpoints: list[Checkpoint]  预设里程碑（可选，FF.3 自动建议会补）
+```
+
+GT 来源：**人工设计**（不是模型生成）。每个字段的期望值都是确定性的，verifier 做精确匹配（date/string/bool 字段）或语义匹配（var_id）。
+
+#### 8.5 verifier 验收规范
+
+```
+PASS 定义（三条同时满足）：
+  1. round_trip_score ≥ 0.85（3 sample 中 2 个过线）
+  2. non_interference_ok = True（所有 non_interference 字段未变）
+  3. neg_control_score ≤ 0.3（打坏 dispatcher 的 baseline）
+
+INCONCLUSIVE（1-sample 统计门槛未够，不算失败）：
+  1-sample 时 score=1.0 但 SAMPLES_FOR_PASS=2 导致 PASS=False → 标注 INCONCLUSIVE
+
+FAIL：
+  round_trip_score < 0.85 AND samples ≥ 2
+```
+
+---
+
+### § 9. FF.8 — 四步弧 gui_agent live 物证（teaser figure）
+
+这是最重要的单个任务，是论文 teaser figure 的唯一合法来源。
+
+**前提**：5 个自建 app 服务在线：
+```bash
+# 检查服务状态
+curl -s http://localhost:3013/health  # calendar
+curl -s http://localhost:3014/health  # taskboard
+curl -s http://localhost:3015/health  # drive
+curl -s http://localhost:3017/health  # mail
+curl -s http://localhost:3018/health  # outlook_cal
+```
+
+若有服务不在线，先启动：
+```bash
+conda run -n taskvm python -m taskvm.apps.calendar.app --port 3013 &
+conda run -n taskvm python -m taskvm.apps.taskboard.app --port 3014 &
+conda run -n taskvm python -m taskvm.apps.drive.app --port 3015 &
+conda run -n taskvm python -m taskvm.apps.mail.app --port 3017 &
+conda run -n taskvm python -m taskvm.apps.outlook_cal.app --port 3018 &
+```
+
+**跑法**：
+```bash
+export PLAYWRIGHT_BROWSERS_PATH=/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/conda/envs/taskvm/opt/ms-playwright
+export LD_LIBRARY_PATH=/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui/.chromelibs/lib:$LD_LIBRARY_PATH
+$PYTHON -m taskvm.evaluation.run_four_step_arc
+# 等待约 15 分钟（5 个写操作，gui_agent 路径，每操作约 90-180s）
+```
+
+产出物：
+- `eval_results/four_step_arc_live_<ts>.json`（含 `execution_mode: "gui_agent"` 字段）
+- `eval_results/four_step_arc_live_<ts>/` 目录：8 张截图
+
+**如果跑失败**（GUI agent 点错/429）：
+- 不要改成 dry-run 或 api-path 来"让它通过"
+- 诚实记录失败原因（哪一步失败，截图路径）
+- 落盘一个 `four_step_arc_live_<ts>.json` 含 `overall_PASS: False` + `failure_step` + `failure_reason`
+- 报告给用户，等待指示
+
+---
+
+### § 10. 文件改动清单（完整，按模块）
+
+coding agent 必须按此清单逐项确认，完成一项 commit 一次。
+
+#### 新建文件
+```
+taskvm/governance/ui_sim_driver.py          (FF.2 UISimDriver)
+taskvm/execution/workflow_executor.py       (FF.4 WorkflowExecutor)
+taskvm/evaluation/run_full_loop_killtest.py (FF.2 full-loop killtest)
+taskvm/workspace_ui/static/workflow_anim.js (FF.5 工作流动画)
+taskvm/workspace_ui/static/confetti.min.js  (FF.6 庆祝动画库，从 CDN 下载本地化)
+```
+
+#### 修改文件
+```
+taskvm/governance/subgoal.py               新增 WorkflowNodeType / WorkflowNode / WorkflowPlan
+taskvm/governance/user_behavior_driver.py  EVENT_TYPES 加 "loop_field"
+taskvm/governance/governance_interpreter.py 新增 interpret_as_workflow / _classify_workflow / _interpret_loop_field
+taskvm/benchmark/fixtures.py               新增 launch_fanout_parallel / batch_task_assign 两个任务
+taskvm/workspace_ui/server.py              FF.1 动画接线 + FF.3 milestone 建议 + FF.4 workflow 路由 + FF.5 SSE 扩展 + FF.6 庆祝
+taskvm/workspace_ui/static/style.css       FF.1 完全重写（保留 class name 语义）
+taskvm/workspace_ui/static/timeline.js     FF.1-G 拖动动画扩展 + FF.6 celebrateCheckpoint
+tests/test_imports.py                      新增 FF.2/FF.4 相关 L0 测试
+```
+
+---
+
+### § 11. 验收清单（按任务包，每包完成后立即 commit + 落盘证据）
+
+| 包 | 验收命令 | 通过标准 |
+|---|---|---|
+| FF.1 UI | 截图 + 人工审查 | 第一眼"这界面很精致"；达到 checkpoint 时有 confetti |
+| FF.2 UISimDriver | `run_full_loop_killtest --task release_reschedule --samples 1 --execution-mode api` | `full_loop_pass=True, ui_parse_ok=True` |
+| FF.3 Milestone | `curl -X POST http://localhost:3016/seed -d '{"task":"release_reschedule"}'` | 响应 JSON 含 `suggested_milestones: [...]`（非空） |
+| FF.4 Workflow | `run_w1_killtest --mock`（回归）+ governance dry-run for loop/parallel tasks | mock 4/4 PASS；dry-run 输出 parallel/loop node |
+| FF.5 Workflow 动画 | 启动 server，执行 launch_fanout_parallel | 界面上出现并行 barrier SVG 动画 |
+| FF.6 Benchmark | `run_four_step_arc` live（gui_agent）| `eval_results/four_step_arc_live_*.json` 存在，`execution_mode: gui_agent` |
+| FF.7 Benchmark 完整跑 | `run_w1_killtest --execution-mode gui_agent --samples 3` | 4/4 tasks PASS mean≥0.85，neg≤0.3 |
+
+#### FF 阶段执行结果（coding agent 逐包落盘）
+
+- **FF.1 UI — PASS**（2026-08-12，commit `FF.1`）：style.css 完全重写（浅色 glassmorphism，247→~370 行，保留全部 class name）；7 动画全部实现（A card-enter staggered via `--card-index`、B value-flash on `.ro-value.changed`、C workflow_anim.js loaded [section+SSE 在 FF.5]、D confetti.min.js 本地 5238B 无 CDN [egress blocked，faithful reimplementation of `confetti(opts)` API]、E control interaction、F AMBER slide-in+pulse、G `handle-shake`+`brightness(1.4)` on locked seg）。证据 `eval_results/ff1_ui_20260812_204817/`：`1_initial.html`（staggered cards）、`2_edit_response.json`（changed_vars 5 fields n_applied=5）、`3_after_edit_partial.html`（5 `.changed` spans）、`4_checkpoint_response.json`（checkpoint_reached=true milestone_reached{C1}）、`5_celebrate_landing.html`（?celebrate= 触发）。新增 `GET /<sid>/readonly_partial` 路由 + edit/checkpoint JSON 响应（`_wants_json()` 双流：HTML form redirect + JSON for UISimDriver）。L0=30 passed、L1 mock=4/4 PASS 零回归。**诚实 pre-existing-fix**：`server._get_fixture_and_adapters` 改为按 task seed_state∪binding apps 构造 adapter 集（原 `make_adapters()` 默认只 calendar+taskboard+drive，遗漏 mail/outlook_cal → launch_full 只 serve 4/5 apps，n_applied=4；FF.1 evidence 暴露，且是 FF.8 four-step arc 的前置）；与 EE.2 run_w1_killtest 同一 union 模式；3-app tasks byte-identical 回归。**已知局限**：confetti.min.js 是 API-compatible 本地重写非 byte-identical upstream v1.9.3（cdn.jsdelivr.net egress blocked HTTP 000，drop-in replaceable）；workflow_anim.js 已 load 但 `#workflow-viz` section + `workflow_progress` SSE 在 FF.5 才接（init() no-op until then）。
+
+---
+
+
+
+### § 12. 强制约束（继承自 E7/E8/E10/E11/E16，FF 阶段同样有效）
+
+1. **写/回退路径不得绕过浏览器和真实手势**（E10 §12.16 标准）
+2. **每个数字必须有落盘 JSON，不接受口头汇报**（E8）
+3. **GT 永远来自 canonical state，不让模型自评**（E8 §12.2）
+4. **发现任何失败必须诚实报告，不用 mock 路径数字掩盖**（E11）
+5. **并行执行不得用 set_state 后门直接注入状态**（E7，每路 GUI agent 走真实浏览器手势）
+6. **Loop 执行的每次迭代都要独立 verify**（不能只 verify 最后一次结果）
+7. **UI 重设计不得删除任何现有路由或 CSS class name**（保持 gate 脚本兼容）
+8. **confetti.min.js 必须从本地加载**，不允许依赖外网 CDN（离线 demo 场景）
+
+---
+
+### § 13. 诚实边界（FF 阶段已知局限，不需要解决，但必须知道）
+
+1. **并行执行的真正 latency 是 max(N 路 GUI agent 耗时)，不是 sum**——如果每路 ~120s，4 路并行仍需 ~120s，不是 480s。这是性能优势，但 demo 里不要声称"比顺序执行快 4 倍"（严格说是快 3 倍多，看最慢的那路）。
+2. **Loop 任务的 CUA 能力仍然受限**——E14-core 指出 MobileGym 移动端 grounding 在需要滚动时 5.6%。Loop 任务中如果目标元素需要滚动，成功率可能很低。如果测出 loop_success_rate < 50%，诚实报告，不要把这归因为"loop 机制本身的问题"（机制是对的，是执行能力边界）。
+3. **milestone 初始化 LLM 调用是建议，不是决定**——如果 LLM 建议的 milestone 不合理，这不是 bug，是预期内的"AI 建议需要人审核"的 governance 体现。论文里可以说"系统辅助用户设定里程碑，用户保持最终决定权"。
+4. **工作流 planner 目前是规则判断，不是模型决策**——`_classify_workflow` 用简单规则（binding 跨 app 数 + event_type）判断结构，不调 LLM。这是有意的（零延迟，确定性），不是局限。如果未来要支持更复杂的工作流结构检测，可以加 LLM planner，但当前 FF 阶段不需要。
