@@ -22,6 +22,10 @@ from taskvm.governance.checkpoint_graph import CheckpointGraph, CheckpointDirect
 from taskvm.governance.scripted_driver import (
     ScriptedUserDriver, make_scripted_driver, get_task_event_sequence,
 )
+# FF.2: UISimDriver — drives the governance loop THROUGH the rendered GenUI
+# surface (GET /<sid> → parse <form> → POST /<sid>/edit → read changed_vars),
+# vs. ScriptedUserDriver's direct intent emission.
+from taskvm.governance.ui_sim_driver import UISimDriver
 from taskvm.governance.governance_interpreter import GovernanceInterpreter
 
 __all__ = [
@@ -30,5 +34,6 @@ __all__ = [
     "SubgoalInstruction",
     "CheckpointGraph", "CheckpointDirection",
     "ScriptedUserDriver", "make_scripted_driver", "get_task_event_sequence",
+    "UISimDriver",
     "GovernanceInterpreter",
 ]

@@ -363,5 +363,49 @@ def test_compiler_vision_signature():
         os.remove(p)
 
 
+# ── FF.2: UISimDriver + full-loop killtest ───────────────────────────────────
+def test_ui_sim_driver_importable():
+    """UISimDriver is importable from the governance package + is a
+    UserBehaviorDriver + parses rw-field forms (FF.2 §3.1)."""
+    from taskvm.governance import UISimDriver, UserBehaviorDriver
+    assert issubclass(UISimDriver, UserBehaviorDriver)
+    # form parser: both the f-string rw-field form + the GenUI genui-field form
+    # carry name="var_id" + name="new_value" → both parse to the same {var_id}.
+    from taskvm.governance.ui_sim_driver import _parse_edit_forms
+    html = ('<form class="rw-field" method="post" action="edit">'
+            '<input type="hidden" name="var_id" value="release_date">'
+            '<input type="text" name="new_value" value="2026-08-14">'
+            '<button>apply</button></form>'
+            '<form class="genui-field" method="post" action="/sid_x/edit">'
+            '<input type="hidden" name="var_id" value="design_review_date">'
+            '<input type="date" name="new_value"></form>')
+    forms = _parse_edit_forms(html)
+    assert set(forms.keys()) == {"release_date", "design_review_date"}
+    assert forms["release_date"]["has_value_input"] is True
+
+
+def test_full_loop_killtest_importable():
+    """run_full_loop_killtest importable + run_one_sample + main callable +
+    a 1-sample api-mode run on release_reschedule passes the full loop
+    (ui_parse_ok + form_submit_ok + round_trip≥0.85 + neg≤0.3). FF.2 §11."""
+    from taskvm.evaluation.run_full_loop_killtest import (
+        run_one_sample, run_neg_control, summarize, main)
+    for fn in (run_one_sample, run_neg_control, summarize, main):
+        assert callable(fn)
+    # 1-sample api-mode acceptance (FF.2 §11): the apps must be online.
+    from taskvm.benchmark.fixtures import get_task
+    fixture = get_task("release_reschedule")
+    s = run_one_sample(fixture, execution_mode="api", sample_i=0)
+    assert s["ui_parse_ok"], f"ui_parse failed: {s}"
+    assert s["form_submit_ok"], f"form_submit failed: {s}"
+    assert s["round_trip_score"] >= 0.85, f"round_trip too low: {s['round_trip_score']}"
+    assert s["non_interference_passed"]
+    neg = run_neg_control(fixture, execution_mode="api")
+    assert neg["passed"], f"neg-control failed (verifier dishonest?): {neg}"
+    assert neg["round_trip_score"] <= 0.3
+    sm = summarize(fixture, [s], neg)
+    assert sm["full_loop_pass"], f"full_loop_pass False: {sm}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-x", "-q"])
