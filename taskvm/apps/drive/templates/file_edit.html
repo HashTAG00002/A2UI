@@ -25,6 +25,10 @@
     <label for="op_owner">Owner (set_owner operator)</label>
     <input type="text" name="set_owner" value="{{ file.owner }}" id="op_owner">
   </div>
+  <div class="field">
+    <label for="op_publish_date">Publish date (set_publish_date operator)</label>
+    <input type="date" name="set_publish_date" value="{{ file.publish_date or '' }}" id="op_publish_date" data-var="publish_date">
+  </div>
   <input type="hidden" name="fid" value="{{ file.fid }}">
   <div class="actions">
     <button type="button" id="review-btn">Review changes</button>
@@ -49,7 +53,7 @@
     var btn = document.getElementById('review-btn');
     var dlg = document.getElementById('confirm-mutate');
     var diff = document.getElementById('diff-rows');
-    var orig = {parent: "{{ file.parent }}", name: {{ file.name|tojson|safe }}, owner: {{ file.owner|tojson|safe }}};
+    var orig = {parent: "{{ file.parent }}", name: {{ file.name|tojson|safe }}, owner: {{ file.owner|tojson|safe }}, publish_date: {{ (file.publish_date or '')|tojson|safe }}};
     btn.addEventListener('click', function () {
       var rows = "";
       function row(label, oldv, newv) {
@@ -60,6 +64,7 @@
       rows += row("folder", orig.parent, document.getElementById('op_parent').value);
       rows += row("name", orig.name, document.getElementById('op_name').value);
       rows += row("owner", orig.owner, document.getElementById('op_owner').value);
+      rows += row("publish_date", orig.publish_date, document.getElementById('op_publish_date').value);
       diff.innerHTML = rows || '<div class="row"><span>(no changes)</span></div>';
       dlg.showModal();
     });

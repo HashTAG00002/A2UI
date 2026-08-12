@@ -48,7 +48,7 @@ DEFAULT_PORT = 3015
 
 # operators exposed by this app (mirrors the OPERATOR_REGISTRY in
 # task_state/entity_binding.py — compiler-visible signatures only, no var_ids).
-APP_OPERATORS = ("move_file", "rename", "set_owner")
+APP_OPERATORS = ("move_file", "rename", "set_owner", "set_publish_date")
 
 
 def _new_session() -> dict:
@@ -136,7 +136,8 @@ def api_file_mutate(sid: str, fid: str):
                     "old": old, "new": value, "file": f})
 
 
-_FIELD_MAP = {"move_file": "parent", "rename": "name", "set_owner": "owner"}
+_FIELD_MAP = {"move_file": "parent", "rename": "name", "set_owner": "owner",
+              "set_publish_date": "publish_date"}
 
 
 def _mutate_file(sess: dict, fid: str, op: str, value) -> tuple | None:
@@ -201,7 +202,15 @@ def file_mutate_prg(sid: str, fid: str):
     applied = []
     for op, field in _FIELD_MAP.items():
         new_val = request.form.get(op)
-        if new_val is None or str(new_val) == str(f[field]):
+        if new_val is None:
+            continue
+        # EE.2: f.get(field) (not f[field]) so publish_date — which may be None
+        # on files with no publish date — doesn't KeyError. Treat empty string
+        # and None as equivalent (unset) so an unchanged empty field isn't written
+        # as "". Backward-compatible for parent/name/owner (always non-empty:
+        # str(x or "") == str(x)).
+        cur = f.get(field)
+        if str(new_val).strip() == str(cur or "").strip():
             continue
         res = _mutate_file(sess, fid, op, new_val)
         if res is not None:

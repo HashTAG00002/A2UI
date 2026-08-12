@@ -7,7 +7,7 @@
 
 <table id="file-list">
   <thead>
-    <tr><th>FID</th><th>Name</th><th>Type</th><th>Folder</th><th>Owner</th><th>Modified</th><th>Content</th><th></th></tr>
+    <tr><th>FID</th><th>Name</th><th>Type</th><th>Folder</th><th>Owner</th><th>Modified</th><th>Content</th><th>Publish</th><th></th></tr>
   </thead>
   <tbody>
   {% for f in files %}
@@ -19,10 +19,11 @@
       <td data-field="owner">{{ f.owner }}</td>
       <td data-field="modified">{{ f.modified }}</td>
       <td data-field="content" class="muted">{{ f.content }}</td>
+      <td data-field="publish_date" class="muted">{{ f.publish_date or '' }}</td>
       <td><a class="btn view" href="{{ sid }}/file/{{ f.fid }}">View</a></td>
     </tr>
   {% else %}
-    <tr><td colspan="8" class="muted">no files</td></tr>
+    <tr><td colspan="9" class="muted">no files</td></tr>
   {% endfor %}
   </tbody>
 </table>

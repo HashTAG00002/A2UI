@@ -1283,3 +1283,33 @@ recon workflow（10 agent，529K tokens）发现 HANDOFF_E17.md 在未验证实�
 1. **`make_adapter`/`make_adapters` 自身默认仍是 `executor='api'`**——EE.1 只改了 server 入口默认，没改 factory 默认。这是有意的：killtest 脚本（`run_w1_killtest --mock` 等）直接调 `make_adapters` 走 mock/api 路径，改 factory 默认会让它们无声切到 gui_agent（需要真实浏览器+模型）而崩。E11 遗留问题4 的"无声退回 api 陷阱"靠 server 入口的 warning log 缓解，但 factory 层仍是 api 默认。
 2. **未 live 启动 server 实测**（需 calendar:3013+taskboard:3014 在线）——只做了 import/argparse/wiring 的静态+单元验证。live demo 验证留到 EE.3 四步弧（需要全套 app 在线时统一跑）。
 3. **gui_agent 模式下 server 启动不崩溃**（seed_session 不调 mutate），但实际 edit/undo 需要 app 在线 + 浏览器 + gpt-5.6-sol 可用，否则 edit 时才报错——这是诚实的延迟失败，不是启动失败。
+
+### EE.2 — launch_full 4-App fanout 任务（VM 性质 2 bidirectional binding 核心证据）
+
+**改了什么**（11 处，跨 9 文件）：
+1. `taskvm/benchmark/fixtures.py`：新增 `LAUNCH_FULL` CanonicalTaskGraph（1 var_id `release_date` → 5 bindings 跨 calendar+taskboard+drive+mail 4 App；E2/T3/F2/M2 non-interference；2 checkpoints C1 会议+任务同步 / C2 文档+邮件同步）+ 注册进 TASKS。
+2. `taskvm/apps/drive/app.py`：`APP_OPERATORS` + `_FIELD_MAP` 加 `set_publish_date→publish_date`；`file_mutate_prg` 的 `f[field]` 改 `f.get(field)` + empty/None 等价（防 publish_date=None 时 KeyError，向后兼容 parent/name/owner）。
+3. `taskvm/apps/mail/app.py`：同上加 `set_send_date→send_date` + PRG 安全 field 访问。
+4. `taskvm/task_state/entity_binding.py`：OPERATOR_REGISTRY 注册 `set_publish_date`(drive) + `set_send_date`(mail)（compiler-visible signature，无 var_id，no-leak）。
+5. `taskvm/substrate/base.py`：`DriveAdapter._OP_FIELD`+mutate op-check 加 `set_publish_date`；`MailAdapter` 同理加 `set_send_date`（两 adapter 在 use_gui_executor=True 时走 `_mutate_via_gui` 真实手势路径，§12.16-compliant）。
+6. `taskvm/apps/drive/templates/drive.html` + `mail.html`：list 视图加 `<td data-field="publish_date">`/`<td data-field="send_date">` cell + `<th>` + colspan 8→9（**handoff 漏了这步**——`assert_obs_matches_state` 字段级比对 canonical vs DOM，新字段不加 cell 会 AssertionError）。
+7. `taskvm/apps/drive/templates/file_edit.html` + `mail/templates/message_edit.html`：edit 表单加 `<input type="date" name="set_publish_date"/"set_send_date" data-var="...">` + diff JS 行（handoff 要求的 grounding 字段）。
+8. `taskvm/harness/replay_engine.py`：`_A11Y_FIELDS` 末尾加 `publish_date`/`send_date`（real compiler path 用；mock 不需要但正确加上，core 3 app a11y byte-identical 回归保护）。
+9. `taskvm/evaluation/run_w1_killtest.py`：`make_adapters` 改为按 tasks 的 seed_state keys + binding apps **并集**构造 adapter 集（否则 launch_full 无 mail adapter → mail op dispatch 到 nothing → round_trip 失败；3 core task 的 app 集不变，byte-identical 回归）。
+
+**为什么改**：大纲 §4.2/§4.4 把"1 var → 4 App 同步写回"列为 VM 性质 2 独占楔子的核心证据 + §2 "项目发布"场景的完整实现。此前最多 2-App fanout（release_reschedule），4-App 从未存在。EE.2 把它做实。
+
+**证据**（`eval_results/w1_20260812_184621.json`，mock mode，3 samples/task）：
+- W1 KILL-TEST VERDICT: **PASS** ✓
+- launch_full: PASS=True mean=1.0 n_pass=3/3 binding_f1=1.0 neg=0.3 ✓
+- dispatch n_ops=5（calendar.E1.move_event + taskboard.T1/T2.set_deadline + drive.F1.set_publish_date + mail.M1.set_send_date），5/5 applied ✓
+- `assert_obs_matches_state` PASS（新 publish_date/send_date 字段在 DOM 与 canonical 一致，F2/M2 的 None 值经 `or ''` 渲染后与 canonical None 等价）✓
+- 3 原任务零回归：release_reschedule/design_review_delay/doc_handoff 各 3/3 PASS mean=1.0 ✓
+- L0: 20 passed（零回归）✓
+- neg-control 4/4 score=0.3（verifier honest）✓
+
+**已知局限（不美化）**：
+1. **GUI 路径未 live 验证**——mock 走 api 路径（requests.post），证实了 binding/dispatch/verify 链路。gui_agent 路径的 `set_publish_date`/`set_send_date` 经 `_mutate_via_gui` 走真实浏览器手势，edit 表单已加 `<input type="date">`，但**未 live 跑过**。`<input type="date">` 的 native picker 对 GUI agent 是否友好未测（.mrules taskvm-radio-button-gui-agent-finding 警示 native select 难操作；date input 可能同类问题）。EE.3 四步弧 live 跑时会暴露，若失败需改成 radio 或 type="text"。
+2. **drive/mail app 重启**——原进程 Aug11 起、senseact env、无 --debug（无 auto-reload）。我 kill+restart 了 3015/3017（taskvm env，nohup detached）。calendar/taskboard/outlook_cal 未改代码未重启。若后续 env 切换需注意 drive/mail 现在跑在 taskvm env（其余仍 senseact）。
+3. **detail 模板未加新字段**——`file_detail.html`/`message_detail.html` 没加 publish_date/send_date（handoff 未要求，list+edit 已够 mock PASS）。GUI agent 若经 detail 页导航可能看不到新字段，但 gui_executor 的 resume_url 指向 edit form 不经 detail，故不阻塞。
+4. **mock PASS=False 在 1-sample 时**是 SAMPLES_FOR_PASS=2 统计门槛，非失败（3-sample 时 PASS=True）。

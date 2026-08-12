@@ -246,12 +246,13 @@ class DriveAdapter(StateAdapter):
     resource = "files"
     id_field = "fid"
     entity_kind = "file"
-    _OP_FIELD = {"move_file": "parent", "rename": "name", "set_owner": "owner"}
+    _OP_FIELD = {"move_file": "parent", "rename": "name", "set_owner": "owner",
+                 "set_publish_date": "publish_date"}
 
     def mutate(self, sid: str, entity_id: str, operator: str, value: Any) -> dict:
-        if operator not in ("move_file", "rename", "set_owner"):
-            raise ValueError(f"drive operator must be move_file/rename/set_owner, "
-                             f"got {operator}")
+        if operator not in ("move_file", "rename", "set_owner", "set_publish_date"):
+            raise ValueError(f"drive operator must be move_file/rename/set_owner/"
+                             f"set_publish_date, got {operator}")
         if self.use_gui_executor:
             # P2 (E10 rework): drive the real browser through the file edit form
             resp = self._mutate_via_gui(sid, entity_id, operator, value,
@@ -274,12 +275,13 @@ class MailAdapter(StateAdapter):
     resource = "messages"
     id_field = "mid"
     entity_kind = "message"
-    _OP_FIELD = {"set_state": "state", "set_priority": "priority", "set_to": "to_addr"}
+    _OP_FIELD = {"set_state": "state", "set_priority": "priority", "set_to": "to_addr",
+                 "set_send_date": "send_date"}
 
     def mutate(self, sid: str, entity_id: str, operator: str, value: Any) -> dict:
-        if operator not in ("set_state", "set_priority", "set_to"):
+        if operator not in ("set_state", "set_priority", "set_to", "set_send_date"):
             raise ValueError(f"mail operator must be set_state/set_priority/"
-                             f"set_to, got {operator}")
+                             f"set_to/set_send_date, got {operator}")
         if self.use_gui_executor:
             resp = self._mutate_via_gui(sid, entity_id, operator, value,
                                         field=self._OP_FIELD[operator])

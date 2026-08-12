@@ -107,6 +107,10 @@ OPERATOR_REGISTRY: dict[str, dict[str, str]] = {
                      "signature": "rename(fid, new_name) — rename a file"},
     "set_owner":    {"app": "drive", "field": "owner",
                      "signature": "set_owner(fid, new_owner) — reassign file ownership"},
+    # EE.2 — Drive publish_date (the launch_full 4-App fanout task edits this on
+    # the release-plan doc F1; same field-setter shape as move_file/rename/set_owner).
+    "set_publish_date": {"app": "drive", "field": "publish_date",
+                     "signature": "set_publish_date(fid, new_date) — set a file's publish date"},
     # W4 held-out — Mail (truly-unseen app). A message lifecycle: set_state
     # mutates a finite-state field (draft/sent/scheduled), not a scalar. This is
     # the operator the W4 OOD mail task edits (scheduled → sent).
@@ -116,6 +120,10 @@ OPERATOR_REGISTRY: dict[str, dict[str, str]] = {
                      "signature": "set_priority(mid, new_priority) — set a message's priority (high/normal/low)"},
     "set_to":       {"app": "mail", "field": "to_addr",
                      "signature": "set_to(mid, new_to_addr) — change a message's recipient"},
+    # EE.2 — Mail send_date (the launch_full 4-App fanout task edits this on the
+    # announcement message M1; same field-setter shape as set_state/set_priority).
+    "set_send_date": {"app": "mail", "field": "send_date",
+                     "signature": "set_send_date(mid, new_date) — set a message's send date"},
     # W4 held-out — Outlook_Cal (calendar reskin). Same semantics as move_event
     # (move a meeting to a new date) but renamed substrate: the field is
     # ``scheduled_for`` (not ``date``), the kind is ``appointment`` (not

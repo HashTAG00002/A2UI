@@ -57,7 +57,7 @@ DEFAULT_PORT = 3017
 
 # operators exposed by this app (mirrors the OPERATOR_REGISTRY in
 # task_state/entity_binding.py — compiler-visible signatures only, no var_ids).
-APP_OPERATORS = ("set_state", "set_priority", "set_to")
+APP_OPERATORS = ("set_state", "set_priority", "set_to", "set_send_date")
 
 
 def _new_session() -> dict:
@@ -143,7 +143,8 @@ def api_mail_mutate(sid: str, mid: str):
                     "old": old, "new": value, "message": m})
 
 
-_FIELD_MAP = {"set_state": "state", "set_priority": "priority", "set_to": "to_addr"}
+_FIELD_MAP = {"set_state": "state", "set_priority": "priority", "set_to": "to_addr",
+              "set_send_date": "send_date"}
 
 
 def _mutate_message(sess: dict, mid: str, op: str, value) -> tuple | None:
@@ -203,7 +204,13 @@ def message_mutate_prg(sid: str, mid: str):
     applied = []
     for op, field in _FIELD_MAP.items():
         new_val = request.form.get(op)
-        if new_val is None or str(new_val) == str(m[field]):
+        if new_val is None:
+            continue
+        # EE.2: m.get(field) (not m[field]) so send_date — which may be None on
+        # messages with no scheduled send — doesn't KeyError. Empty==None (unset)
+        # so an unchanged empty field isn't written as "".
+        cur = m.get(field)
+        if str(new_val).strip() == str(cur or "").strip():
             continue
         res = _mutate_message(sess, mid, op, new_val)
         if res is not None:

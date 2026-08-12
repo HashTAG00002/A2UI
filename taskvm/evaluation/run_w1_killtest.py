@@ -371,7 +371,22 @@ def main(argv=None):
     gui_shot_dir = args.gui_screenshot_dir
     if args.execution_mode == "gui_agent" and gui_shot_dir is None:
         gui_shot_dir = str(EVAL_DIR / f"p5_gui_visual_{time.strftime('%Y%m%d_%H%M%S')}")
-    adapters = make_adapters(host=args.host, executor=args.execution_mode,
+    # EE.2: build the adapter set from the UNION of apps across all tasks being
+    # run (seed_state keys + binding apps). Without this, launch_full (which
+    # seeds+writes mail) would run without a mail adapter → the mail op dispatches
+    # to nothing → round_trip fails. Auto-including held-out apps per-task keeps
+    # the 3 core tasks byte-identical (their apps = calendar/taskboard/drive)
+    # while letting 4-App fanout tasks pull in mail/outlook_cal as needed.
+    tasks = [get_task(args.task)] if args.task else all_tasks()
+    needed_apps: set[str] = set()
+    for fx in tasks:
+        needed_apps.update(fx.seed_state.keys())
+        needed_apps.update(b.app for b in fx.bindings)
+    _APP_ORDER = ("calendar", "taskboard", "drive", "mail",
+                  "outlook_cal", "wechat", "alipay")
+    app_list = [a for a in _APP_ORDER if a in needed_apps]
+    adapters = make_adapters(apps=app_list, host=args.host,
+                             executor=args.execution_mode,
                              gui_screenshot_dir=gui_shot_dir)
     # health check
     for app, ad in adapters.items():
@@ -381,7 +396,6 @@ def main(argv=None):
             sys.exit(2)
         logger.info(f"{app} healthy @ {ad.base_url}")
 
-    tasks = [get_task(args.task)] if args.task else all_tasks()
     cost_model = CostModel()
     # E10 rework (P5): wire the GUI executor's cost_model to the W1 cost_model
     # so GUI-grounding calls are attributed in the report's cost (honesty: the

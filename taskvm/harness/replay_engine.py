@@ -134,6 +134,7 @@ _A11Y_FIELDS = ("title", "date", "time", "calendar", "rsvp",
                 "name", "content", "parent", "owner", "modified", "type",
                 "subject", "from_addr", "to_addr", "state", "received",
                 "priority", "scheduled_for",
+                "publish_date", "send_date",
                 "peer_name", "peer_wxid", "n_messages", "last_message",
                 "messages", "counterpartyName", "delta", "timestamp",
                 "category", "note", "description")

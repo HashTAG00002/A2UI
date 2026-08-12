@@ -7,7 +7,7 @@
 
 <table id="mail-list">
   <thead>
-    <tr><th>MID</th><th>Subject</th><th>From</th><th>To</th><th>State</th><th>Received</th><th>Priority</th><th></th></tr>
+    <tr><th>MID</th><th>Subject</th><th>From</th><th>To</th><th>State</th><th>Received</th><th>Priority</th><th>Send</th><th></th></tr>
   </thead>
   <tbody>
   {% for m in messages %}
@@ -19,10 +19,11 @@
       <td data-field="state" class="mail-state">{{ m.state }}</td>
       <td data-field="received">{{ m.received }}</td>
       <td data-field="priority"><span class="pill {{ m.priority }}">{{ m.priority }}</span></td>
+      <td data-field="send_date" class="muted">{{ m.send_date or '' }}</td>
       <td><a class="btn view" href="{{ sid }}/message/{{ m.mid }}">View</a></td>
     </tr>
   {% else %}
-    <tr><td colspan="8" class="muted">no messages</td></tr>
+    <tr><td colspan="9" class="muted">no messages</td></tr>
   {% endfor %}
   </tbody>
 </table>

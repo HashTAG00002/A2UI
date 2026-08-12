@@ -205,10 +205,86 @@ DOC_HANDOFF = CanonicalTaskGraph(
 )
 
 
+# ── Task 4: launch_full (EE.2 — 4-App fanout: calendar+taskboard+drive+mail) ──
+# 1 var_id release_date → 5 bindings across 4 apps (the §2 "项目发布" scenario
+# fully realized). This is VM property 2 (bidirectional executable binding: one
+# variable fans out to N heterogeneous apps) core evidence + the §4.4 four-step
+# arc's Step 1 fixture. E2/T3/F2/M2 are the non-interference set (unrelated to
+# release_date → must not change). Two checkpoints split the fanout into
+# "meeting+tasks sync" (C1) and "doc+mail sync" (C2) for the governance arc.
+LAUNCH_FULL = CanonicalTaskGraph(
+    task_id="launch_full",
+    goal="把项目发布日期从8/14推迟到8/18：日历会议同步移动，任务截止日同步延期，"
+         "Drive发布文档的publish_date同步更新，Mail发布公告的send_date同步更新。",
+    seed_state={
+        "calendar": {"events": [
+            {"eid": "E1", "title": "项目发布会议", "date": "2026-08-14",
+             "time": "14:00-15:00", "calendar": "work", "rsvp": "accepted"},
+            {"eid": "E2", "title": "周会", "date": "2026-08-12",
+             "time": "10:00-10:30", "calendar": "work", "rsvp": "accepted"},
+        ]},
+        "taskboard": {"tasks": [
+            {"tid": "T1", "title": "最终检查演示文档", "status": "todo",
+             "assignee": "Alex", "deadline": "2026-08-14", "depends_on": ["release_date"]},
+            {"tid": "T2", "title": "确认发布公告", "status": "todo",
+             "assignee": "Bo", "deadline": "2026-08-14", "depends_on": ["release_date"]},
+            {"tid": "T3", "title": "整理会议纪要", "status": "done",
+             "assignee": "Cara", "deadline": "2026-08-10", "depends_on": []},
+        ]},
+        "drive": {"files": [
+            {"fid": "F1", "name": "发布计划.doc", "content": "v1", "parent": "shared",
+             "owner": "Alex", "modified": "2026-08-12", "type": "doc",
+             "publish_date": "2026-08-14"},
+            {"fid": "F2", "name": "设计稿.png", "content": "", "parent": "shared",
+             "owner": "Bo", "modified": "2026-08-10", "type": "image",
+             "publish_date": None},
+        ]},
+        "mail": {"messages": [
+            {"mid": "M1", "subject": "项目发布公告", "from_addr": "pm@x.com",
+             "to_addr": "team@x.com", "state": "draft", "received": "2026-08-12",
+             "priority": "high", "send_date": "2026-08-14"},
+            {"mid": "M2", "subject": "周报", "from_addr": "bo@x.com",
+             "to_addr": "team@x.com", "state": "draft", "received": "2026-08-11",
+             "priority": "normal", "send_date": None},
+        ]},
+    },
+    user_edit={"var_id": "release_date", "old": "2026-08-14", "new": "2026-08-18"},
+    bindings=[
+        CanonicalBinding("release_date", "calendar",  "E1", "date",         "move_event",       "2026-08-18"),
+        CanonicalBinding("release_date", "taskboard", "T1", "deadline",     "set_deadline",     "2026-08-18"),
+        CanonicalBinding("release_date", "taskboard", "T2", "deadline",     "set_deadline",     "2026-08-18"),
+        CanonicalBinding("release_date", "drive",     "F1", "publish_date", "set_publish_date", "2026-08-18"),
+        CanonicalBinding("release_date", "mail",      "M1", "send_date",    "set_send_date",    "2026-08-18"),
+    ],
+    non_interference_set=[("calendar", "E2"), ("taskboard", "T3"),
+                          ("drive", "F2"), ("mail", "M2")],
+    expected_diff={
+        "calendar":  {"E1": {"date": "2026-08-18"}},
+        "taskboard": {"T1": {"deadline": "2026-08-18"},
+                      "T2": {"deadline": "2026-08-18"}},
+        "drive":     {"F1": {"publish_date": "2026-08-18"}},
+        "mail":      {"M1": {"send_date": "2026-08-18"}},
+    },
+    description="EE.2: 1 var_id release_date → 4 App fanout (calendar+taskboard+"
+                "drive+mail). VM property 2 (bidirectional executable binding) core "
+                "evidence. 5 bindings, 4-App fanout, E2/T3/F2/M2 non-interference.",
+    checkpoints=[
+        Checkpoint("C1", "会议+任务同步",
+                   {"calendar": {"E1": {"date": "2026-08-18"}},
+                    "taskboard": {"T1": {"deadline": "2026-08-18"},
+                                  "T2": {"deadline": "2026-08-18"}}}),
+        Checkpoint("C2", "文档+邮件同步",
+                   {"drive": {"F1": {"publish_date": "2026-08-18"}},
+                    "mail": {"M1": {"send_date": "2026-08-18"}}}),
+    ],
+)
+
+
 TASKS: dict[str, CanonicalTaskGraph] = {
     RELEASE_RESCHEDULE.task_id: RELEASE_RESCHEDULE,
     DESIGN_REVIEW_DELAY.task_id: DESIGN_REVIEW_DELAY,
     DOC_HANDOFF.task_id: DOC_HANDOFF,
+    LAUNCH_FULL.task_id: LAUNCH_FULL,
 }
 
 
