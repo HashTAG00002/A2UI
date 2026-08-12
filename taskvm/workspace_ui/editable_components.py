@@ -46,18 +46,26 @@ def readonly_card_html(app: str, entities: dict[str, dict[str, Any]],
     if not entities:
         return (f'<div class="card ro"{style}><h3>{_esc(app)}</h3>'
                 f'<p class="muted">no entities</p></div>')
+    # GG: the visible identity of each row is its screen-visible title (the
+    # TITLE_FIELD value — title/name/subject/...), NOT the internal entity_id.
+    # data-entity carries the title (CSS-animation target; no JS reads it). The
+    # changed set is (app, entity_id, field) tuples computed server-side
+    # (control-plane) — kept as-is for matching, never rendered.
+    from taskvm.governance.translate import TITLE_FIELD
+    title_field = TITLE_FIELD.get(app)
     rows = []
     for eid, fields in entities.items():
+        visible_title = (fields.get(title_field) if title_field else None) or eid
         parts = []
         for k, v in fields.items():
             is_changed = changed is not None and (app, eid, k) in changed
             cls = "ro-value changed" if is_changed else "ro-value"
             parts.append(
                 f'{_esc(k)}=<span class="{cls}" data-app="{_esc(app)}" '
-                f'data-entity="{_esc(eid)}" data-field="{_esc(k)}">'
+                f'data-entity="{_esc(visible_title)}" data-field="{_esc(k)}">'
                 f'{_esc(v)}</span>')
         fv = " ".join(parts)
-        rows.append(f'<div class="ro-row"><code>{_esc(eid)}</code> {fv}</div>')
+        rows.append(f'<div class="ro-row"><strong>{_esc(visible_title)}</strong> {fv}</div>')
     return f'<div class="card ro"{style}><h3>{_esc(app)}</h3>{"".join(rows)}</div>'
 
 
@@ -115,7 +123,8 @@ def _short_reason(err: str) -> str:
     return e.split("。")[0][:160] or "this operation is not compensable via the app's own UI."
 
 
-def saga_undo_timeline_html(saga: dict) -> str:
+def saga_undo_timeline_html(saga: dict,
+                            canonical_entities: dict[str, dict[str, Any]] | None = None) -> str:
     """The honesty-based rollback visualization (E9.2 — '以诚实为本的回退').
 
     Renders a saga's undo outcome as a **progress-bar / timeline metaphor**: each
@@ -145,6 +154,23 @@ def saga_undo_timeline_html(saga: dict) -> str:
     n_rev = int(saga.get("n_reverted", 0) or 0)
     n_tgt = int(saga.get("n_targets", 0) or 0)
     errs = saga.get("errors") or []
+    # GG: translate each step's (app, entity_id, field) → a VISIBLE descriptor
+    # (app kind + visible title + field display name). The old ``app.eid.field``
+    # tag leaked the internal entity_id to the user. canonical_entities (per-app
+    # {entity_id: row}) is passed from the server; entity_id_to_locator reads
+    # the screen-visible title from it (title IS visible → not a GT leak).
+    from taskvm.governance.translate import (entity_id_to_locator, FIELD_DISPLAY,
+                                             KIND_DISPLAY)
+    def _step_label(s: dict) -> str:
+        app = s.get("app", "?")
+        eid = s.get("entity_id", "")
+        fld = s.get("field", "?")
+        canon = (canonical_entities or {}).get(app, {})
+        loc = entity_id_to_locator(app, eid, canon) if eid else None
+        kind = KIND_DISPLAY.get(app, app)
+        fd = FIELD_DISPLAY.get(fld, fld)
+        # loc is like '标题为"项目发布会议"的会议' — use it; fall back to kind
+        return _esc(f'{loc or kind} · {fd}')
     # ``undo_saga`` appends steps in REVERSE dispatch order (LIFO); display in
     # dispatch order (left = first executed, right = last executed) so the
     # progress bar reads like a timeline of the action.
@@ -152,35 +178,30 @@ def saga_undo_timeline_html(saga: dict) -> str:
     segs = []
     locked = []
     for i, s in enumerate(disp, 1):
-        app = s.get("app", "?")
-        eid = s.get("entity_id", "?")
-        fld = s.get("field", "?")
-        tag = f"{_esc(app)}.{_esc(eid)}.{_esc(fld)}"
+        label = _step_label(s)
         if s.get("reverted"):
             segs.append(
-                f'<div class="seg ok" data-i="{i}" data-reverted="1" title="{tag}: reverted">'
-                f'<span class="seg-no">✓{i}</span><span class="seg-lbl">{tag}</span></div>')
+                f'<div class="seg ok" data-i="{i}" data-reverted="1" title="{label}: reverted">'
+                f'<span class="seg-no">✓{i}</span><span class="seg-lbl">{label}</span></div>')
         else:
             locked.append(s)
             err = s.get("error") or (errs[0] if errs else "") or "irreversible"
             segs.append(
                 f'<div class="seg lock" data-i="{i}" data-lock="1" data-err="{_esc(err)}" '
                 f'title="{_esc(err)}"><span class="seg-no">🔒{i}</span>'
-                f'<span class="seg-lbl">✗ {tag}</span></div>')
+                f'<span class="seg-lbl">✗ {label}</span></div>')
     bar = "".join(segs) or '<div class="seg none">no saga steps recorded</div>'
     lock_count = len(locked)
 
     # ── honest one-line message (grep-able: 'partial_failure'/'不可撤销'/'🔒') ──
     if partial and lock_count:
-        names = ", ".join(
-            f"{_esc(s.get('app', '?'))}.{_esc(s.get('entity_id', '?'))}."
-            f"{_esc(s.get('field', '?'))}" for s in locked)
+        names = ", ".join(_step_label(s) for s in locked)
         reason = _short_reason((locked[0].get("error") if locked else "")
                                or (errs[0] if errs else ""))
         msg = (
             f'⚠ 本操作 <strong>部分不可撤销</strong> · <span class="pf-tag">partial_failure</span>：'
             f'{n_rev}/{n_tgt} 步已回退，{lock_count} 步已发生且 <strong>物理不可逆</strong>'
-            f'（{_esc(names)}）。进度条 <strong>拖不回</strong> 这一步 —— '
+            f'（{names}）。进度条 <strong>拖不回</strong> 这一步 —— '
             f'{reason} 这一步之后的操作仍可独立回退。')
         cls = "partial"
     elif partial:
@@ -195,13 +216,14 @@ def saga_undo_timeline_html(saga: dict) -> str:
                f'write API · no set_state backdoor）。') if n_tgt else '✓ 无待回退步骤。'
         cls = "full"
 
-    saga_id = _esc(saga.get("saga_id", "") or "")
+    # GG: saga_id is an internal transaction id — drop it from the user-facing
+    # header (keep only the business-language "honesty-based rollback" label).
     pf_badge = (' · <span class="saga-pf">partial_failure=True</span>') if partial else ""
     return (
         f'<div class="saga-timeline {cls}" data-partial="{1 if partial else 0}" '
         f'data-n-targets="{n_tgt}" data-n-reverted="{n_rev}">'
         f'  <div class="saga-head">'
-        f'    <span class="saga-title">↶ honesty-based rollback · saga {saga_id}</span>'
+        f'    <span class="saga-title">↶ 诚实回退（按真实 app 写操作补偿）</span>'
         f'    <span class="saga-count">{n_rev}/{n_tgt} reverted{pf_badge}</span>'
         f'  </div>'
         f'  <div class="saga-bar" role="slider" aria-label="saga rollback progress">'
@@ -254,7 +276,8 @@ def milestone_suggest_html(suggested: list[dict],
             f'{"".join(cards)}</div>')
 
 
-def conflict_row_html(var_id: str, label: str, conflict: dict) -> str:
+def conflict_row_html(var_id: str, label: str, conflict: dict,
+                      canonical_entities: dict[str, dict[str, Any]] | None = None) -> str:
     """An AMBER conflict row for the read-only zone (W3 reconciliation, handoff
     §5 inv 4-5). Shows BOTH the projected value (Y, what the user is looking at)
     AND the underlying app state (X, the real world now), with merge-option
@@ -262,20 +285,30 @@ def conflict_row_html(var_id: str, label: str, conflict: dict) -> str:
     — these are affordances the user MAY click; the agent is not paused.
 
     ``conflict`` = {"underlying": X, "projected": Y, "app", "entity_id", "field"}.
+    GG: the ``(app.entity_id.field)`` internal path is NOT shown — instead the
+    visible descriptor (app kind + visible title + field display name) from
+    ``canonical_entities`` (screen-visible title → not a GT leak).
     The three merge options post to ``/<sid>/resolve`` with the chosen option
     (and an optional resolved_value for "merge")."""
+    from taskvm.governance.translate import (entity_id_to_locator, FIELD_DISPLAY,
+                                             KIND_DISPLAY)
     underlying = conflict.get("underlying")
     projected = conflict.get("projected")
-    app = conflict.get("app")
-    eid = conflict.get("entity_id")
-    field = conflict.get("field")
+    app = conflict.get("app") or "?"
+    eid = conflict.get("entity_id") or ""
+    field = conflict.get("field") or "?"
+    canon = (canonical_entities or {}).get(app, {})
+    loc = entity_id_to_locator(app, eid, canon) if eid else None
+    kind = KIND_DISPLAY.get(app, app)
+    fd = FIELD_DISPLAY.get(field, field)
+    visible_desc = _esc(f'{loc or kind} · {fd}')
     return (
         f'<div class="card conflict">'
         f'  <h3>⚠ {_esc(label)} <span class="muted">[{_esc(var_id)}]</span></h3>'
         f'  <div class="conflict-row">'
         f'    <div>底层已变 (现 <code>{_esc(underlying)}</code>) · 你投影的是 '
         f'      <code>{_esc(projected)}</code>'
-        f'      <span class="muted">({_esc(app)}.{_esc(eid)}.{_esc(field)})</span></div>'
+        f'      <span class="muted">({visible_desc})</span></div>'
         f'    <div class="merge-opts">'
         f'      <form class="inline" method="post" action="resolve">'
         f'        <input type="hidden" name="var_id" value="{_esc(var_id)}">'

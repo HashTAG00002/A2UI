@@ -385,6 +385,11 @@ def render_two_zone_html(sess: WorkspaceSession) -> str:
     conflicts (re-read vs the cached projection) and renders them AMBER with
     merge options — no silent overwrite, no human-block (handoff §5 inv 4-5)."""
     canonical = canonical_snapshot(sess.adapters, sess.sid)
+    # GG: per-app {entity_id: row} for the renderers to translate entity_id →
+    # visible title (screen-visible → not a GT leak). Used by readonly_card_html,
+    # saga_undo_timeline_html, conflict_row_html (de-leaked in GG.1-4 sweep).
+    canonical_entities = {app: (snap or {}).get("entities") or {}
+                          for app, snap in canonical.items()}
     # FF.1 §2.2 A: card_index → staggered card-enter animation (style.css).
     # FF.1 §2.2 B: changed set (from sess.last_changed, set by edit/resolve/
     #   undo) → .changed class on matching ro-value spans → value-flash anim.
@@ -411,7 +416,8 @@ def render_two_zone_html(sess: WorkspaceSession) -> str:
     # amber conflict cards rendered ABOVE the read-only app cards (visible, not
     # silently overwritten). Clean fields re-projected normally.
     conflict_html = "".join(
-        conflict_row_html(vid, info.get("label", vid), info.get("conflict") or {})
+        conflict_row_html(vid, info.get("label", vid), info.get("conflict") or {},
+                          canonical_entities)
         for vid, info in updated_proj.items() if info.get("conflict")) \
         if recon.has_conflicts else ""
     if recon.has_conflicts:
@@ -467,7 +473,8 @@ def render_two_zone_html(sess: WorkspaceSession) -> str:
     # SagaResult.partial_failure (previously a backend-only field).
     saga_html = ""
     if sess.last_undo_saga is not None:
-        saga_html = saga_undo_timeline_html(sess.last_undo_saga.to_dict())
+        saga_html = saga_undo_timeline_html(sess.last_undo_saga.to_dict(),
+                                            canonical_entities)
     # FF.3 §4: render the LLM-suggested milestones at the rw-zone top. Empty
     # string when there are no suggestions (graceful degrade — the block just
     # doesn't appear; session works normally).
@@ -675,6 +682,8 @@ def readonly_partial(sid: str):
     if sess is None:
         return ("session not found", 404)
     canonical = canonical_snapshot(sess.adapters, sess.sid)
+    canonical_entities = {app: (snap or {}).get("entities") or {}
+                          for app, snap in canonical.items()}
     changed_set = set(sess.last_changed) if sess.last_changed else None
     ro_cards = [readonly_card_html(name, (snap or {}).get("entities") or {},
                                    card_index=i, changed=changed_set)
@@ -689,7 +698,7 @@ def readonly_partial(sid: str):
         if recon.has_conflicts:
             conflict_html = "".join(
                 conflict_row_html(vid, info.get("label", vid),
-                                  info.get("conflict") or {})
+                                  info.get("conflict") or {}, canonical_entities)
                 for vid, info in _updated.items() if info.get("conflict"))
             ro_html = (f'<div class="notice resolve">{recon.n_conflicts} '
                        f'conflict(s) detected (underlying changed since your '
