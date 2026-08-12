@@ -39,6 +39,11 @@ from taskvm.governance.subgoal import (SubgoalInstruction, WorkflowNode,
 from taskvm.governance.user_behavior_driver import UserBehaviorEvent
 from taskvm.governance.vm_state import VMStateSnapshot
 from taskvm.governance.checkpoint_graph import CheckpointGraph, CheckpointDirection
+# GG.3: SubgoalGenerator replaces the hardcoded _build_edit_nl if/elif templates.
+# It emits a zero-internal-id, zero-operator-jargon NL from the visible locator
+# (translated control-plane from canonical state).
+from taskvm.governance.subgoal_generator import instruction_for_op
+from taskvm.governance.translate import entity_id_to_locator
 
 if TYPE_CHECKING:
     from taskvm.benchmark.fixtures import CanonicalTaskGraph
@@ -50,16 +55,23 @@ class GovernanceInterpreter:
     """Translate UserBehaviorEvents into SubgoalInstructions (L3)."""
 
     def __init__(self, *, model: str | None = None,
-                 enable_llm_rollback_nl: bool = True) -> None:
+                 enable_llm_rollback_nl: bool = True,
+                 mock_subgoal: bool | None = None) -> None:
         """Args:
           model: the model id for the dynamic rollback NL inference (None →
             TASKVM_DEFAULT_MODEL). Pass a cheaper id for the 'lightweight LLM'
             the handoff describes.
           enable_llm_rollback_nl: if False, skip the LLM call and use a
             deterministic NL template for rollback_to (for mock/offline runs).
+          mock_subgoal: GG.3 — if True, the SubgoalGenerator uses its
+            deterministic mock path (no LLM); if False, the LLM path. None
+            (default) → mirrors ``enable_llm_rollback_nl`` (offline/mock runs
+            get the mock path; live runs get the LLM).
         """
         self.model = model
         self.enable_llm_rollback_nl = enable_llm_rollback_nl
+        self.mock_subgoal = (enable_llm_rollback_nl if mock_subgoal is None
+                             else mock_subgoal)
         self._rollback_nl_seen = 0  # count of LLM-generated rollback NLs (for manual-review flagging)
 
     # ── main entry ────────────────────────────────────────────────────────
@@ -105,7 +117,13 @@ class GovernanceInterpreter:
         ops = compile_patch(edit, vm_state.binding)
         subgoals: list[SubgoalInstruction] = []
         for op in ops:
-            nl = _build_edit_nl(op, payload)
+            # GG.3: generate the NL via SubgoalGenerator (zero internal id +
+            # zero operator jargon) from the op's visible locator. The locator
+            # is translated control-plane from canonical state (the title IS
+            # screen-visible → not a GT leak). Replaces _build_edit_nl.
+            canonical_entities = self._canonical_for_op(op, vm_state)
+            nl, _meta = instruction_for_op(
+                op, canonical_entities, mock=self.mock_subgoal, model=self.model)
             criterion = _criterion_for_op(op, task, target_cp, new_value)
             subgoals.append(SubgoalInstruction(
                 natural_language=nl,
@@ -117,6 +135,21 @@ class GovernanceInterpreter:
         if not subgoals:
             logger.warning("edit_field produced no patch ops for var_id=%s", var_id)
         return subgoals
+
+    def _canonical_for_op(self, op: PatchOp,
+                          vm_state: VMStateSnapshot) -> dict[str, dict[str, Any]]:
+        """Read the canonical entities for an op's app (control-plane). The
+        title field IS screen-visible, so translating entity_id→visible locator
+        from this is not a GT leak. Returns {} if the adapter/state is unavailable
+        (the SubgoalGenerator then returns the honest cannot-locate sentinel)."""
+        ad = (vm_state.adapters or {}).get(op.app)
+        if ad is None or not vm_state.sid:
+            return {}
+        try:
+            return ad.read_canonical(vm_state.sid).get("entities", {}) or {}
+        except Exception as e:
+            logger.warning(f"[interp] read_canonical({op.app}) failed: {e}")
+            return {}
 
     # ── FF.4 §5.3: workflow planner (Sequential / Parallel / Loop) ────────
     def interpret_as_workflow(self, events: list[UserBehaviorEvent],
@@ -212,9 +245,30 @@ class GovernanceInterpreter:
                 "new": new_value}
         ops = compile_patch(edit, vm_state.binding)
         criterion = task.expected_diff if task else {}
+        # GG: translate loop_values (entity_ids) → visible titles for the NL.
+        # The template op's first entity's app gives the canonical source.
+        loop_app = ops[0].app if ops else (task.bindings[0].app if (task and task.bindings) else "")
+        canonical_entities = self._canonical_for_op(
+            PatchOp(app=loop_app, entity_id="", field="", operator="", value=""),
+            vm_state) if loop_app else {}
+        visible_values = []
+        for v in values:
+            loc = entity_id_to_locator(loop_app, v, canonical_entities)
+            visible_values.append(loc if loc else "(an item)")
+        # the var's user-facing label (not the internal var_id snake_case) if the
+        # binding carries one
+        var_label = var_id
+        for var in (vm_state.binding.variables or []):
+            if var.get("var_id") == var_id:
+                var_label = var.get("label") or var_id
+                break
+        visible_list = "; ".join(visible_values) if visible_values else "each listed item"
         return [SubgoalInstruction(
-            natural_language=(f"Loop template — for each entity in {values}, "
-                              f"set {var_id} to {new_value!r} (batch op)."),
+            natural_language=(f"Batch operation — for each of these visible "
+                              f"items ({visible_list}), set {var_label} to "
+                              f"{new_value!r}. Use the UI to apply the change "
+                              f"to each item in turn. Output "
+                              f'{{"action":"done"}} when all reflect the new value.'),
             patch_ops=ops, verification_criterion=criterion,
             source_event_type="loop_field",
             meta={"loop_values": values, "loop_count": len(values)})]
@@ -375,58 +429,15 @@ class GovernanceInterpreter:
             meta={"app": app})]
 
 
-# ── NL template builders (deterministic, per operator + app) ───────────────
-def _build_edit_nl(op: PatchOp, payload: dict) -> str:
-    """Build a goal-level NL instruction for a PatchOp, using visible-content
-    hints from the event payload (NOT GT post_ids). The payload may carry:
-      - visible_token: visible text identifying the target (MG-1 visible-
-        uniqueness path — the token is on-screen, not a backdoor).
-      - contact_name: the wechat contact's display name.
-      - message_text: the text to type/send.
-    """
-    app, eid, field, operator, value = op.app, op.entity_id, op.field, op.operator, op.value
-    visible_token = payload.get("visible_token")
-    contact_name = payload.get("contact_name")
-    if operator == "toggle_like":
-        if visible_token:
-            return (f"On the X (Twitter) app timeline, find the post containing "
-                    f"the text \"{visible_token}\" and tap the heart (like) icon "
-                    f"in its action bar so it becomes filled/active. "
-                    f"Output {{\"action\":\"done\"}} once the heart is filled. "
-                    f"If you cannot find that post, output "
-                    f"{{\"action\":\"fail\",\"reason\":\"...\"}}.")
-        return (f"On the X app timeline, find a post whose heart (like) icon is "
-                f"not yet filled and tap it. Output {{\"action\":\"done\"}} when done.")
-    if operator == "toggle_retweet":
-        return (f"On the X app timeline, find a post whose repost icon is not "
-                f"yet active and tap it. Output {{\"action\":\"done\"}} when done.")
-    if operator == "toggle_bookmark":
-        return (f"On the X app timeline, find a post whose bookmark icon is not "
-                f"yet active and tap it. Output {{\"action\":\"done\"}} when done.")
-    if operator == "send_message":
-        who = contact_name or f"chat {eid}"
-        text = value if isinstance(value, str) else str(value)
-        return (f"In the WeChat app, open the chat with {who}, type exactly: "
-                f"\"{text}\", and send it. Output {{\"action\":\"done\"}} once "
-                f"the message is sent.")
-    if operator == "move_event":
-        return (f"In the calendar app, find event {eid} and change its {field} "
-                f"to {value}. Output {{\"action\":\"done\"}} when done.")
-    if operator == "set_deadline":
-        return (f"In the task board app, find task {eid} and change its "
-                f"{field} to {value}. Output {{\"action\":\"done\"}} when done.")
-    if operator == "set_status":
-        return (f"In the task board app, find task {eid} and set its "
-                f"{field} to {value}. Output {{\"action\":\"done\"}} when done.")
-    if operator == "move_file":
-        return (f"In the drive app, find file {eid} and move it to the "
-                f"{value} folder. Output {{\"action\":\"done\"}} when done.")
-    if operator == "rename":
-        return (f"In the drive app, find file {eid} and rename it to "
-                f"{value}. Output {{\"action\":\"done\"}} when done.")
-    # generic fallback
-    return (f"In the {app} app, perform {operator} on {eid} field {field} "
-            f"→ {value}. Output {{\"action\":\"done\"}} when done.")
+# ── NL template builders ───────────────────────────────────────────────────
+# GG.3: the old ``_build_edit_nl`` (per-operator if/elif that leaked entity_id
+# via "find event {eid}" / "chat {eid}" / "perform {operator} on {eid}") is
+# DELETED. All NL generation now goes through the SubgoalGenerator
+# (governance.subgoal_generator.instruction_for_op), which builds a zero-
+# internal-id, zero-operator-jargon NL from the visible locator. The MobileGym
+# visible_token / contact_name payload hints are screen-visible text — they are
+# folded into the visible_locator upstream by the driver, not handled by an
+# operator if/elif here.
 
 
 def _criterion_for_op(op: PatchOp, task: "CanonicalTaskGraph | None",

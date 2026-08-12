@@ -117,7 +117,8 @@ class StateAdapter:
                     screenshot_dir=self.gui_screenshot_dir, undo=undo,
                     attempt=attempt,
                     prev_screenshot=prev_screenshot, resume_url=resume_url,
-                    backend_name=getattr(self, "grounding_backend", "gpt56sol"))
+                    backend_name=getattr(self, "grounding_backend", "gpt56sol"),
+                    canonical_entities=before_state.get("entities") or {})
             except GuiExecutorFailure:
                 raise   # honest irreversibility — don't retry
             last_resp = resp
