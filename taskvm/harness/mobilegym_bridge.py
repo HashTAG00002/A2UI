@@ -16,34 +16,45 @@ NOT ``set_state`` (which MobileGym's runtime-api.md L276 defines as setup-only
 leave ``rollback.py`` / ``reconciliation.py`` / ``verifier/`` untouched.
 
 **Non-invasive write/rollback boundary (load-bearing — handoff fix
-2026-08-10, see memory taskvm-non-invasive-write-rollback-boundary).** The
-write path (``_send_message``) goes through the app's OWN write pipeline —
-NO ``set_state``: ``env.open_app("wechat")`` (OS launcher) → deep-link
-``openApp('wechat','/chat/<id>')`` (OS navigation, like an Android Intent) →
-programmatic textarea focus (grounding — the composer renders below the
-viewport, so a coordinate tap can't reach it; documented in ``_send_message``)
-→ ``Action.type_text`` (gesture via ``__SIM_INPUT__``) → ``Action(ENTER)``
-(gesture → WeChat ``handleKeyDown`` → ``handleSend`` → ``sendMessage`` store
-mutation). The rollback
-path: MobileGym's wechat has NO delete/recall UI for messages (verified — no
-long-press handler, no deleteMessage store action, append-only messages), so a
-real-gesture rollback of a sent message is NOT possible; the bridge HONESTLY
-raises ``NotImplementedError`` rather than falling back to ``set_state`` to
-fake a byte-exact restore (that would undermine the compensation claim — a
-backdoor rollback proves "we have debug permission," not "TaskVM compensates").
-``rollback.py``'s saga undo catches this and marks ``reverted=False`` (honest
-partial-failure). This is Option C (honest irreversibility) pending the user's
-rollback-branch decision.
+2026-08-10, see memory taskvm-non-invasive-write-rollback-boundary; Task3 E10
+rework 2026-08-11).** The wechat write path goes through ``gui_write_async``
+(Task3 — a REAL grounding loop: screenshot → model → ``env.step(Action.click/
+type/swipe)`` gestures; the model observes the chat page and decides how to
+send: tap composer → type text → Enter/send). NO ``set_state``, and NOT a
+hardcoded click sequence. The earlier hardcoded 7-step ``_send_message`` is
+retained below as DEAD CODE (superseded by ``gui_write_async``; not on the
+live path, kept for reference only).
+
+The wechat rollback path: ``gui_write_async(undo=True)`` — the model observes
+the chat page + TRIES to find a delete/recall UI (long-press menu, recall
+button). MobileGym's wechat has NO such UI (verified — no long-press handler,
+no deleteMessage store action, append-only messages), so the model outputs
+``{"action":"fail"}`` and the bridge raises ``web.HTTPConflict`` (409). This
+is honest irreversibility PROVEN by the model's real attempt (Task3 replaced
+the old hardcoded 409 with model-driven discovery of the same conclusion).
+The bridge does NOT fall back to ``set_state`` to fake a byte-exact restore
+(that would undermine the compensation claim — a backdoor rollback proves "we
+have debug permission," not "TaskVM compensates"). ``rollback.py``'s saga undo
+catches the 409 → ``reverted=False``, ``partial_failure=True``; the verifier
+independently confirms the message is still there (fidelity=0.0).
+
+The X toggle write path (``mutate_x``) is also a real grounding loop
+(``gui_act_async``). E16-complete (2026-08-12): the model's instruction names
+NO post_id, NO post text, NO current toggle state — pure-vision CUA (the
+content_hint backdoor, whether from posts.json or from DOM textContent, is
+fully removed; see the in-method comment).
 
 Routes (mirror the Drive app's contract, app-namespaced):
     GET  /health                              → {"status":"ok","site":"mobilegym"}
     GET  /<sid>                               → minimal HTML view (data-chat-id DOM)
-    POST /api/reset/<sid>                     → env.reset(app_ids=[wechat,alipay])
+    POST /api/reset/<sid>                     → env.reset(app_ids=[wechat,alipay,x])
     POST /api/inject_task/<sid>               → env.set_state(seed, deep=True) [SETUP-ONLY]
     GET  /api/session_state/<sid>             → summary only (n_chats, n_tx) — never GT
     GET  /api/wechat_chats/<sid>              → flattened wechat chats (entities)
     GET  /api/alipay_transactions/<sid>       → flattened alipay transferRecords
-    POST /api/wechat/<sid>/<eid>              → send_message (real gestures) OR msg:-rollback
+    GET  /api/x_state/<sid>                   → X toggle lists (liked/retweeted/bookmarked ids) [verifier read]
+    POST /api/wechat/<sid>/<eid>              → send_message via gui_write_async (real gestures) OR msg:<id> rollback (gui_write_async undo → 409 if irreversible)
+    POST /api/x/<sid>/<eid>                   → toggle_like/retweet/bookmark via gui_act_async (pure-vision CUA, E16-complete)
 """
 from __future__ import annotations
 
