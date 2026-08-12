@@ -211,5 +211,26 @@ def test_mg_vm_killtest_dry_run_mg2():
     assert "checkpoint" in event_types
 
 
+# ── EE.3: four_step_arc demo script ─────────────────────────────────────────
+def test_four_step_arc_importable():
+    """run_four_step_arc must be importable + its 4 step fns + main callable."""
+    from taskvm.evaluation.run_four_step_arc import (
+        step1_write, step2_reconciliation, step3_rollback, step4_jvm_moment, main,
+        _gt_binding, _apps_for)
+    for fn in (step1_write, step2_reconciliation, step3_rollback,
+               step4_jvm_moment, main, _gt_binding, _apps_for):
+        assert callable(fn)
+
+
+def test_four_step_arc_apps_for_launch_full():
+    """_apps_for(launch_full) returns the 4-App fanout set (calendar+taskboard+
+    drive+mail) — the EE.2 task the arc's Step 1 uses."""
+    from taskvm.evaluation.run_four_step_arc import _apps_for
+    from taskvm.benchmark.fixtures import get_task
+    apps = _apps_for(get_task("launch_full"))
+    assert apps == ["calendar", "taskboard", "drive", "mail"], (
+        f"launch_full should need 4 apps in order; got {apps}")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-x", "-q"])

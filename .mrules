@@ -1313,3 +1313,29 @@ recon workflow（10 agent，529K tokens）发现 HANDOFF_E17.md 在未验证实�
 2. **drive/mail app 重启**——原进程 Aug11 起、senseact env、无 --debug（无 auto-reload）。我 kill+restart 了 3015/3017（taskvm env，nohup detached）。calendar/taskboard/outlook_cal 未改代码未重启。若后续 env 切换需注意 drive/mail 现在跑在 taskvm env（其余仍 senseact）。
 3. **detail 模板未加新字段**——`file_detail.html`/`message_detail.html` 没加 publish_date/send_date（handoff 未要求，list+edit 已够 mock PASS）。GUI agent 若经 detail 页导航可能看不到新字段，但 gui_executor 的 resume_url 指向 edit form 不经 detail，故不阻塞。
 4. **mock PASS=False 在 1-sample 时**是 SAMPLES_FOR_PASS=2 统计门槛，非失败（3-sample 时 PASS=True）。
+
+### EE.3 — 四步弧端到端 demo 脚本（§4.4 teaser figure 唯一物证来源）
+
+**改了什么**（新建 `taskvm/evaluation/run_four_step_arc.py` + 2 L0 测试）：
+- 4 步连续弧：Step1 launch_full 4-App 写回+非干涉+重投影；Step2 外部注入 taskboard.T2.deadline=8/20 触发 reconciliation 冲突标红；Step3 saga undo 真实复原+诚实报告 external_change；Step4 同操作在 Stack B（outlook_cal+taskboard）重演证明 substrate-independence。
+- 两种模式：`--dry-run`（executor='api'，apps 在线→真实 round_trip 数字，**非 §12.16-compliant**，验证管线用）；默认（executor='gui_agent'，gpt-5.6-sol+Playwright，§12.16-compliant，teaser figure 用）。
+- 截图 best-effort（Playwright headless），每步落盘 `eval_results/four_step_arc_<ts>/stepN_<app>.png`；JSON 记录路径。
+- **Step2 inject 修正**：初版用 `inject_task` 全量重注入→污染 session（T1/T2 丢字段→404）。改为直接调 taskboard 自己的 mutate API（`POST /api/task/<sid>/<T2>` operator=set_deadline value=8/20）——绕过 TaskVM adapter/dispatcher，不进 rollback_log，是真正的"外部并发修改"。
+- **Step3 诚实增强**：不只看 `partial_failure`（机械：mutate 调用成功否），还独立检测 `external_changes_before_undo`——对比 saga 记录的 `after` vs undo 前真实 canonical 值，不等则标记。T2 被外部改成 8/20，saga 记录 after=8/18，undo 把 T2 设回 8/14（机械成功 reverted=True），但 `external_change_before_undo=True` 如实报告"世界在写与撤销之间变了"。
+
+**证据**（`eval_results/four_step_arc_20260812_185550.json` + 8 PNG，dry-run mode）：
+- **overall_PASS: True** ✓
+- step1: round_trip=1.0, non_interference=True, n_ops=5, apps_written=[calendar,drive,mail,taskboard] ✓
+- step2: conflict_detected=True, n_conflicts=1, conflict_vars=[{var_id:release_date, taskboard.T2.deadline, projected:2026-08-18, underlying:2026-08-20}] ✓（精确只标 T2，不误标 T1）
+- step3: n_reverted=5/5, partial_failure=False（机械全成功）, **external_changes_before_undo=[{taskboard.T2.deadline, saga_recorded_after:2026-08-18, actual_pre_undo:2026-08-20}]** ✓（诚实报告外部变化）
+- step4: stack=B, trajectory=[outlook_cal,taskboard]（≠ step1 的 [calendar,taskboard,drive,mail]，证明底层轨迹不同）, round_trip=1.0, neg_control=0.3 ✓, surface_slots=[{var_id:release_date, field:scheduled_for, app:outlook_cal}]（同 VM 变量，不同 substrate 字段名）
+- 8 截图：step1_{calendar,taskboard,drive,mail}.png + step3_rollback_{calendar,taskboard}.png + step4_stackB_{outlook_cal,taskboard}.png
+- L0: 22 passed（20→22，新增 test_four_step_arc_importable + test_four_step_arc_apps_for_launch_full）✓
+
+**chromium 截图环境**（memory taskvm-chromium-launch-recipe 已记，此处复述生效配置）：需设 `PLAYWRIGHT_BROWSERS_PATH=/mnt/.../conda/envs/taskvm/opt/ms-playwright`（chromium-1117 二进制在此）+ `LD_LIBRARY_PATH=/mnt/.../a2ui/.chromelibs/lib`（4 个 lib：alsa-lib/at-spi2-atk/at-spi2-core/libxkbcommon，已在 .chromelibs/lib/ 装好）。两者都设后 `BrowserType.launch` 成功，截图落盘。未设则 `libatk-bridge-2.0.so.0: cannot open shared object file` 报错。
+
+**已知局限（不美化）**：
+1. **dry-run 是 api 路径 = §12.16 后门**——round_trip=1.0 证明的是"4-App fanout + reconciliation + saga undo 的管线+验证器+回退逻辑全跑通"，**不是**"GUI agent 在真实浏览器里点对了 4 个 app 的表单"。teaser figure 必须用默认模式（gui_agent）重跑。dry-run 的诚实 framing 已写进 JSON 的 `honest_framing` 字段。
+2. **默认（gui_agent）模式未 live 跑**——需 gpt-5.6-sol + QPM 间距（5 个写操作 ~90s spacing，E13 测过 16 calls/op）。live 跑会落盘 `four_step_arc_<ts>.json`（gui_agent mode），是 teaser figure 的最终物证。本轮未跑因 token 预算 + QPM 限流，留 final 阶段。
+3. **Step4 GenUI surface 对比是 slot 级非视觉级**——`surface_slots_match` 只比 var_id+field 结构（两边都有 release_date 字段），不比 HTML pixel。handoff 要求"slot 结构相同"即此。要做视觉对比需 EE.7 GenUI 默认 on 后截两边 GenUI 页面 LLM-judge。
+4. **Step3 partial_failure=False**——机械全成功（5/5 mutate 调用成功）。handoff 原设想 partial_failure=True 是基于初版 inject_task 的 404 bug。修正 inject 后机械成功，但 `external_changes_before_undo` 诚实记录了 T2 被外部改过——这是比 partial_failure 更精确的诚实信号。如需 partial_failure=True 的演示，可注入一个真正不可逆的操作（如 wechat send_message 的 409），但那会改变 Step1 任务，超出 launch_full 范围。
