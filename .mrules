@@ -1168,3 +1168,88 @@ recon workflow（10 agent，529K tokens）发现 HANDOFF_E17.md 在未验证实�
 - `base`、`codelab` 等：系统级，不要污染
 
 **MobileGym 服务本身（bench_env 服务器）**：仍然在 `mobilegym` 环境里启动（`conda run -n mobilegym python -m bench_env.server`），TaskVM 只通过 HTTP/WebSocket 连接它的端口，两个进程用不同环境，互不干扰。
+
+---
+
+## E18 — 新会话接班：run_mg_vm_killtest 落盘 + verify_mode=any_new SR验证 + rollback NL路径验证
+
+**[session: 2026-08-12 下午，新会话接手 E17 遗留工作]**
+
+### 背景
+
+本轮是新会话接手 HANDOFF_E17 末尾列出的最高优先级遗留任务。开工前三条验证命令全绿（L0: 17/17 PASS, L1: W1 mock PASS, 干跑 MG-1 管线 PASS）。
+
+### E18-P1: run_mg_vm_killtest.py 落盘（E17 §5.3 Step 4 的遗留缺口）
+
+**做了什么**：新建 `taskvm/evaluation/run_mg_vm_killtest.py`，覆盖 MG-1 (`social_morning_brief`) 和 MG-2 (`expense_and_notify`) 的完整端到端 killtest：
+- L4→L3→bridge HTTP 完整链路：`ScriptedUserDriver` → `GovernanceInterpreter` → bridge REST API → Playwright 手势
+- 每个 subgoal 执行后验证 checkpoint criterion（通过 `snap_fn` 读真实 app state）
+- 支持 `--dry-run`（不需要 bridge，只验证管线结构）
+- 输出落盘 `eval_results/mg_vm_killtest_<ts>.json`（E8 原则）
+- 报告 VM 五性质覆盖度（`vm_properties_covered` 字段）
+- **诚实标注**：MG-2 的 rollback_to 触发 honest-409 被标记为 `rollback_honest_irreversibility=True`，是正面结果不是失败
+
+**dry-run 验证结果**（`eval_results/mg_vm_killtest_20260812_162514.json`）：
+- MG-1: PASS，3/3 subgoal（`edit_field(toggle_like)` + `edit_field(send_message)` + `checkpoint`）
+- MG-2: PASS，4/4 subgoal（`edit_field(V1)` + `checkpoint` + `rollback_to` + `edit_field(V2)`）
+- 结构验证：`rollback_to` subgoal 存在，`checkpoint` 事件产生正确的 `target_checkpoint_id`
+
+**L0 测试扩充**（`tests/test_imports.py` 17→20 PASS）：新增 3 个测试：
+- `test_mg_vm_killtest_importable`：验证 `run_one_sample` + `main` 可导入
+- `test_mg_vm_killtest_dry_run_mg1`：验证 MG-1 dry-run 包含 `toggle_like` + `send_message` ops
+- `test_mg_vm_killtest_dry_run_mg2`：验证 MG-2 dry-run 包含 `rollback_to` + `checkpoint` event_types
+
+**commit**: `cebc907` — "E18, P1: run_mg_vm_killtest.py (MG-1/MG-2 VM5 end-to-end killtest) + L0 tests 17→20 PASS"
+
+**诚实边界**（E11 原则）：
+- dry-run 验证了管线结构，不是 live 跑通的证明（live 需要 bridge + Vite + GUI 模型）
+- MG-1 live 跑通需要 X toggle_like（已有 94.4% SR 的存在性证明，E15）+ wechat send_message（E13 Task C 后达到 1.0）
+- MG-2 live 跑通的 rollback honest-409 路径已在 `run_mobilegym_killtest` 里验证过
+
+### E18-P2: verify_mode=any_new SR 验证（E17 遗留问题3）
+
+**做了什么**：在真实 bridge（:3019 + Vite :3000 已在运行）上跑 `run_x_toggle_killtest --samples 2 --operators toggle_like`（verify_mode=any_new，E17-A Option B），产出 `eval_results/x_toggle_killtest_20260812_163053.json`。
+
+**结果（原始 JSON 数据）**：
+- `success_rate=1.0`（6/6），`PASS=True`（threshold 0.8）✓
+- 对比 E16 的 38.9%（ill-posed specific-post verifier，1/3-guess lottery）→ 现在 **100%**（any-new-post verifier 与 instruction 语义对齐）
+- `per_toggled_post`：`p_1879539026291785845` × 4，`p_1879539450872778943` × 2 — 模型有位置偏置（倾向第2个帖子），如实记录（any_new 下属于 pass，但位置偏置是描述性信息）
+
+**结论**：E17 §0-B 的"ill-posed 任务"问题彻底解决。verify_mode=any_new 的验证器与 instruction 语义完全对齐，SR 从 38.9% 提升到 100%。
+
+**诚实标注**：这个 100% 是"任意帖子被 toggle"的成功率，不是"特定内容帖子被识别并 toggle"的成功率（后者是 MG-1 `social_morning_brief` 验证的，有 `visible_token="核心CPI"` 作为可视唯一性约束）。
+
+### E18-P3: rollback_to LLM NL 路径验证（E17 遗留问题2）
+
+**做了什么**：通过 `/tmp/test_rollback_nl.py` 脚本调用真实模型验证 `GovernanceInterpreter._infer_rollback_nl`。
+
+**验证结果（两条路径）**：
+
+1. **确定性路径**（`enable_llm_rollback_nl=False`）：
+   - `llm_generated=False` ✓
+   - NL = `"Roll back to checkpoint C0 by undoing 1 saga(s): ['saga_1']."`（模板文本）
+   
+2. **LLM 路径**（`enable_llm_rollback_nl=True`，真实 LLM 调用）：
+   - `llm_generated=True` ✓
+   - NL = `"Rolling back to checkpoint C0 would require undoing the WeChat message sent to wxid_huangyong_demo in saga_1, **but this action is irreversible and cannot be undone.**"` — **正确提到了不可逆性**，符合 `_infer_rollback_nl` 的 prompt 里"for wechat send_message, undo is HONESTLY IRREVERSIBLE"的设计意图 ✓
+   - `manual_review_needed=True`（首次 LLM 输出正确标记需人工审查）✓
+   - criterion 正确来自 C0 checkpoint criterion（空 dict，C0 是初始状态） ✓
+
+**诚实边界**：
+- `manual_review_needed` flag 目前只是 `SubgoalInstruction` 上的一个字段，没有 UI 层的呈现（`.mrules` E9.2 遗留）
+- LLM rollback NL 路径在 live MG-2 killtest 里默认关闭（`enable_llm_rollback_nl=False`）以避免 QPM 消耗；如需验证完整 live 链路需显式开启
+
+### 三任务诚实汇总
+
+| 任务 | 状态 | 证据 JSON | 诚实标注 |
+|---|---|---|---|
+| P1 run_mg_vm_killtest | ✅ dry-run PASS，代码落盘 | mg_vm_killtest_20260812_162514.json | live 跑通需 bridge 在线；dry-run 验证结构 |
+| P2 verify_mode=any_new SR | ✅ 100% (6/6) PASS | x_toggle_killtest_20260812_163053.json | any-post 语义，非 specific-content；模型有位置偏置 |
+| P3 rollback NL 路径 | ✅ 两条路径验证通过 | /tmp/test_rollback_nl.py 脚本（非仓库产物） | LLM 正确提到不可逆性；manual_review UI 未实现 |
+
+### 遗留问题（供下一个 agent）
+
+1. **run_mg_vm_killtest live 跑通**：dry-run PASS 了，但没有 live 样本证明整个链路（X toggle + wechat send）在真实 bridge 上端到端工作。需要等 bridge 在线时跑 `python -m taskvm.evaluation.run_mg_vm_killtest --task all --samples 1`，落盘 JSON。
+2. **rollback_to LLM NL 的 manual_review UI**：`SubgoalInstruction.manual_review_needed=True` 目前只是字段，没有 workspace_ui 层的呈现（进度条/标记显示"这一步操作的 governance 描述需人工确认"）。
+3. **MG-2 V1 后验证 C1 criterion 的 _contains 模式**：`expense_and_notify` 的 C2 criterion 需要 `_contains` 语义（wechat append-only messages），当前 `run_mg_vm_killtest._check_criterion` 已支持 `_contains` 字段，但 MG-2 fixture 的 criterion 是 `exact_equality`（因为 C1 时 chat 是空的，V1 是第一条消息，exact 成立）。后续如果增加 V1+V2 双消息场景需改用 `_contains`。
+4. **X toggle 位置偏置问题**：`per_toggled_post` 显示模型倾向选第2个帖子，不均匀分布。这是 any_new 下的已知偏置（不影响 PASS），但 MG-1 `social_morning_brief` 用 `visible_token="核心CPI"` 做 specific-content 识别，位置偏置不影响它（模型需找特定内容的帖子）。
