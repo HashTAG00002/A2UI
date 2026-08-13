@@ -1,0 +1,6564 @@
+[A2UI] Prototype工作流优化建议
+=======================
+
+【提问 轮数1】
+https://github.com/HashTAG00002/A2UI/tree/gg-phase
+我现在正在完成一篇CHI的工作,现在我的prototype已经搭完了,我们的整个的任务的设计目标以及核心的这些功能实现,以及我们要跟其他竞品拉开差距的这个某点全部钉死在该文件中:https://github.com/HashTAG00002/A2UI/blob/gg-phase/docs/A2UI_%E5%BC%80%E5%B7%A5%E5%A4%A7%E7%BA%B2_v0_%E5%BF%83%E6%99%BA%E6%A8%A1%E5%9E%8B%E5%AF%B9%E9%BD%90%E7%89%88.md
+
+现在 GG阶段的工作已经完成了,具体相关的GG阶段做了什么,你也可以在doc目录下去找到（@https://github.com/HashTAG00002/A2UI/blob/gg-phase/docs/A2UI_GG%E9%98%B6%E6%AE%B5%E5%BC%80%E5%B7%A5%E7%9B%AE%E6%A0%87.md）。OK,现在我要你求你做的是,合理分析我现在的这个整个工作流程,给我用最通俗易懂的语言描述一下,现在从用我们的这个Task VM的这个Harness到底是怎么运行的,它作为一个真实的软件,到底是怎么去完整地实行一次用户的一个任务的。现在是起始点是用户开始给了他一个任务,然后在给任务之前,界面是什么状态,给了任务之后会变成什么状态,然后调用几次模型,然后生成什么什么东西。对,然后整个过程中会有几个模型去参与,会有几类的模型去参与,可能是CUA,可能是Agentic Gen UI,可能是Subgoal Generator,对吧,这些东西就是整个调用次数给理清楚。然后在整个用户的过程中,用户使用的过程中,当用户不发起操作的时候,模型整个Task VM的这个Harness会一直以怎样的形式运行下去,然后它主要改变的是只读区,对吧。然后当用户开始在运行的过程期间,开始动态干预,要求退回检查点,或者是有没有什么其他的相关的可能,比如说重新设计这个终结目标,就类似于这种感觉的。那么在用户发起这样的请求之后,又会陷入到怎样的工作流之中,怎样的调用关系之中。你应该结合整个代码库中间的具体的函数名字,但是光看函数名字我是看不懂的,我需要你去仔细地给我用生动的语言,甚至可以打比方举例子的方式去给我讲解它到底是怎么实现的。
+
+然后这篇工作现在prototype部分的完成度,你觉得足够达到一篇CHI中稿论文的水平吗?甚至可以冲这个World?我理解冲World需要我的科学严谨性、设计、思路创新度,然后实验完整度、严谨性,然后人类用户的这个反馈,以及写作和实验设计上全部都达到最高的标准。我们现在还有时间,我们就是冲这个目标去的。那其实也不一定非得拿到World,但是我就是想要冲一次World质量的论文,我不奢求一定要得到最终的这个结果,我只希望它能达到这个质量的论文。你觉得现在它作为一种变革的范式,跟同类竞品中拉开差距吗?它咬死了现在我的那个新指模型对齐那个文件里面的所有矛点吗?它面对未见的APP,未见的任务,就是在开放场景下,随便一个用户在随便一个平台上给它一个随便的这样的一个指令,它有可能能完成吗?注意,我这里说的,它的泛化性的体现,一部分依赖于harness,一部分依赖于模型能力侧,对吧?模型能力侧我们没有什么可做的,因为毕竟我们是人机交互的工作。但是就是在harness侧的话,我们支持这样的实现吗?就是意思就是说我们现在harness prototype的这个实现,如果用户达不到在开放场景下随便用的这个地步的话,如果它是因为模型侧的能力限制达不到的话,那我可以理解。但是如果它是因为harness侧的某些功能实现有问题,或者是设计有问题的限制而实现不了的话,就绝对不行。比如说之前的什么呢?比如说之前他们通过这个任务先s绑定的这个operator,然后来去设置这个subgoal,而不是通过generator subgoal去丢给这个GUI agent或者叫CUA。那这个很明显,它就面对开放场景里没有任何的泛化性,对吧?这阶段的开工文档也提到了这一点。我要求你排查接下来所有其他东西,然后并且告诉我,接下来这个prototype到底怎么做,以及benchmark部分,自动化评估部分到底要怎么做,以及有没有更合理的人类控制流程,就是从初始化到人类不断的反馈循环,人类不干预的时候循环是什么样的,人类干预的时候循环是什么样的,给我一套更合理的工作流的改进建议,对吧?然后要求能让这个prototype达到CHI award级别的prototype,这只是prototype的这一部分,其他部分你先不用管,就是prototype和这个benchmark的设计,对。因为我希望我们跟其他的CHI工作能够拉开差距,就是我们除了以人为本的用户调查、用户调研以外,我们还希望有一些很客观的指标能够去评估我们的这个task VM prototype新交互范式的客观执行（非以人为本）性能。
+
+总而言之,你要通读整个代码库,并且可能还需要适当去调研其他竞品工作,来告诉我们如下几方面的建议。1,整体prototype工作流的设计建议,然后目的是为了提高用户的这个可用度,让用户觉得在这个过程中玩乐感更强,成就感更强,并且尽量地去降低模型的调用开销,就是不要整一次任务就调用好几百次模型,这个有点太过分了,对吧?开销太大了,我们承担不起。然后并且尽量地去提高harness,让它客观执行队的这个性能。对,然后其次是当前的benchmark还有什么可以改进的点,对吧。然后最后一部分就是在第一个问题里面,全新的工作流的范式下,以及第二个benchmark客观指标没有问题的情况下,怎么样去提高我们的harness方面的性能,让它能够更好地实现,对吧。然后你要关注现有的几种工作流范式,分别是这个线性、树状和loop。
+
+【回答内容 轮数1】
+I’ll trace the actual task lifecycle, model calls, checkpoints, interventions, and benchmarks, separating implemented behavior from documented promises and harness versus model limitations. Then I’ll propose a unified linear/tree/loop workflow and evaluation roadmap against comparable agent systems.
+
+【回答内容 轮数1】
+A decisive gap is emerging: the real Workspace still uses fixture/GT bindings and scripted drivers, while `compile_binding(...)` remains disconnected. Current “open-world” tests therefore do not demonstrate unseen-app GUI generalization.
+
+【回答内容 轮数1】
+A separate harness-level issue is model-call amplification: `SubgoalGenerator` emits two candidates per PatchOp, GUI writes can reach 54 calls, and GenUI repeatedly decodes on full-page rerenders.
+
+【回答内容 轮数1】
+# 结论先行
+
+我对 `gg-phase` 分支中的权威设计文档、GG 阶段文档，以及 `task_state`、`governance`、`execution`、`workspace_ui`、`substrate`、`verifier`、`benchmark`、`evaluation` 等关键链路做了静态代码审计。以下判断基于当前公开代码；我没有在本轮真正启动全部 App 服务、Playwright 浏览器和模型端点，因此不能把代码中的注释性结果当成我独立复现过的实验结果。
+
+我的核心判断是：
+
+> **TaskVM 的研究概念具有很强的 CHI 潜力，但当前 prototype 还不是一个真正闭环的开放世界 Task VM。现在最严重的问题不是 CUA 模型不够强，而是“真实 Workspace 主链路”仍然绕过了你已经实现的开放世界 compiler 和动态规划组件。**
+
+更直白地说：
+
+- 你已经造好了发动机、刹车、仪表盘、行车记录仪、倒车机构。
+- 但真正演示时，车仍然沿着预先铺好的测试轨道走。
+- `compile_binding(...)` 像一套可以现场识路的导航系统，但实际 `/seed` 启动车辆时没有使用它。
+- 当前主路径直接用 `_gt_binding(fixture)` 把正确地图塞进系统，再由 scripted driver 生成预定工作流。
+- 所以现在演示能证明“系统各部件能够协作”，却还不能证明“随便给一个目标和未见 App，系统能自己发现状态、生成计划并执行”。
+
+当前权威文档已经把 TaskVM 的五个锚点定义得很准确：实时投影、双向可执行绑定、substrate independence、人类治理与 Agent 自治、独立验证与可逆性。这个理论框架本身是你最有价值的部分。turn561149view2
+
+但是当前实现对这五个锚点的完成度大致是：
+
+| 锚点 | 当前状态 | 我的判断 |
+|---|---|---|
+| 实时投影 | 有 SSE 心跳和 canonical reread | **部分完成**，但只是在已有 binding 上刷新数值，不会发现新结构、新实体、新 App |
+| 双向绑定 | GenUI 编辑可转成 PatchOp，再写回 App | **部分完成**，因为真实 Workspace 使用 GT binding |
+| substrate independence | 有 adapter 抽象和 held-out App | **明显不足**，运行时仍依赖每个 App 的 adapter、operator 表和内部 canonical API |
+| 人类治理 + Agent 自治 | 有 start、pause、checkpoint、rollback、conflict resolve | **部分完成**，但没有真正的动态 goal redesign 和 subtree replan |
+| 独立验证与可逆性 | canonical verifier、non-interference、Saga rollback 做得较完整 | **目前最强的一部分**，且能诚实表示不可逆操作 |
+
+因此：
+
+> **以现在代码原样提交，不能安全地把“开放世界、任意 App、任意任务的 Task VM”作为论文已经实现的核心事实。**
+> **但把下面的 P0 闭环补完后，它非常可能成为一套有明显范式差异、足以支撑强 CHI 投稿的 prototype。**
+
+---
+
+# 一、现在真实的 TaskVM Harness 到底是怎么运行的
+
+我先不讲抽象术语，用一个具体任务解释。
+
+假设用户想做：
+
+> “把项目发布会议从 8 月 14 日推迟到 8 月 18 日，并同步所有依赖任务的截止日期。”
+
+## 1. 用户还没有给任务时，系统是什么状态
+
+从当前 Workspace 主路径来看，它并不是一个真正的：
+
+> “空白 TaskVM 桌面 → 用户随便输入一句自然语言任务”
+
+而更像是：
+
+> “测试任务启动器 → 选择一个已经注册的 task_id → 创建工作区”
+
+核心入口是：
+
+```python
+seed_route()
+```
+
+它接受的是：
+
+```json
+{"task_id": "..."}
+```
+
+而不是任意 `goal`。默认任务还是 `doc_handoff`。随后：
+
+```python
+_get_fixture_and_adapters(task_id)
+```
+
+会根据这个预定义 `task_id` 找到一个 `CanonicalTaskGraph fixture`，再根据 fixture 中出现的 App 建立对应 adapters。
+
+所以当前“用户给任务之前”的本质状态是：
+
+- 还没有 `WorkspaceSession`。
+- 还没有真正观察用户当前桌面。
+- 还没有扫描用户当前打开了哪些 App。
+- 还没有从屏幕中发现可操纵对象。
+- 等待的是一个预注册的任务编号，而不是任意任务描述。
+
+这是第一个必须修改的地方。
+
+---
+
+## 2. 用户“给出任务”之后，系统当前实际做了什么
+
+调用链是：
+
+```text
+POST /seed
+  └─ _get_fixture_and_adapters(task_id)
+      └─ seed_session(fixture, adapters)
+```
+
+`seed_session(...)` 做四件主要事情。
+
+### 第一步：重置并注入测试环境
+
+```python
+ad.reset(sid)
+replay.seed_apps(fixture, adapters, sid)
+```
+
+这相当于拍电影之前，剧组先把所有道具摆到正确位置：
+
+- Calendar 里提前放好发布会议；
+- TaskBoard 里提前放好依赖任务；
+- Drive、Mail 等也按 fixture 填好内容。
+
+这对 benchmark 是合理的，因为实验必须可复现。
+
+问题不在“有 fixture”，而在于后面真实运行路径继续使用了 fixture 的答案。
+
+---
+
+### 第二步：直接从 fixture 构造正确 binding
+
+```python
+binding = _gt_binding(fixture)
+```
+
+`_gt_binding(...)` 直接读取：
+
+- `var_id`
+- `app`
+- `entity_id`
+- `field`
+- `operator`
+
+例如直接知道：
+
+```text
+release_date
+  → calendar.E1.date / move_event
+  → taskboard.T1.deadline / set_deadline
+  → taskboard.T2.deadline / set_deadline
+```
+
+这就相当于：
+
+> 系统还没有看屏幕，就已经拿到了答案册，上面写着“发布会议是数据库里的 E1，要调用 move_event；两个任务是 T1/T2，要调用 set_deadline”。
+
+当前代码也明确把它称为 mock binding，并说未来再替换为 compiler binding。
+
+与此同时，你真正用于开放世界发现的：
+
+```python
+compile_binding(...)
+```
+
+虽然已经实现了“目标 + 可见文本/截图 → TaskBinding”，但目前没有接到 `workspace_ui/server.py` 的实际 seed 主链路上。
+
+这是当前 prototype 最关键的断点。
+
+---
+
+### 第三步：用 scripted driver 生成预定工作流
+
+`seed_session(...)` 接下来调用：
+
+```python
+drv = make_scripted_driver(fixture.task_id)
+binding = _build_minimal_binding(drv.task)
+events = []
+while True:
+    ev = drv.next_event()
+    ...
+sess.workflow_plan = interp.interpret_as_workflow(events, vm, task=drv.task)
+```
+
+这相当于：
+
+> 不仅地图是预先给的，连驾驶路线也是测试脚本提前写好的。
+
+`GovernanceInterpreter.interpret_as_workflow(...)` 并不是根据任意自然语言目标规划任务，而是把一批预先生成的 `UserBehaviorEvent` 分类成三种结构：
+
+- `SEQUENTIAL`
+- `PARALLEL`
+- `LOOP`
+
+分类规则也非常简单：
+
+```text
+有 loop_field → LOOP
+一个 edit_field 且 fixture binding 跨多个 App → PARALLEL
+否则 → SEQUENTIAL
+```
+
+并且判断是否跨 App 时，直接读取 `task.bindings`。
+
+因此当前的“WorkflowPlan 动态生成”准确说是：
+
+> **根据预定事件和 GT binding 做结构分类。**
+
+还不是：
+
+> **根据任意用户目标、当前屏幕状态、依赖关系、风险和验证条件动态生成语义工作流。**
+
+---
+
+### 第四步：可选地调用一次模型建议里程碑
+
+在 `/seed` 中，如果 `suggest_milestones=True`，会调用：
+
+```python
+_suggest_milestones(fixture.goal)
+```
+
+它让模型根据目标提出若干里程碑。
+
+例如：
+
+```text
+C1：确认会议已改期
+C2：确认所有依赖任务已同步
+C3：完成跨 App 一致性检查
+```
+
+这是一次真正的模型调用。
+
+但目前“采纳里程碑”主要改变 UI 中的展示和 adopted 状态，没有重新生成或修改 `WorkflowPlan`。换句话说：
+
+> 现在它更接近一个可采纳的任务清单，而不是会真正控制执行图的运行时 checkpoint。
+
+turn297382view4
+
+---
+
+# 二、Task VM 界面是怎么生成出来的
+
+工作区页面通过：
+
+```python
+render_two_zone_html(sess)
+```
+
+生成。
+
+你设计中的两个区域已经比较清晰：
+
+## 1. 只读区
+
+只读区展示真实 App 状态，例如：
+
+```text
+Calendar
+  项目发布会议：2026-08-14
+
+TaskBoard
+  发布文案：deadline 2026-08-14
+  QA 测试：deadline 2026-08-14
+```
+
+当前值通过：
+
+```python
+resync_values(...)
+project_readonly(...)
+```
+
+得到。
+
+但需要注意一个非常重要的问题：
+
+```python
+resync_values()
+    → adapter.read_canonical(sid)
+```
+
+而 `read_canonical(...)` 实际调用的是各个模拟 App 的内部 HTTP API，例如 `/api/events/<sid>`，再归一化成 entity map。turn487147view0
+
+所以当前只读区不是严格意义上的：
+
+> “从任意现实 App 屏幕中实时编译出的状态投影”
+
+而是：
+
+> “从已知 App 的内部 canonical API 中读取状态，再投影到 VM”。
+
+这对 benchmark oracle 很好，但对真实开放世界 harness 是一个重大限制。
+
+你需要把两个概念彻底分开：
+
+### 生产运行时状态
+
+只能来自：
+
+- screenshot
+- accessibility tree
+- 可见文本
+- 可见 UI 结构
+- 用户允许的公开接口
+
+### Benchmark oracle 状态
+
+可以来自：
+
+- 内部数据库
+- 测试 API
+- hidden canonical state
+- deterministic evaluator
+
+现在这两个角色混在同一个 `StateAdapter` 里了。
+
+---
+
+## 2. 可写治理区
+
+可写区可以有两种生成方式。
+
+### 方式 A：传统 f-string 表单
+
+系统按 binding 直接渲染输入框。
+
+### 方式 B：真正的 GenUI decoder
+
+当：
+
+```python
+sess.use_genui = True
+```
+
+时，调用：
+
+```python
+decode_genui(binding, values)
+```
+
+模型决定：
+
+- 用 Card 还是 List；
+- 用 TextField、ChoicePicker 还是 DateTimeInput；
+- 哪些组件可编辑；
+- 两个 zone 如何组织。
+
+然后薄渲染器：
+
+```python
+render_a2ui_to_html(...)
+```
+
+把 A2UI 消息转成 HTML 表单。
+
+这个设计方向是正确的：**模型负责界面语义组织，renderer 只负责安全渲染。**
+
+但是当前 `_build_user_prompt(...)` 会把以下信息给 GenUI 模型：
+
+```text
+Variable: label [var_id]
+app.entity_id.field
+operator
+```
+
+也就是 `var_id`、`entity_id` 和 `operator` 都进入了 GenUI 模型上下文。
+
+如果你的 GG 红线是：
+
+> 所有参与 TaskVM 的模型都只能看到用户可见信息
+
+那么这里是明确违规的。
+
+如果红线只限定 CUA 模型，这仍然会削弱“substrate-independent GenUI”的论证，因为 GenUI decoder 仍依赖内部 schema，而不是纯 VM semantic state。
+
+正确做法应该是给 GenUI：
+
+```json
+{
+  "semantic_key": "release date",
+  "label": "发布日期",
+  "type": "date",
+  "value": "2026-08-14",
+  "editable": true,
+  "scope": ["Calendar", "TaskBoard"],
+  "effects": "Changing this will update 3 visible items"
+}
+```
+
+而不是：
+
+```text
+calendar.E1.date(move_event)
+taskboard.T1.deadline(set_deadline)
+```
+
+---
+
+# 三、用户点击“开始执行”后发生什么
+
+入口是：
+
+```python
+start_workflow(sid)
+```
+
+它启动一个 daemon thread，并调用：
+
+```python
+WorkflowExecutor.execute(...)
+```
+
+执行过程中通过 SSE 推送：
+
+- lane running
+- lane done
+- barrier
+- workflow complete
+
+
+
+可以把 `WorkflowExecutor` 想成一个舞台监督：
+
+- `WorkflowPlan` 是演出节目单；
+- 每个 `WorkflowNode` 是一幕；
+- 每个 `SubgoalInstruction` 是演员的任务；
+- `dispatch(...)` 是把任务交给演员；
+- verifier 是每幕结束后的验收员。
+
+---
+
+## 1. Sequential：线性工作流
+
+例如：
+
+```text
+先改 Calendar
+  ↓
+验证 Calendar
+  ↓
+再改 TaskBoard T1
+  ↓
+验证
+  ↓
+再改 TaskBoard T2
+  ↓
+验证
+```
+
+当前 executor 会逐个 subgoal 调用：
+
+```python
+dispatch(sg.patch_ops, ...)
+```
+
+再对每一个 PatchOp 做 canonical reread，检查目标字段是否真的变成预期值。
+
+它的优点是：
+
+- 简单；
+- 容易定位错误；
+- 容易 rollback；
+- 不会出现并发冲突。
+
+缺点是：
+
+- 慢；
+- 每个 App 都重新走一遍 CUA；
+- 长任务成本很高。
+
+---
+
+## 2. Parallel：并行工作流
+
+逻辑上可以是：
+
+```text
+                  ┌─ Calendar 改期 ─┐
+release_date ─────┼─ Task T1 改期 ──┼─ verifier barrier
+                  └─ Task T2 改期 ──┘
+```
+
+API executor 模式下，代码使用 `ThreadPoolExecutor`，可以真正并发。
+
+但 GUI agent 模式下，所有 App 共用一个 resident Playwright page，`GuiExecutor` 还有一把 lock，因此所谓并行实际上会串行执行：
+
+```text
+Calendar → T1 → T2
+```
+
+只是工作流结构上保留了 parallel node 和最终 barrier。turn775421view0
+
+所以论文里必须诚实地区分：
+
+- **logical parallelism**
+- **physical execution parallelism**
+
+当前只有前者。
+
+要得到真正并行，需要：
+
+- 每条 lane 独立 browser context/page；
+- 每个 App 独立 CUA execution context；
+- verifier barrier 汇合；
+- 对共享资源做冲突检测。
+
+---
+
+## 3. Loop：循环工作流
+
+当前 LOOP 的实现不是“模型根据状态判断是否继续”，而是：
+
+1. 事件里预先带有 `loop_values`；
+2. 取一个 template PatchOp；
+3. 依次把其中的 `entity_id` 替换为 T1、T2、T3；
+4. 每次执行后独立验证。
+
+例如：
+
+```text
+for entity_id in [T1, T2, T3]:
+    set assignee = Bob
+    verify
+```
+
+turn842575view0
+
+这叫：
+
+> **有限集合迭代**
+
+还不是一个完整的 agentic loop。
+
+真正需要支持的 loop 至少包括：
+
+### 固定集合循环
+
+```text
+对当前发现的所有逾期任务执行一次
+```
+
+### 条件循环
+
+```text
+不断处理下一页，直到没有下一页
+```
+
+### 修复循环
+
+```text
+执行 → 验证失败 → 重观察 → 修正 → 再验证
+```
+
+### 持续监控循环
+
+```text
+只要外部状态发生变化，就更新 VM 投影和受影响计划
+```
+
+当前实现主要覆盖第一种。
+
+---
+
+# 四、一次 PatchOp 是怎样真正写进 App 的
+
+`WorkflowExecutor` 不直接控制浏览器，而是：
+
+```text
+WorkflowExecutor
+  → action_dispatcher.dispatch
+      → adapter.mutate
+```
+
+`adapter.mutate` 有两个模式：
+
+## API 模式
+
+直接 POST 模拟 App 的内部 API。
+
+这个模式适合：
+
+- 快速回归测试；
+- verifier 测试；
+- 测试 patch 编译；
+- 隔离模型随机性。
+
+但它不能作为论文里“真实 GUI 执行性能”的核心结果。
+
+---
+
+## GUI Agent 模式
+
+调用：
+
+```python
+StateAdapter._mutate_via_gui(...)
+    → gui_write(...)
+        → GuiExecutor.execute(...)
+```
+
+此时流程是：
+
+```text
+读取当前 canonical old value
+  ↓
+根据 visible locator 生成自然语言子目标
+  ↓
+打开 App 列表页
+  ↓
+截屏
+  ↓
+CUA 模型输出一个 action
+  ↓
+BrowserController 执行 click/type/press/scroll
+  ↓
+重新截屏
+  ↓
+CUA 再输出一个 action
+  ↓
+直到 done / fail / max_steps
+  ↓
+重新读取 canonical state
+  ↓
+确认写入是否真的落地
+```
+
+CUA 的动作 DSL 包括：
+
+```json
+{"action":"click","coordinate":[x,y]}
+{"action":"type","text":"..."}
+{"action":"press","key":"Enter"}
+{"action":"scroll","coordinate":[x,y],"direction":"down"}
+{"action":"wait"}
+{"action":"done"}
+{"action":"fail","reason":"..."}
+```
+
+turn775421view5
+
+这是你当前实现中相当扎实的一段：
+
+- 不再使用 deep link 直接跳编辑页；
+- 不直接 set DOM value；
+- 用真实点击和键盘事件；
+- 写入后独立读取状态验证；
+- rollback 也重新走 GUI，而不是偷偷恢复数据库；
+- 不可逆行为会诚实失败。
+
+这部分是很有论文价值的。
+
+---
+
+# 五、到底有几个模型角色，调用多少次
+
+先区分一个概念：
+
+> **模型角色数量，不等于物理模型数量。**
+
+你完全可以用同一个 frontier model 承担多个角色，但从系统设计上，它们是独立上下文、独立职责。
+
+当前代码里实际出现了六类可能的模型角色。
+
+| 模型角色 | 作用 | 当前主路径是否使用 |
+|---|---|---|
+| Binding Compiler | 从目标和屏幕发现变量、实体和绑定 | **没有接到 Workspace 主路径** |
+| Milestone Suggester | 初始化时建议检查点 | 默认使用一次 |
+| Workflow/Subgoal Generator | 把 PatchOp 写成 CUA 可理解的目标语言 | 存在，但当前有重复与 flag 问题 |
+| GenUI Decoder | 根据 VM state 生成 A2UI | 可选 |
+| CUA / Grounding Model | 每次看屏幕输出下一步动作 | GUI 模式核心 |
+| Rollback NL Generator | 描述 rollback 会撤销什么 | 某些 GovernanceInterpreter 路径可选 |
+
+Verifier 当前主要是 deterministic canonical verifier，不需要模型，这一点是优点。
+
+---
+
+## 当前典型初始化调用量
+
+假设一个任务最终有 `N` 个 PatchOp。
+
+### 1. Binding compiler
+
+真实 Workspace 主路径：
+
+```text
+0 次
+```
+
+这是问题，因为它用的是 `_gt_binding(...)`。
+
+理想情况应该是：
+
+```text
+初始化 1 次
+```
+
+只有发现多个完全分离的 substrate 时，才按 App 分组调用。
+
+---
+
+### 2. Milestone suggester
+
+默认：
+
+```text
+1 次
+```
+
+---
+
+### 3. Workflow planner
+
+结构分类本身：
+
+```text
+0 次
+```
+
+因为是规则分类。
+
+但这里存在一个疑似明确的布尔 flag 反转问题。
+
+`GovernanceInterpreter.__init__` 中：
+
+```python
+self.mock_subgoal = (
+    enable_llm_rollback_nl
+    if mock_subgoal is None
+    else mock_subgoal
+)
+```
+
+而 `generate_subgoal(...)` 的语义是：
+
+```text
+mock=True  → 不调用模型
+mock=False → 调用模型
+```
+
+`seed_session(...)` 又实例化：
+
+```python
+GovernanceInterpreter(enable_llm_rollback_nl=False)
+```
+
+这会导致：
+
+```text
+mock_subgoal=False
+```
+
+于是 `_interpret_edit_field(...)` 反而进入 LLM 路径。
+
+而 LLM SubgoalGenerator 每个 PatchOp 会生成两个候选，因此是：
+
+```text
+2 × N 次文本模型调用
+```
+
+turn534469view0turn297382view1
+
+而且 `WorkflowExecutor` 最终只是把 `sg.patch_ops` 交给 `dispatch(...)`，并没有把 `sg.natural_language` 传进 adapter；GUI 写入时 `gui_write(...)` 又会自己生成一遍默认的 deterministic instruction。turn297382view0
+
+所以这里很可能同时存在：
+
+1. 不必要的模型调用；
+2. natural-language subgoal 没有真正传到 CUA；
+3. 同一个子目标被生成两次；
+4. planning layer 与 execution layer 没有建立单一真源。
+
+这是优先级很高的修复项。
+
+---
+
+### 4. GenUI decoder
+
+如果 `use_genui=False`：
+
+```text
+0 次
+```
+
+如果 `use_genui=True`：
+
+```text
+每次完整 render 至少 1 次
+```
+
+解析或 schema validation 失败时还可能发生 repair retry。
+
+因此不要在每次只读数值更新时重新调用 GenUI。
+
+正确策略是：
+
+- 初次生成组件树：1 次；
+- 仅数值变化：0 次模型调用，只发 `updateDataModel`；
+- 增删字段或结构变化：才重新调用；
+- 用户明确要求重新设计布局：才重新调用。
+
+---
+
+### 5. CUA 调用量
+
+`GuiExecutor` 默认：
+
+```python
+max_steps = 18
+max_attempts = max_steps * 3
+```
+
+也就是一次 GUI execution 最多 54 个 prediction attempts。
+
+而 `_mutate_via_gui(...)` 又允许：
+
+```text
+初次执行 + 2 次重试 = 3 次
+```
+
+因此一个 PatchOp 的理论上限是：
+
+```text
+54 × 3 = 162 个 CUA prediction attempts
+```
+
+多个 PatchOp 时：
+
+```text
+4 个 PatchOp → 最坏 648 个 prediction attempts
+```
+
+底层 JSON repair 还可能产生额外 provider 调用。turn487147view0
+
+所以你担心的“一个任务调用几百次模型”，在当前上限设计里确实可能发生。
+
+虽然这只是极端上限，但论文和产品都必须设置任务级总预算，而不能只有单 PatchOp 的局部上限。
+
+---
+
+# 六、用户不操作时，系统怎么运行
+
+这一部分当前实现比较清楚。
+
+浏览器会连接：
+
+```python
+/<sid>/poll
+```
+
+这是一个 SSE stream。
+
+每隔 5 秒，服务器：
+
+```python
+resync_with_conflicts(
+    sess.binding,
+    sess.last_projection,
+    sess.adapters,
+    sid
+)
+```
+
+也就是：
+
+1. 重新读 canonical state；
+2. 和上一次投影比较；
+3. 如果外部 App 被修改，发 `conflict`；
+4. 如果没有变化，发 `ok`；
+5. 同时转发 workflow progress。
+
+
+
+## 模型是否会一直调用
+
+通常不会。
+
+当用户不操作、世界状态也没有变化时：
+
+- 每 5 秒调用 adapter；
+- 不调用 CUA；
+- 不调用 planner；
+- 不调用 compiler；
+- 不调用 GenUI。
+
+这点是合理的。
+
+但它当前只做：
+
+> **value-level reconciliation**
+
+也就是检查已有 binding 中的值是否变化。
+
+它不会做：
+
+- 新 App 发现；
+- 新实体发现；
+- 旧实体消失；
+- UI schema 变化；
+- 原有 visible locator 失效；
+- binding confidence 下降；
+- 计划依赖关系改变；
+- 自动重新 compile binding。
+
+所以它现在更像：
+
+> “拿着旧地图每五秒查看几个固定地址有没有变”
+
+而不是：
+
+> “持续观察世界，并在地图结构变化时重绘地图”。
+
+理想 idle loop 应该是：
+
+```text
+cheap observer heartbeat
+  ↓
+计算视觉/可访问性结构指纹
+  ↓
+没有结构变化：只更新 data model
+  ↓
+有局部结构变化：incremental rebind
+  ↓
+binding 受影响：invalidate 对应 plan nodes
+  ↓
+局部 replan
+  ↓
+更新只读区和工作流图
+```
+
+并且绝大多数 heartbeat 不应调用模型。
+
+---
+
+# 七、用户动态干预时，现在会发生什么
+
+## 1. 用户暂停
+
+调用：
+
+```python
+/<sid>/pause
+```
+
+它只是设置：
+
+```python
+sess.paused = True
+```
+
+`WorkflowExecutor` 只在每个 node 开始前检查。
+
+因此：
+
+- 当前 node 会继续完成；
+- 当前 GUI gesture sequence 不会被中断；
+- 下一个 node 不再执行。
+
+turn297382view3
+
+这是诚实而安全的初版设计，但 UX 上必须写成：
+
+> “安全暂停：完成当前动作后暂停”
+
+不能显示成“立即停止”。
+
+未来可以增加两级暂停：
+
+### Soft pause
+
+当前 node 完成后暂停。
+
+### Emergency stop
+
+在 CUA 每一步 action 后检查 cancellation token；不再执行下一次点击或输入。
+
+不可逆动作，例如最后一个“发送”“购买”“提交”，应在执行前单独检查。
+
+---
+
+## 2. 用户修改一个字段
+
+例如在 GenUI 中把发布日期改成 8 月 18 日：
+
+```text
+POST /<sid>/edit
+  ↓
+compile_patch(edit, sess.binding)
+  ↓
+多个 PatchOp
+  ↓
+WorkflowExecutor / dispatch
+  ↓
+App 写入
+  ↓
+重新投影
+```
+
+这是你双向绑定最核心的实现。
+
+但它依赖的仍然是 session 里已经存在的 binding。当前这个 binding 来自 GT fixture，而不是当前屏幕。
+
+所以目前它证明的是：
+
+> 给定正确 binding 后，用户编辑 VM variable 可以 fan-out 到多个 App。
+
+还没证明：
+
+> 系统能够在任意 App 中自主发现这个 binding。
+
+---
+
+## 3. 用户回退到 checkpoint
+
+回退流程的核心不是让 LLM“猜怎么撤销”，而是：
+
+```text
+checkpoint_id
+  ↓
+VMStateSnapshot.sagas_after_checkpoint(...)
+  ↓
+找出 checkpoint 后发生的 sagas
+  ↓
+LIFO 顺序执行 RollbackLog.undo_saga(...)
+  ↓
+每个 inverse op 重新通过 adapter.mutate(...)
+```
+
+turn297382view3
+
+这个设计非常好。
+
+可以把它理解成银行流水：
+
+- 每次跨 App 修改是一笔 saga；
+- 每个 checkpoint 是一个结算点；
+- 回到 C1，就是把 C1 之后的流水按倒序冲正；
+- 某笔流水不能冲正，就明确标记 partial failure，而不是假装成功。
+
+尤其 WeChat 发消息这种不可逆操作，当前代码会诚实返回失败，不用 hidden `set_state` 伪造撤回。
+
+这是一项可以强化成论文贡献的设计：
+
+> **TaskVM 的 rollback 不是 UI 动画，也不是历史快照伪恢复，而是经过真实执行路径的补偿性重执行。**
+
+---
+
+## 4. 用户要求重新设计最终目标
+
+例如任务进行一半时，用户说：
+
+> “不再推迟到 18 日了，改成 20 日；而且不要同步已经完成的任务。”
+
+当前系统没有完整支持。
+
+原因是：
+
+- 没有真正的 arbitrary goal update route；
+- `Replanner` 是 `NotImplementedError` stub；
+- `set_milestone` 的多步推进仍标注为 future；
+- adopted milestone 没有重写执行图；
+- `WorkflowPlan` 是 seed 时一次生成的；
+- 没有 subtree invalidation 和 dependency-aware replan。
+
+所以现在用户能做的是：
+
+- pause；
+- 手动编辑已有 variable；
+- rollback；
+- resolve conflict；
+- adopt 一个展示型 milestone。
+
+但不能真正做到：
+
+> “保留已验证的历史，修改最终目标，只重规划受影响的未来部分，然后继续。”
+
+这恰恰应该成为 TaskVM 相比普通 CUA 的核心差异。
+
+---
+
+# 八、线性、树状和 Loop：当前到底支持到什么程度
+
+## 1. 线性
+
+当前支持较完整：
+
+```text
+A → verify → B → verify → C → verify
+```
+
+优点：
+
+- 可解释；
+- 易回退；
+- 易显示 checkpoint；
+- 易统计成功率。
+
+适合：
+
+- 有严格依赖的任务；
+- 高风险任务；
+- 同一个 App 内的连续操作。
+
+---
+
+## 2. 当前所谓 Parallel，不等于树状工作流
+
+现在的 parallel 是：
+
+```text
+一个节点里有多个并行 subgoals，最后一个 barrier 汇合
+```
+
+它缺少真正树状工作流需要的：
+
+- 条件分支；
+- choice node；
+- fallback branch；
+- exception branch；
+- nested branches；
+- 分支级 checkpoint；
+- 分支级 rollback；
+- dynamic branch creation；
+- 只重规划一棵子树。
+
+因此严格地说：
+
+> 当前支持“fan-out/fan-in”，还不支持完整 tree 或 DAG。
+
+---
+
+## 3. 当前 Loop 是预枚举循环
+
+当前 loop 依赖预先给出的 `loop_values`，而不是 runtime condition。
+
+真正的 TaskVM 工作流应该统一成一个图，而不是把 linear、tree、loop 当三个互不关联的模式。
+
+建议的统一节点类型是：
+
+```text
+ActionNode
+VerifyNode
+ChoiceNode
+ParallelNode
+BarrierNode
+LoopNode
+HumanDecisionNode
+CheckpointNode
+CompensationNode
+TerminalNode
+```
+
+其中：
+
+- 线性是图的一条链；
+- 树状是 Choice/Parallel 产生的分支；
+- loop 是有回边的子图；
+- rollback 是沿 Compensation edge 反向执行；
+- user intervention 是插入一个 HumanDecisionNode；
+- replan 是替换尚未 commit 的子图。
+
+这会让你的系统论述从：
+
+> “我们支持三种流程”
+
+上升到：
+
+> “TaskVM 提供了一个可验证、可重写、可补偿的任务控制流运行时。”
+
+后者更像真正的 VM，也更有 CHI 范式贡献感。
+
+---
+
+# 九、它现在能不能面对未见 App、未见任务、任意平台
+
+## 明确答案：目前不能。
+
+而且原因相当一部分是 harness-side，不只是模型侧。
+
+## Harness-side 限制一：真实入口不是 arbitrary goal
+
+`/seed` 接受 `task_id`，不是任意目标。
+
+---
+
+## Harness-side 限制二：真实入口使用 GT binding
+
+```python
+_gt_binding(fixture)
+```
+
+完全绕过 compiler。
+
+---
+
+## Harness-side 限制三：工作流来自 scripted driver
+
+不是从目标和观察中动态生成。
+
+---
+
+## Harness-side 限制四：运行时投影依赖 app-specific canonical API
+
+`project_readonly` 依赖 `read_canonical`，而每个 adapter 知道：
+
+- resource 路径；
+- id field；
+- entity kind；
+- API endpoint；
+- operator → field 映射。
+
+turn487147view0
+
+对于真正未见 App，这些都不存在。
+
+---
+
+## Harness-side 限制五：Adapter registry 是封闭的
+
+当前支持的 App 被注册在：
+
+```python
+_ADAPTER_CLASSES
+DEFAULT_PORTS
+```
+
+新增 App 必须写一个新的 Adapter 类。
+
+这是一种良好的 benchmark engineering abstraction，但不等于任意 App 泛化。
+
+---
+
+## Harness-side 限制六：Operator 仍是白名单
+
+例如 Calendar：
+
+```python
+_OP_FIELD = {
+    "move_event": "date",
+    "update_rsvp": "rsvp"
+}
+```
+
+TaskBoard、Drive、Mail 也有各自的 operator 表。
+
+所以 GG.6 的 `update_rsvp` 证明的是：
+
+> SubgoalGenerator 不再为每个 operator 写自然语言 if/else 模板。
+
+它没有证明：
+
+> Harness 在从未见过的 App 中能自主发现一种全新的操作。
+
+而且当前 open-world killtest：
+
+- 新 operator 仍在代码中注册；
+- fixture 仍然手写；
+- CalendarAdapter 仍然已知；
+- 默认使用 API executor；
+- 只有一个主要任务。
+
+
+
+所以它应该改名为更准确的：
+
+> **operator-template generalization killtest**
+
+而不是最终的 open-world killtest。
+
+---
+
+## Harness-side 限制七：没有真正 replan
+
+这意味着页面漂移、目标变化和中途失败无法局部修复。
+
+---
+
+## 模型侧限制是什么
+
+当上述 harness 闭环后，剩下的以下问题才可以合理归因于模型：
+
+- 看不懂一个复杂的新 UI；
+- grounding 点错；
+- 不知道某个专业软件的操作知识；
+- 长程任务丢失上下文；
+- 对模糊目标判断错误；
+- 无法发现隐藏在多层菜单中的入口。
+
+真正好的论文实验应该能区分：
+
+```text
+失败是因为 compiler 没发现绑定？
+失败是因为 planner 生成错依赖？
+失败是因为 CUA grounding 错？
+失败是因为 App 没有对应操作？
+失败是因为 verifier 判断错？
+失败是因为 rollback 不可行？
+```
+
+现在不少失败会被 `_gt_binding` 和预设 plan 隐藏，因此还不能做到这种归因。
+
+---
+
+# 十、与同类工作相比，你的差异到底够不够强
+
+我认为**理论差异是够强的**，但必须把实现补到与理论一致。
+
+## 相比 ALLOY
+
+ALLOY 的重点是：
+
+- 用户示范程序化偏好；
+- 从 demonstration 生成可复用 workflow；
+- 可视化、编辑和泛化程序流程。
+
+
+
+TaskVM 可以与它拉开的差异是：
+
+> ALLOY 主要让用户编辑“过程”；TaskVM 让用户操纵“跨 App 的 live task state”，系统再把状态变化编译为过程。
+
+一句话：
+
+```text
+ALLOY：procedure-first
+TaskVM：state-first
+```
+
+这是有价值的差异。
+
+---
+
+## 相比 Morae
+
+Morae 的重点是：
+
+- 自动识别关键决策点；
+- 主动暂停；
+- 让用户在多种选择中表达偏好；
+- 保护 user agency。
+
+
+
+TaskVM 可以更进一步：
+
+- 不只是在选择点暂停；
+- 用户可以在任意时候直接重写目标状态；
+- 用户可以 rollback 到任意 checkpoint；
+- 用户修改的是持续存在的 task representation，而不是一次问答。
+
+但前提是你真的实现 dynamic replan。否则目前 Morae 在“什么时候暂停、为什么需要用户”的闭环反而更完整。
+
+---
+
+## 相比 AgentLens
+
+AgentLens 的重点是根据任务情境在：
+
+- Full UI
+- Partial UI
+- GenUI
+
+三种视觉交互方式中动态切换，并强调后台执行与 just-in-time awareness。
+
+TaskVM 的差异不应写成“我们也有 GenUI”，而应该写成：
+
+> GenUI 在 TaskVM 中不是展示层，而是一个可执行的、双向绑定的任务状态控制面。
+
+也就是：
+
+```text
+AgentLens：适应性地展示 Agent 正在做什么
+TaskVM：让用户通过生成式状态界面改变 Agent 接下来必须实现什么
+```
+
+这个差异是强的。
+
+---
+
+## 相比 OSWorld / AndroidWorld 类工作
+
+OSWorld 提供真实桌面环境和 execution-based evaluation；AndroidWorld 强调动态参数化任务、可复现 initialization、success checking 和 teardown。
+
+到 2026 年，OSWorld 2.0 已经把重点推进到超长程真实工作流，任务规模远高于早期几十步 GUI 操作。
+
+因此你的 benchmark 不应该试图和它们比“App 数量最多”，而应该回答它们没有直接回答的问题：
+
+> **在同一个 CUA 模型能力下，TaskVM harness 是否因为状态投影、独立验证、用户可控 checkpoint、局部 replan 和跨 App binding，而获得更高的成功率、更低的恢复成本和更少的人类操作？**
+
+这才是 HCI + systems 的合理交叉点。
+
+---
+
+# 十一、当前 prototype 达到 CHI 或 Award 水平了吗
+
+## 作为概念：有 Award 潜力
+
+我认为以下组合有范式贡献潜力：
+
+```text
+live task-state projection
++ executable two-way binding
++ user-editable task state
++ autonomous cross-app execution
++ independent verification
++ checkpoint-level rollback
++ dynamic human intervention
+```
+
+它不是普通 CUA，不是普通 GenUI，也不是普通 workflow editor。
+
+---
+
+## 作为当前实现：还没有达到 Award-grade prototype
+
+主要原因不是 UI 不够漂亮，而是：
+
+### 1. 核心 claim 与真实主链路不一致
+
+文档说 bottom-up compile，真实 Workspace 用 GT binding。
+
+### 2. 没有任意目标入口
+
+用户不是在真实界面输入任意任务。
+
+### 3. 没有真正 goal-to-workflow planner
+
+当前只有 scripted events + rule classifier。
+
+### 4. 没有 replanner
+
+用户改变目标时无法保留历史并局部修改未来。
+
+### 5. Runtime 与 benchmark oracle 混合
+
+真实投影依赖内部 canonical API。
+
+### 6. 所谓 open-world 证据过窄
+
+新 operator 不等于未见 App × 未见任务 × GUI execution。
+
+### 7. 模型调用预算没有系统级控制
+
+理论上一个多 PatchOp 任务可能达到数百次 CUA prediction attempts。
+
+### 8. Benchmark 还没有达到文档承诺的规模
+
+生成器注释说 40 templates / 800 instances，但当前实际 `TEMPLATES` 只有四类。turn671903view3
+
+因此我的评价是：
+
+> **现在是一套研究方向很强、模块工程相当丰富、已经超过普通 paper demo 的 prototype scaffold；但还不是能够经受 Award-level reviewer 对核心 claim 逐链路追问的 artifact。**
+
+这不是否定。恰恰相反，你现在距离真正强的系统差的不是“再堆十个功能”，而是把几个已有模块接成一条不能绕过的主链路。
+
+---
+
+# 十二、我建议的全新 TaskVM 工作流
+
+建议把整个系统重新定义为一个：
+
+> **Event-sourced、incrementally compiled、verification-gated Task Runtime**
+
+核心循环如下：
+
+```text
+OBSERVE
+  ↓
+COMPILE STATE
+  ↓
+PLAN CONTROL GRAPH
+  ↓
+PROJECT TASK UI
+  ↓
+EXECUTE ONE COMMIT UNIT
+  ↓
+VERIFY
+  ↓
+COMMIT / REPAIR / ESCALATE
+  ↓
+REPROJECT
+```
+
+## 阶段 1：初始化
+
+用户界面初始只显示：
+
+```text
+你希望完成什么？
+[自然语言任务输入框]
+
+在哪些环境中执行？
+[当前桌面] [浏览器标签页] [手机] [选择窗口]
+```
+
+用户输入目标后：
+
+### 第一次模型调用：State/Binding Compiler
+
+输入：
+
+- 用户目标；
+- 当前可见窗口截图；
+- accessibility visible text；
+- App/window names；
+- 不含内部 ID 和 operator registry。
+
+输出：
+
+```json
+{
+  "variables": [
+    {
+      "semantic_key": "release_date",
+      "label": "发布日期",
+      "type": "date",
+      "current_value": "2026-08-14",
+      "evidence": [
+        {
+          "surface": "Calendar",
+          "visible_locator": "项目发布会议",
+          "field_label": "日期",
+          "confidence": 0.94
+        },
+        {
+          "surface": "TaskBoard",
+          "visible_locator": "发布文案",
+          "field_label": "截止日期",
+          "confidence": 0.89
+        }
+      ]
+    }
+  ]
+}
+```
+
+注意：这里不要要求 compiler 立刻生成 `move_event` 或 `entity_id`。
+
+它首先应该发现：
+
+> 哪些可见状态代表同一个任务变量。
+
+---
+
+### 第二次模型调用：Goal Planner
+
+输入：
+
+- 用户目标；
+- compiled task state；
+- observed affordances；
+- reversibility/risk metadata。
+
+输出一个语义 DAG：
+
+```text
+C0 初始状态
+  ↓
+N1 修改发布会议日期
+  ├─ N2 同步发布文案 deadline
+  └─ N3 同步 QA deadline
+       ↓
+B1 全部验证
+       ↓
+C1 跨 App 日期一致
+```
+
+Planner 只负责：
+
+- 依赖；
+- 分支；
+- checkpoint；
+- loop termination；
+- verification intent；
+- 不可逆边界。
+
+它不负责每一步坐标操作。
+
+---
+
+### 第三次模型调用：GenUI Decoder
+
+输入的是去除内部实现细节后的 Semantic Task State。
+
+生成：
+
+- 只读区；
+- 用户可编辑目标区；
+- checkpoint timeline；
+- dependency preview；
+- risk indicators；
+- “修改此字段将影响 3 个 App”的影响说明。
+
+之后只有结构变化才重新调用。
+
+---
+
+## 阶段 2：自主执行循环
+
+系统每次只执行一个 **commit unit**：
+
+```text
+选取 ready node
+  ↓
+生成/复用 goal-level instruction
+  ↓
+CUA 执行
+  ↓
+独立观察验证
+  ↓
+成功：commit + checkpoint
+失败：局部 repair
+高不确定性：请求用户
+不可逆：显式确认
+```
+
+关键是不要让整个任务一口气成为一个黑箱长 trajectory。
+
+---
+
+## 阶段 3：人类不干预时
+
+```text
+Observer heartbeat
+  ↓
+没有结构变化
+    → deterministic data update
+  ↓
+当前节点完成
+    → verifier
+  ↓
+成功
+    → 自动选择下一个 ready node
+  ↓
+直至 terminal node
+```
+
+用户能看到：
+
+- 当前正在实现哪个目标；
+- 哪个 App 正在执行；
+- 已完成哪些 checkpoint；
+- 哪些结果已经 verified；
+- 哪些只是 Agent 自己认为 done；
+- 总模型调用预算还剩多少。
+
+---
+
+## 阶段 4：用户干预时
+
+所有干预统一转换成 `GovernanceEvent`：
+
+```text
+PauseRequested
+GoalPatched
+VariableEdited
+CheckpointRollbackRequested
+BranchDisabled
+BranchAdded
+ConflictResolved
+ExecutionModeChanged
+ResumeRequested
+```
+
+处理方式统一：
+
+```text
+记录事件
+  ↓
+计算哪些已 commit 状态仍然有效
+  ↓
+找出受影响的未完成子图
+  ↓
+invalidate 受影响节点
+  ↓
+必要时增量重编译 binding
+  ↓
+只重规划受影响子树
+  ↓
+更新 GenUI
+  ↓
+用户 resume 或系统自动继续
+```
+
+---
+
+# 十三、怎样让用户觉得更有控制感、玩乐感和成就感
+
+不要把“玩乐感”简单做成积分和动画。TaskVM 更适合提供一种：
+
+> “我正在操纵一个活的任务世界，而不是观看机器人乱点屏幕”
+
+的感受。
+
+建议保留你已经有的 milestone celebration，但增加四个层次。
+
+## 1. 可见因果关系
+
+用户编辑发布日期时，先预览：
+
+```text
+这次修改将影响：
+✓ Calendar：项目发布会议
+✓ TaskBoard：发布文案
+✓ TaskBoard：QA 测试
+
+预计 3 个写操作
+预计 18–30 个 GUI actions
+全部可回退
+```
+
+---
+
+## 2. Verified progress，而不是 Agent 自报 progress
+
+节点状态区分：
+
+```text
+○ waiting
+◐ executing
+◉ agent says done
+✓ independently verified
+! conflict
+↶ rolled back
+🔒 irreversible
+```
+
+只有 verifier 通过后才庆祝。
+
+---
+
+## 3. 用户能够修改未来，而不是不断纠正过去
+
+在 timeline 上允许：
+
+- 拖动 checkpoint；
+- 禁用一个 branch；
+- 改写目标值；
+- 增加一个终结条件；
+- 让某条 lane “先不要执行”。
+
+这会显著区别于传统 CUA 的 pause/continue 模式。
+
+---
+
+## 4. Earned autonomy
+
+系统根据实际可靠性逐渐减少打扰：
+
+```text
+首次执行此类操作：执行前预览
+连续 5 次验证成功：自动执行，可随时撤回
+高风险或不可逆：永远确认
+发现 UI 漂移：恢复预览模式
+```
+
+这比固定的“每步确认”或“永远全自动”更符合人类治理。
+
+---
+
+# 十四、如何把模型调用开销压下来
+
+建议设立任务级硬预算，而不仅是 `max_steps`。
+
+例如：
+
+```text
+Compiler：最多 2 次
+Planner：初始化 1 次，单次干预最多 1 次
+GenUI：初始化 1 次，结构变化最多 2 次
+CUA：每 commit unit 最多 12 次
+Repair：每 node 最多 1 次
+整个任务：最多 60 次模型调用
+```
+
+达到预算时进入：
+
+```text
+budget exhausted → pause → 给用户展示已完成状态和失败原因
+```
+
+具体优化如下。
+
+## 1. 删除重复 SubgoalGenerator 调用
+
+修复 `mock_subgoal` flag。
+
+并让：
+
+```python
+SubgoalInstruction.natural_language
+```
+
+真正传入：
+
+```python
+adapter.mutate(..., instruction=...)
+```
+
+不要在 `gui_write` 内再次生成。
+
+---
+
+## 2. GenUI 只生成结构一次
+
+只读数值变化使用：
+
+```text
+updateDataModel
+```
+
+而不是重新 decoder。
+
+---
+
+## 3. 让 CUA 执行语义 macro
+
+例如模型第一次发现：
+
+```text
+list row → View → Edit → field → Review → Confirm
+```
+
+后，存为带视觉锚点的 action macro。
+
+后续相似实体先尝试 macro，失败才退回模型。
+
+这不是硬编码 operator，而是从已验证轨迹中学习 affordance pattern。
+
+---
+
+## 4. 失败后不要从头重走
+
+保留：
+
+- 当前 screenshot；
+- 当前 URL；
+- 对话框状态；
+- 已完成 action history；
+- 最近一次 verifier discrepancy。
+
+Repair prompt 应该是：
+
+> “字段值仍为 8/14；当前已在 Review dialog；请完成剩余步骤。”
+
+而不是重新给完整任务。
+
+---
+
+## 5. 用 uncertainty gate 控制调用
+
+只有以下情况才调用 planner/compiler：
+
+- structure fingerprint 变化；
+- visible locator 消失；
+- verifier 发现意外 diff；
+- CUA 连续两步无进展；
+- 用户修改终结目标；
+- 出现多个同等合理选择。
+
+---
+
+# 十五、Benchmark 当前的优点和问题
+
+## 当前已经做得好的部分
+
+你们的 benchmark 有几项明显强于一般 prototype：
+
+- hidden canonical graph；
+- expected diff；
+- non-interference set；
+- independent verifier；
+- negative-control no-op/wrong-target；
+- rollback fidelity；
+- OOD reskin；
+- model backend ablation；
+- token/call accounting；
+- API mode 和 GUI mode 分离。
+
+这些都是值得保留的。
+
+---
+
+## 问题一：Full-loop 仍使用 GT binding
+
+`run_full_loop_killtest.py` 自己明确说明：
+
+> seed_session 使用 `_gt_binding`，这个测试只验证 UI → edit → dispatch → verify，不测试 binding discovery。
+
+
+
+所以它不是 claim-level full loop。
+
+真正 full loop 必须是：
+
+```text
+goal
+→ screen observation
+→ compile_binding
+→ plan
+→ GenUI
+→ human/UISim edit
+→ GUI execution
+→ independent verify
+→ reproject
+```
+
+全程不允许 `_gt_binding`。
+
+---
+
+## 问题二：Open-world 测试不够 open
+
+当前主要验证一个新 `update_rsvp` operator，而且使用已知 Calendar App 和注册过的 operator mapping。turn487147view0
+
+需要至少四种 holdout：
+
+| Split | 训练/开发阶段未见什么 |
+|---|---|
+| Task holdout | 新自然语言任务组合 |
+| App holdout | 新 App UI 和 affordances |
+| Operation holdout | 新字段或新操作方式 |
+| Cross-product holdout | 已见 App 与已见任务概念的全新组合 |
+
+最重要的是：
+
+> App holdout 的 runtime harness 不可以有该 App 的 adapter/operator mapping。
+
+Evaluator 可以有 oracle adapter，但 harness 不可以导入它。
+
+---
+
+## 问题三：当前 800 instances 主要是实例数量，不是结构多样性
+
+当前 generator 实际只有四个 template families：
+
+- date move cross-app
+- file move
+- mail state change
+- outlook date move
+
+turn671903view3
+
+把四个 template 各随机生成 200 次，不等于 800 个独立任务结构。
+
+Reviewer 会认为这是 parameter variation，不是 task diversity。
+
+至少需要 20–40 个结构模板，覆盖：
+
+- create
+- edit
+- delete
+- move
+- copy
+- search
+- filter
+- aggregate
+- compare
+- send
+- schedule
+- conditional choice
+- multi-page navigation
+- loop over result set
+- cross-app dependency
+- conflict resolution
+- irreversible action
+- partial failure
+- permission denied
+- external state drift。
+
+---
+
+## 问题四：Interaction compression 是分析模型，不是实测 baseline
+
+当前计算：
+
+```text
+baseline_actions
+= n_apps navigates
++ 3 × n_bindings
+```
+
+这是一个理论下界，不是用户或 baseline agent 的真实 action trace。
+
+可以保留为 analytical lower bound，但论文主表应该实测：
+
+- 人类 native-app 路径；
+- direct CUA；
+- planner + CUA；
+- TaskVM；
+- TaskVM without editable projection；
+- TaskVM without rollback/replan。
+
+---
+
+## 问题五：Non-interference 还需要字段级检查
+
+当前有些测试只检查 unrelated entity 是否完全不变。
+
+但如果目标实体是 M1，任务只想改 `state`，Agent 同时误改了 M1 的 `priority`，只检查 M2 不变可能抓不到。
+
+OOD fixture 注释也承认这类字段级 non-interference 尚未完整覆盖。
+
+应同时检查：
+
+```text
+entity-level unrelated set
+field-level allowed diff mask
+cross-app allowed diff mask
+temporal side effects
+```
+
+---
+
+# 十六、建议的新 Benchmark 架构
+
+建议分成三个层次。
+
+## Layer A：组件能力
+
+用于快速定位失败，不作为最终 headline。
+
+### A1 Binding compilation
+
+指标：
+
+```text
+variable precision / recall / F1
+entity grounding accuracy
+field grounding accuracy
+cross-app binding F1
+confidence calibration
+```
+
+### A2 Workflow planning
+
+指标：
+
+```text
+node precision / recall
+dependency-edge F1
+checkpoint quality
+branch correctness
+loop termination correctness
+risk classification
+```
+
+### A3 GenUI
+
+指标：
+
+```text
+semantic coverage
+editable/read-only correctness
+action wiring fidelity
+schema validity
+structural stability
+```
+
+### A4 Execution
+
+指标：
+
+```text
+GUI action success
+steps per successful mutation
+grounding error rate
+stuck-loop rate
+```
+
+### A5 Verification/Rollback
+
+指标：
+
+```text
+false positive rate
+false negative rate
+rollback success
+rollback fidelity
+partial-failure detection
+```
+
+---
+
+## Layer B：真正 End-to-End
+
+所有任务必须从自然语言目标开始。
+
+主要指标：
+
+### Task Success Rate
+
+最终目标是否完成。
+
+### Round-trip Correctness
+
+目标字段正确、非目标状态未损坏、VM 已重投影。
+
+### Open-world Generalization Gap
+
+```text
+ID success − OOD success
+```
+
+分别报告：
+
+- task holdout；
+- app holdout；
+- operation holdout；
+- cross-product holdout。
+
+### Substrate Invariance
+
+同一语义任务换 UI skin 后：
+
+```text
+成功率差异
+binding F1 差异
+调用次数差异
+执行轨迹差异
+```
+
+轨迹应该不同，但语义结果应该相同。
+
+### Cost
+
+```text
+model calls
+vision calls
+input/output tokens
+wall-clock latency
+p50 / p90 / p95
+GUI actions
+repair count
+```
+
+你们当前 `CostModel` 明确把 token 当预算记录而非研究指标；对于这篇工作，我建议把 cost 正式升级为研究指标，因为 interaction compression 和 harness efficiency 本来就是你的贡献之一。
+
+---
+
+## Layer C：治理与恢复 Benchmark
+
+这是最能和普通 GUI agent benchmark 拉开差距的一层。
+
+设计自动注入事件：
+
+### C1 外部冲突
+
+Agent 执行期间，另一个进程修改同一字段。
+
+测量：
+
+```text
+conflict detection recall
+detection latency
+silent overwrite rate
+reconciliation success
+```
+
+### C2 用户中途改目标
+
+在第 k 个 node 后注入：
+
+```text
+GoalPatched(old=8/18, new=8/20)
+```
+
+测量：
+
+```text
+already-completed work reused
+nodes invalidated
+replan calls
+extra GUI actions
+final success
+```
+
+### C3 Rollback
+
+随机选择 checkpoint 回退。
+
+测量：
+
+```text
+rollback success
+state fidelity
+unavoidable irreversibility correctly surfaced
+```
+
+### C4 Pause
+
+随机时刻 pause。
+
+测量：
+
+```text
+pause latency
+actions after pause request
+irreversible actions after pause
+resume success
+```
+
+### C5 UI drift
+
+运行过程中：
+
+- 改按钮文字；
+- 改布局；
+- 增加 distractor；
+- 移动目标对象；
+- 分页；
+- 弹窗。
+
+测量：
+
+```text
+rebind success
+recovery calls
+wrong-target rate
+```
+
+### C6 Partial failure
+
+一条 parallel lane 失败。
+
+测量：
+
+```text
+successful branches preserved
+failed branch isolated
+replan quality
+rollback scope
+```
+
+---
+
+# 十七、必须包含的 Baselines 和 Ablations
+
+建议最少有：
+
+| 系统 | 作用 |
+|---|---|
+| Direct CUA | 证明纯模型能力 |
+| Planner + CUA | 证明不是单纯多一个 planner |
+| TaskVM with GT binding | oracle upper bound |
+| TaskVM full | 主系统 |
+| TaskVM – live projection | 验证状态投影价值 |
+| TaskVM – independent verifier | 验证 verifier 价值 |
+| TaskVM – rollback/replan | 验证治理价值 |
+| TaskVM – GenUI | 验证生成界面是否必要 |
+| TaskVM static workflow | 对比 dynamic graph |
+| TaskVM API executor | 分离 harness logic 与 CUA grounding 能力 |
+
+最重要的对照是：
+
+```text
+同一个 CUA 模型
+同一个任务环境
+只改变 harness
+```
+
+这样才能回答：
+
+> 性能提升到底是 TaskVM harness 带来的，还是换了更强模型带来的。
+
+---
+
+# 十八、接下来 prototype 的具体代码修改顺序
+
+## P0：不做完就不能声称开放世界
+
+### P0-1：重写 `/seed`
+
+从：
+
+```python
+{"task_id": "..."}
+```
+
+改成：
+
+```python
+{
+  "goal": "...",
+  "surfaces": [...],
+  "execution_policy": {...}
+}
+```
+
+fixture seed 只能由 benchmark orchestrator 调用，不能成为生产 Workspace API 的语义。
+
+---
+
+### P0-2：把 `compile_binding(...)` 接进真实主路径
+
+真实链路必须变成：
+
+```text
+capture_obs
+→ compile_binding
+→ binding validation
+→ WorkspaceSession
+```
+
+`_gt_binding(...)` 只允许在：
+
+```text
+tests/
+evaluation oracle upper bound
+```
+
+使用。
+
+最好加一个静态 killtest：
+
+```text
+workspace_ui/
+governance/
+execution/
+不得 import fixture.bindings 或 _gt_binding
+```
+
+---
+
+### P0-3：拆开 Runtime Adapter 与 Oracle Adapter
+
+建议变成：
+
+```text
+RuntimeSurface
+  observe_visible()
+  act_gui()
+
+BenchmarkOracle
+  reset()
+  seed()
+  read_hidden_state()
+  evaluate()
+```
+
+生产 harness 永远不能调用 `BenchmarkOracle.read_hidden_state()`。
+
+当前 `StateAdapter` 同时承担两类职责，必须拆开。
+
+---
+
+### P0-4：实现真正 Goal Planner
+
+替换：
+
+```python
+make_scripted_driver(...)
+interpret_as_workflow(prewritten_events)
+```
+
+为：
+
+```python
+plan_goal(goal, observed_task_state)
+```
+
+输出统一的 DAG。
+
+scripted driver 只用于 benchmark 注入用户事件。
+
+---
+
+### P0-5：实现 `Replanner`
+
+接口建议：
+
+```python
+replan(
+    old_plan,
+    committed_nodes,
+    current_observed_state,
+    governance_event,
+    verifier_discrepancies
+) -> PlanPatch
+```
+
+输出不是整个新 plan，而是：
+
+```text
+nodes_to_keep
+nodes_to_invalidate
+nodes_to_add
+edges_to_rewrite
+new_checkpoints
+```
+
+---
+
+### P0-6：修复 Subgoal 单一真源
+
+- 修复 `mock_subgoal` 布尔值；
+- planner 只生成一次自然语言目标；
+- `WorkflowExecutor` 把该 instruction 传给 adapter；
+- `gui_write` 不再自行重复生成；
+- 所有模型调用都纳入同一个 task-level CostLedger。
+
+---
+
+### P0-7：清理所有 model-facing hidden identifiers
+
+至少检查：
+
+- GenUI prompt 中的 `var_id/entity_id/operator`；
+- rollback NL prompt 中的 `entity_id/operator/saga_id`；
+- loop natural language 中附加的 `(entity=...)`；
+- debug history 中的 `row_event`、`row_task`；
+- compiler 输出是否被回送给其他模型。
+
+`GovernanceInterpreter._infer_rollback_nl(...)` 当前会把 `entity_id`、`operator`、`saga_id` 发给模型；这和“所有模型只看可见信息”的强版本红线不一致。
+
+---
+
+## P1：把 prototype 变成真正 Task VM
+
+### P1-1：Event Store
+
+记录：
+
+```text
+ObservationEvent
+BindingCompiled
+PlanCreated
+ActionDispatched
+ActionObserved
+VerificationPassed
+VerificationFailed
+CheckpointCommitted
+GovernanceEvent
+RollbackApplied
+ConflictDetected
+```
+
+这样：
+
+- UI 能重放历史；
+- rollback 可审计；
+- benchmark 能统计每个阶段；
+- replan 能知道哪些状态已 commit。
+
+---
+
+### P1-2：Incremental compiler
+
+不要每五秒重新看完整世界。
+
+维护：
+
+```text
+surface fingerprint
+entity locator signature
+binding confidence
+last observed version
+```
+
+只对变化区域重新 compile。
+
+---
+
+### P1-3：真正的 Tree/DAG/Loop runtime
+
+增加：
+
+- condition；
+- fallback；
+- nested parallel；
+- barrier；
+- bounded loop；
+- verifier-directed repair edge；
+- human decision edge。
+
+---
+
+### P1-4：任务级预算管理
+
+例如：
+
+```python
+TaskBudget(
+    max_model_calls=60,
+    max_vision_calls=45,
+    max_replans=3,
+    max_repairs_per_node=1,
+    max_wall_clock_s=600
+)
+```
+
+一旦接近预算，系统应调整策略，而不是继续盲点。
+
+---
+
+### P1-5：真正的 cancel token
+
+在每个 CUA action 前检查：
+
+```python
+cancellation_token.is_cancelled()
+```
+
+不可逆动作前再次检查。
+
+---
+
+## P2：Award-grade benchmark
+
+- 20–40 个结构模板；
+- 真实 GUI executor 作为主结果；
+- API executor 只作为诊断上限；
+- 严格 app/task/cross-product holdout；
+- 多模型 backend；
+- 每个条件多随机种子；
+- bootstrap confidence intervals；
+- failure taxonomy；
+- 完整 cost/latency；
+- intervention benchmark；
+- drift benchmark；
+- field-level non-interference；
+- 公开 execution traces 和 evaluator。
+
+---
+
+# 十九、最终的“开放世界完成标准”
+
+在下面测试通过前，不建议在论文中写“arbitrary unseen applications and tasks”。
+
+## 必须通过的终极 killtest
+
+选择一个开发阶段从未出现过的新 App。
+
+Harness 中：
+
+- 没有该 App adapter；
+- 没有该 App operator mapping；
+- 没有该 App DOM selector；
+- 没有该 App entity kind；
+- 没有该 App task template；
+- 没有 GT binding；
+- 没有 scripted workflow。
+
+只允许 benchmark evaluator 拥有：
+
+- reset；
+- seed；
+- hidden success checker。
+
+然后让系统从：
+
+```text
+自然语言目标
++ screenshot
++ visible accessibility text
+```
+
+开始，完整执行：
+
+```text
+observe
+→ compile
+→ plan
+→ project
+→ user edit/start
+→ GUI execute
+→ verify
+→ reproject
+→ intervention
+→ replan
+→ rollback
+```
+
+最终至少报告：
+
+```text
+task success
+binding F1
+non-interference
+model calls
+GUI actions
+latency
+recovery success
+rollback fidelity
+```
+
+这个测试一旦真实通过，你就可以非常有底气地说：
+
+> 即使模型能力仍然限制最终成功率，TaskVM harness 本身不再是开放世界泛化的结构性瓶颈。
+
+---
+
+# 最后的总体评价
+
+你们现在最应该避免的是继续横向增加更多 App、更多 operator、更多 fixture，然后把数量当成泛化。
+
+真正应该做的是纵向打通这一条不可绕过的链：
+
+```text
+任意目标
+→ 可见观察
+→ 动态 binding
+→ 动态 DAG
+→ executable GenUI
+→ GUI execution
+→ independent verification
+→ event-sourced checkpoint
+→ human intervention
+→ incremental replan
+→ rollback
+```
+
+当前 prototype 最有价值的部分不是某个单独模型，也不是 A2UI renderer，而是以下组合：
+
+> **用户操纵的是跨 App 的任务状态；Agent 负责把状态差异编译成行动；Verifier 决定现实是否真的追上了目标；Checkpoint 和 Replanner 让用户可以修改时间线，而不只是暂停一个黑箱 Agent。**
+
+这确实有机会成为一种与 ALLOY、Morae、AgentLens 和普通 CUA 都不同的交互范式。
+
+但当前版本的最准确评价是：
+
+> **概念已经接近 Award ambition，工程模块已经具备强论文 prototype 的骨架；真实主链路仍停留在 benchmark-scripted 闭环。完成上述 P0 后，它才会从“设计得像 Task VM”变成“实际上就是 Task VM”。**
+
+
+【提问 轮数2】
+1. 怎么还有API executor，这到底是干嘛的，我不是要求coding agent都删掉了吗？这对于现实开放场景没有任何意义吧？还是我理解错了，entity_id是什么?这到底算不算违规？是不是读取了底层数据库（在模拟里可以做到，在真机里做不到的话，我们就不想要），如果只是taskVM harness内部的编号，有没有可能通过复用形成一个小的简单cache从而降低模型call的调度次数，降低成本开销。另外，API是不是可以在web端完全开放，我们常见的有三个端：web/os/mobile，web端的底层DOM之类的在真实场景下也是可以拿到的，如果buildin主要针对web端模拟，是不是就可以认为此时API的存在也是合理的？不对！这是对于输入来说，现在executor是输出执行啊，我不是在各个开工文档里都反复说明了要删除API executor只走GUI Agent执行器吗？？？？？
+2. patchop这个概念其实我一直没太懂对应什么，一次patchop是对应几次大模型调用，分别对应什么用途目的？canonical这个词在这个场景下到底是什么意思？StateAdapter._mutate_via_gui(...)
+    → gui_write(...)
+        → GuiExecutor.execute(...)这个过程每一步都是什么？_mutate_via_gui是什么意思？输入输出都是什么？？完全看不懂啊
+3. agentic GenUI部分，没有办法吧生成patchop的subgoal generator和GenUI Decoder一起融合在一次模型调用从而减少一个角色吗？？？我的理解是agentic UI的工作角色不就该是直接保证“生成，然后形成前端和后端的逻辑关系，这样操作前端，后端就直接也获得信息”吗？DeutUI这类chatLLM不断完善意图不就是做的这件事情吗？为什么我们这里就不可以了呢？我是真的不知道，不是反问，你觉得怎么设计是合理的呢？我觉得如无必要勿增实体，但是现在有没有必要我不知道，减少一次调用会牺牲什么我也不知道，另外重新生成PatchOp的场景只有`回退`这一种吗？没有其他的吗？我的理解是patchop好像是每次重新生成subgoal的时候就会出现，除了回退你还能想到什么其他的吗？不用太多，重点是要>1种，来体现我们在这个维度上也有厚度而不是只有一个选项
+4. workflow planner为什么是基于规则的，这合理吗？？workflow planner应该在初始化和milestone suggester一块吧，甚至可以合并成一次调用，因为milestone检查点的组织格式和拓扑关系不就是天然的就构成了workflow的拓扑结构吗（线性、树状、loop），mock是什么意思？为什么还有不调用模型的可能？"LLM SubgoalGenerator 每个 PatchOp 会生成两个候选，因此是2N"这句话是什么意思？N是patchop的个数？这岂不是大幅增加了调用的次数和开销吗？
+5. use_genui=False怎么可能还为false？这是不是中间debug遗留产物的fallback没删干净？另外为什么每次只读数据更新都重新调用GenUI大模型？合理的实际不应该是：只读变动其实只是单纯的模板固定下的数据变更吗？这又不像是patchop可能直接变化整个工作流，应该维护一个runtime数据库吧然后生成的UI轮询去读，这个过程是没有模型调用只是让前端轮询后端数据库，GUI Agent或者总结状态的模型在形成后端runtime数据库可能需要轮询（这似乎确实没办法），但是GenUI没必要每次数据更新都重新生成一个可渲染代码吧？明明变化的只是其中的一个数字？
+6. max_steps = 18
+max_attempts = max_steps * 3 最大步长和最大尝试有何区别？_mutate_via_gui(...)最大为3又代表什么？
+7. SSE stream是什么？我完全不懂这个，对前端开发也没有很熟悉，需要你生动一点说明他和playwright，css，flask这些常见术语有何关系啊？
+resync_with_conflicts(
+    sess.binding,
+    sess.last_projection,
+    sess.adapters,
+    sid
+)
+这个是什么？哦我好像懂了，是不是我刚刚说的GUI Agent每次执行都会带来状态改变，所以cua执行的过程中天然的每次执行可能都要重新收集信息，但是环境除了被CUA改变以外本身可能也不是稳态的（还有其他的动态操作，环境变化之类的），所以有需要有这么一个resync_with_conflicts重新同步？once again，canonical state里面canonical是什么意思？每5s调用adapter，adapter是不是就是主要实现这个重新同步的功能？重新同步具体是如何实现的？有用于同步的模型吗（以一个协调的上下文定义的一个角色）。我知道也很认可你说的这个：```理想 idle loop 应该是：
+
+cheap observer heartbeat
+  ↓
+计算视觉/可访问性结构指纹
+  ↓
+没有结构变化：只更新 data model
+  ↓
+有局部结构变化：incremental rebind
+  ↓
+binding 受影响：invalidate 对应 plan nodes
+  ↓
+局部 replan
+  ↓
+更新只读区和工作流图
+
+
+并且绝大多数 heartbeat 不应调用模型。```
+但是问题是：1.这真的能实现吗，尤其是“大多数heartbeat不应该调用模型”的限制下；以及 2.我们投CHI的核心贡献是taskVM引入了一种新的投影层范式，我们真的需要把一个实验室环境的验证初步工作lab study变成一个工程可落地的高效可发布APP吗？其他部分我都可以说服自己不要妥协尽可能做的完整一点，但是这一部分我感觉太难了，但是如果你觉得你的主观能动性能给出优雅的工程解决方案，那就你来推着我往前走！我很乐意接受。另外，请仔细甄别：用户和CUA，用户不操作的时候（non-goverance runtime）根据“goverance over autonomy”原则，就是CUA autonomy自由发挥的时刻了吧？所以用户不操作≠CUA不操作，而且恰恰相反，用户不操作的时候正应该是CUA大幅推进的时候，此时世界环境状态会被CUA一直改变，不能假设用户不操作就是世界状态相对平稳的时候。此时是不是重新同步会被大量频繁的CUA执行+反馈给上位替代（因为CUA执行反馈，反馈就是一种更完备的重新同步吧），我的心智模型和现在的代码是一致的吗？请给出代码依据
+
+8. 用户动态干预的时候，是不是应该区分热拔插和冷拔插，就是热拔插就是CUA既定目标尚未完成突然新的patchOP来袭，相当于跑步的时候突然掉头，冷拔插就是CUA觉得自己已经可以了停下来了。很明显前者更难吧，可能还要处理已经发出去的请求（异步问题），比如当前已经有面向老的目标的CUA请求发出去给CUA，但是CUA还没返回结果，这个结果是不是该丢弃？如果已经CUA发出执行正在执行，是不是要等一会确定世界平稳了，总而言之就是避免动作和观察失配，而这个在热拔插里真的有可能出现，因为没人知道什么时候会被打断并给出新的(sub)goal对不对。哦，现在的实现是：node是最小的原子打断点。
+
+9. sagas是什么意思，为什么起这么个名字。RollbackLog.undo_saga(...)真的会调用模型尝试执行一个“逆动作”吗？不会还是有恢复快照的后门吧？？真实真机绝对不会有这个的
+
+10. 用户要求重新设计最终目标，也就是说此时是subgoal patchop->goal patchop，这个我觉得必须要好好实现。但是subgoal patchop和goal patchop目前设计哲学上没有明确的离散边界，实现上：需要重新replan，重新设置新的milestone，重新根据生成的里程碑检查点组织workflow的逻辑拓扑结构的视作goal，否则简单回退这些还在原有的路径上，只不过小幅度改变执行方向视作subgoal
+
+11. 我们做study不用那么完整，我其实一开始想要表达的就是fan-in/fan-out的这种感觉就像，不用非得完整的树状结构功能接口实现，但是loop确实可以做的完整一点，因为loop的VM意味是最强的，但是别做太深了，我担心工程上刹不住车，说实话我现在就隐隐约约感觉我们在很多细节上把握不好真实落地系统和学术研究的边界了，而且现在越做越不像是CHI更像是系统、软工方向的工作了，确实有点刹不住车了
+
+12. 你说的harness侧的问题我都接受，就该按你说的改，必须达到 Award-grade prototype，在达到 Award-grade prototype的基础上再考虑我们之前说的刹车
+
+13. 我甚至觉得可以有一个bonus，能做出来的话就基本稳了，就是：跨substrate的抽象协作一体化投影，比如：我在osworld的基建和mobilegym的基建上，模拟我一个人类同时有两个设备，让同一个投影控制跨设备的统一调度、抽象、投影，这个做不出来也没关系，能做出来的话我觉得真的是award candidate了就
+
+回答我的问题先，逐条回答，紧密结合我的代码！
+
+【回答内容 轮数2】
+我会按你的 13 点逐条回答，并把“代码现在到底做了什么 / 这是不是违规 / 我建议怎么改”分开说。重点会收紧到 prototype 边界：只保留对 CHI 核心论点必要的机制，不把它做成一篇系统论文。
+
+【回答内容 轮数2】
+先确认你最担心的一点：**你没有理解错。当前仓库里 API executor 确实还没删干净，而且代码自己把它标成 “LEGACY BACKDOOR PATH / NOT compliant”。** `workspace_ui` 默认虽已是 `gui_agent`，但 `make_adapter()` / `make_adapters()` 默认仍是 `api`，各 Adapter 里也还保留 `requests.post(...)` 写路径。
+
+我下面会进一步区分：**benchmark 的 reset/seed/oracle API 可以存在；TaskVM runtime 的观察和执行不能靠真机不存在的内部 API。** 这两者之前确实混得太近了。
+
+【回答内容 轮数2】
+你这 13 点里，有几处你的直觉是对的，而且比当前代码的设计更干净。最重要的一条先钉死：
+
+> **最终 Award-grade prototype 的 TaskVM runtime 应该彻底没有 API executor。**
+>
+> 但 benchmark 的 `reset / seed / hidden oracle evaluator` 可以继续用 API，因为那不是 TaskVM 在“执行任务”，而是实验员在“布置考场、判卷”。
+
+而且我建议我们进一步把你 GG 文档里的边界再收紧一点：**不仅不能把 hidden state 喂给模型，真实 runtime 最好也不要依赖真机上不存在的 DB primary key / internal API 来完成寻址、同步和 rollback。** 你当前 GG 文档 technically 允许 `read_canonical()` 留在 verifier/seed/rollback control plane，但现在代码把它用得比“实验 oracle”更广，这会妨碍真正的开放场景论证。GG 文档自己已经明确规定 `entity_id` 是数据库主键，模型不可见，写/回退必须是真 GUI gesture。
+
+---
+
+# 1. API executor 到底是什么？应该删吗？`entity_id` 到底算不算违规？
+
+## 1.1 你没理解错：API executor 应该从 runtime 彻底删掉
+
+现在代码里确实还有两条写路径：
+
+```text
+StateAdapter.mutate(...)
+    ├── use_gui_executor=True
+    │     → _mutate_via_gui(...)
+    │     → CUA + Playwright
+    │
+    └── use_gui_executor=False
+          → requests.post("/api/...")
+```
+
+例如 Calendar：
+
+```python
+if self.use_gui_executor:
+    return self._mutate_via_gui(...)
+
+requests.post("/api/event/...")
+```
+
+TaskBoard、Drive、Mail 都还有类似代码。更要命的是，底层 `make_adapter()` / `make_adapters()` 的默认值还是：
+
+```python
+executor="api"
+```
+
+虽然 Workspace CLI 默认已经是 `gui_agent`，而且日志甚至明确写：
+
+> `LEGACY BACKDOOR PATH ... NOT compliant`
+
+说明之前 coding agent 知道它是后门，只是为了 regression/debug 没彻底删除。turn932102view0
+
+所以最终我建议：
+
+```text
+taskvm/runtime/
+    不允许出现 executor="api"
+    不允许出现 requests.post(app mutation API)
+
+taskvm/evaluation/
+    允许 reset()
+    允许 seed()
+    允许 oracle_read()
+```
+
+甚至不要用一个 `StateAdapter` 同时承担这两类职责。
+
+拆成：
+
+```text
+RuntimeSurface
+    observe()
+    act_gui()
+
+BenchmarkOracle
+    reset()
+    seed()
+    hidden_state()
+    evaluate()
+```
+
+这样 reviewer 一眼就明白：
+
+> TaskVM 跑任务只能走人类真实可走的路径；
+> 实验框架有额外权限只是为了重置和判卷。
+
+---
+
+## 1.2 Web 上能拿 DOM，所以 API 就合理吗？
+
+这里要区分四种“API”。
+
+### A. App 内部写 API
+
+例如：
+
+```text
+POST /api/event/sid/E1
+```
+
+这个**不合理**。
+
+因为真人在 Google Calendar 页面上不能直接调用内部数据库接口改会议。
+
+所以无论 Web / OS / Mobile，TaskVM 主实验都不应该使用。
+
+---
+
+### B. 浏览器 DOM / accessibility tree
+
+这个**合理，而且非常有用**。
+
+比如 Playwright 可以获取：
+
+```text
+按钮文字
+input label
+页面可见文本
+元素 role
+bounding box
+accessibility tree
+```
+
+这是 Web substrate 天然提供的传感器。
+
+它和 API executor 完全不是一回事：
+
+```text
+DOM/a11y
+= 我戴了一副更好的眼镜
+
+内部 mutation API
+= 我偷偷打开数据库直接改值
+```
+
+前者可以用。
+
+但是你自己的 GG 红线又比一般 browser agent 更严格：
+
+> **不能因为 DOM 里技术上存在一个隐藏 `data-event-id="E1"`，就把 E1 喂给模型。**
+
+现在 `BrowserController.element_at_point_norm()` 仍然会尝试读取：
+
+```python
+data-event-id
+data-task-id
+data-file-id
+```
+
+这跟 GG 文档明确要求删掉这类属性存在冲突，需要继续清理。turn138127view0
+
+---
+
+### C. 用户正常授权的公开 API
+
+比如真实 Gmail API、Calendar API。
+
+从“通用 agent”角度说当然可以。
+
+但**对你这篇论文不建议主实验用**。
+
+因为你的 claim 是：
+
+> TaskVM 能在 GUI substrate 上形成统一投影和执行。
+
+如果一部分 App GUI、一部分 App API，reviewer 会问：
+
+> 性能提升到底来自 TaskVM，还是来自 API 更稳定？
+
+所以这篇 paper 主链路坚持 GUI。
+
+以后可以写 future work：
+
+> TaskVM architecture could support heterogeneous actuators including GUI and public APIs.
+
+---
+
+### D. Benchmark 的 reset/seed/oracle API
+
+这个完全可以留。
+
+OSWorld、Android agent benchmark 也必须有环境初始化和 success checker，不然实验没法重复。
+
+区别是：
+
+```text
+Agent 不得访问
+Evaluator 可以访问
+```
+
+---
+
+# 1.3 `entity_id` 是什么？
+
+这里我要非常明确：
+
+**当前代码里的 `entity_id` 不是 TaskVM 自己随便编的 cache ID。**
+
+它就是 App 内部实体的数据库 primary key。
+
+代码注释直接写着：
+
+```python
+entity_id: DB primary key, not on screen
+```
+
+例如：
+
+```text
+Calendar:
+E1
+
+TaskBoard:
+T1
+
+Drive:
+F1
+
+Mail:
+M1
+```
+
+`EntityBinding` 当前结构是：
+
+```python
+EntityBinding(
+    var_id,
+    app,
+    field,
+    operator,
+    entity_id,
+    locator
+)
+```
+
+其中设计意图是模型产生：
+
+```text
+locator = "标题为项目发布会议的会议"
+```
+
+然后 harness 再把 locator 翻译成：
+
+```text
+entity_id = E1
+```
+
+后面 PatchOp 和 adapter 都继续使用 E1。
+
+### 那它算不算违规？
+
+要分两层。
+
+**按当前 GG 红线字面定义：**
+
+只要 `entity_id` 不进入模型 prompt，它存在于 harness control plane，可以不算红线违规。
+
+**但按你现在提出的更严格原则：**
+
+> “真实手机/真实 App 拿不到的东西，不应成为 runtime 必需品。”
+
+那么：
+
+> **当前 runtime 对 `entity_id` 的依赖是不合格的。**
+
+因为真机上你根本未必有一个 E1 可以查。
+
+所以我建议改成真正的 TaskVM-owned cache handle。
+
+例如：
+
+```python
+SurfaceHandle(
+    id="h17",
+    surface="calendar-window",
+    role="listitem",
+    visible_name="项目发布会议",
+    nearby_text="8月14日 10:00",
+    bbox=(...),
+    fingerprint="...",
+    last_seen_version=37
+)
+```
+
+这里 `h17` 是 TaskVM 自己生成的。
+
+它没有任何 App 内部含义。
+
+它只是：
+
+> “我刚才在这块屏幕上认识的这个东西，我给它贴个便利贴叫 h17。”
+
+这就非常适合你说的 **cache 降模型调用成本**。
+
+只要页面没发生明显结构改变：
+
+```text
+“项目发布会议”
+→ h17
+→ 上次在哪里
+→ 周围有什么文字
+```
+
+都可以复用。
+
+不用每次再问 Binding Compiler：
+
+> “这个会议在哪里？”
+
+一旦：
+
+- 元素消失；
+- 名称冲突；
+- 页面重排；
+- fingerprint 不匹配；
+
+再 invalidate `h17`，重新调用 compiler。
+
+**这个 cache 我非常支持。**
+
+---
+
+# 2. PatchOp 到底是什么？一次 PatchOp 有几次模型调用？`canonical` 又是什么？
+
+先把 PatchOp 彻底说成人话。
+
+## PatchOp 就是一张“世界修改单”
+
+假设 TaskVM 里有一个变量：
+
+```text
+发布日期 = 8月14日
+```
+
+它实际上对应：
+
+```text
+Calendar 的会议日期
+TaskBoard 的任务 deadline
+```
+
+用户把它改成：
+
+```text
+8月20日
+```
+
+`compile_patch(...)` 会生成：
+
+```text
+PatchOp 1:
+Calendar 那个会议
+date → 8月20日
+
+PatchOp 2:
+TaskBoard 那个任务
+deadline → 8月20日
+```
+
+所以：
+
+> **PatchOp ≠ 鼠标动作。**
+>
+> **PatchOp ≠ subgoal。**
+>
+> **PatchOp ≠ 一次大模型调用。**
+
+它只是：
+
+> “现实世界里有一个字段应该发生这样的语义变化。”
+
+代码本身也是这么定义的：
+
+```python
+@dataclass
+class PatchOp:
+    app
+    entity_id
+    field
+    operator
+    value
+```
+
+而 `compile_patch()` 本身是**纯 deterministic Python，0 次模型调用**。
+
+---
+
+## 当前一张 PatchOp 后面发生什么？
+
+当前理想链路可以画成：
+
+```text
+PatchOp
+  ↓
+SubgoalGenerator
+  ↓
+一句给 CUA 听的人话
+  ↓
+GuiExecutor
+  ↓
+CUA 看截图
+  ↓
+click/type/scroll
+  ↓
+继续截图
+  ↓
+直到 done
+```
+
+比如 PatchOp：
+
+```text
+Calendar / release date / 8月20日
+```
+
+SubgoalGenerator 可能翻译成：
+
+> 在 Calendar 中找到“项目发布会议”，打开编辑界面，将日期修改为 8 月 20 日并确认。
+
+然后 CUA 才开始操作。
+
+---
+
+## 当前一次 PatchOp 会产生多少模型调用？
+
+### 第 0 步：`compile_patch`
+
+```text
+0 次模型调用
+```
+
+---
+
+### 第 1 步：SubgoalGenerator
+
+如果走 LLM 模式：
+
+```text
+2 次
+```
+
+因为当前代码故意生成两个 candidate，然后自己选一个。
+
+我认为这个设计应该删掉，后面第 3 点解释。
+
+---
+
+### 第 2 步：CUA
+
+假设完成这个修改用了：
+
+```text
+click meeting
+click edit
+click date
+type date
+click save
+done
+```
+
+可能是 6 次 CUA prediction。
+
+因为 CUA 每一次都：
+
+```text
+看屏幕 → 决定一个动作
+```
+
+所以粗略就是：
+
+```text
+1 GUI action ≈ 1 CUA inference
+```
+
+当然也可能模型调用失败，没有产生合法 action，那就只增加 attempt、不增加 step。
+
+---
+
+### 第 3 步：verifier
+
+现在 canonical verifier：
+
+```text
+0 次模型调用
+```
+
+它读状态直接比较。
+
+所以目前：
+
+```text
+1 PatchOp
+≈ 2 次 Subgoal LLM
++ k 次 CUA
+```
+
+真正贵的是 `k`，不是 PatchOp 本身。
+
+---
+
+# 2.1 `canonical` 到底是什么意思？
+
+这个词本身没有神秘 AI 含义。
+
+**canonical = 统一格式、标准形式。**
+
+比如三个 App 各自的数据长这样：
+
+```text
+Calendar:
+{
+    eid: E1,
+    date: 8/20
+}
+
+TaskBoard:
+{
+    tid: T1,
+    deadline: 8/20
+}
+
+Drive:
+{
+    fid: F1,
+    publish_date: 8/20
+}
+```
+
+TaskVM 把它们统统翻译成：
+
+```python
+{
+    "entities": {
+        "...": {
+            "field": value
+        }
+    }
+}
+```
+
+这就是 canonical representation。
+
+可以理解成：
+
+> 三个地方的人讲四川话、上海话、广东话；canonical state 就是大家都翻成普通话之后的账本。
+
+问题不是 canonical 这个概念。
+
+**问题是现在 canonical state 从哪里来。**
+
+当前：
+
+```python
+read_canonical()
+    → requests.get("/api/events/...")
+```
+
+也就是直接读模拟 App 内部 API。
+
+因此我建议以后名字都直接区别开：
+
+```text
+RuntimeObservedState
+    真人也有可能获得的信息
+
+BenchmarkOracleState
+    实验环境内部 GT
+```
+
+不要两个都叫 canonical，不然很容易混。
+
+---
+
+# 2.2 `_mutate_via_gui → gui_write → GuiExecutor.execute` 一层层到底干嘛？
+
+这三个名字确实容易把人绕晕。
+
+我用“老板—领班—司机”解释。
+
+---
+
+### `_mutate_via_gui(...)`
+
+这是 **Adapter 层的老板**。
+
+它接到：
+
+```text
+我要把某东西的某字段变成 X
+```
+
+当前输入大致是：
+
+```python
+sid
+entity_id
+operator
+value
+field
+undo
+```
+
+它主要负责：
+
+1. 记录修改前是什么；
+2. 请 GUI executor 真正操作；
+3. 操作后验证有没有成功；
+4. 如果失败，再试；
+5. 最后返回 old/new/trace。
+
+现在具体是：
+
+```text
+read_canonical()
+↓
+得到 old value
+
+gui_write(...)
+↓
+CUA 真操作
+
+read_canonical()
+↓
+看看有没有落地
+
+失败
+↓
+最多再整个重试 2 次
+```
+
+
+
+---
+
+### `gui_write(...)`
+
+这是 **领班**。
+
+它负责把“结构化修改要求”交给真正开车的 CUA。
+
+现在它会：
+
+```text
+PatchOp / entity info
+↓
+转换成 visible natural-language instruction
+↓
+找到对应 App 的首页 URL
+↓
+get_executor()
+↓
+GuiExecutor.execute(...)
+```
+
+而且这里还有一个你应该很关注的问题：
+
+当前如果上游没提供 `instruction`，`gui_write()` **自己又会调用 `instruction_for_op()`** 生成一次。
+
+与此同时 GovernanceInterpreter 上游已经生成过：
+
+```python
+SubgoalInstruction.natural_language
+```
+
+可是 `WorkflowExecutor._exec_one_subgoal()` 实际调用的是：
+
+```python
+dispatch(sg.patch_ops, ...)
+```
+
+并没有把：
+
+```python
+sg.natural_language
+```
+
+传下去。
+
+也就是说现在有一个很明显的架构裂缝：
+
+```text
+上游：辛辛苦苦生成了一句 subgoal NL
+              ↓
+        没真正传下去
+
+下游 gui_write：
+        又自己生成一遍
+```
+
+这也是为什么我非常赞成你第 3 点的“减实体”。
+
+---
+
+### `GuiExecutor.execute(...)`
+
+这个才是真正的 **司机**。
+
+流程：
+
+```text
+打开 App 首页
+↓
+截图
+↓
+CUA 看截图 + instruction
+↓
+CUA：
+{"action":"click", ...}
+↓
+Playwright 真点
+↓
+再截图
+↓
+CUA：
+{"action":"type", ...}
+↓
+Playwright 真输入
+↓
+……
+↓
+CUA 输出 done
+```
+
+Playwright 自己不聪明。
+
+它只是机器人的手：
+
+```text
+mouse.click()
+keyboard.type()
+keyboard.press()
+scroll()
+screenshot()
+```
+
+CUA 才是决定“点哪里”的脑子。turn932102view3
+
+---
+
+# 3. SubgoalGenerator 能不能和 Agentic GenUI 合并？
+
+**可以，而且我现在认为应该比“合并一次模型调用”走得更彻底一点：直接取消独立的 model-based SubgoalGenerator。**
+
+你的“如无必要勿增实体”在这里是对的。
+
+但需要稍微调整心智模型：
+
+> GenUI 不应该在初始化时预先生成所有未来的具体 subgoal 文本。
+>
+> 它应该生成的是一个**可执行 action contract**。
+
+---
+
+## 举个例子
+
+GenUI 初次生成一个日期控件：
+
+```text
+发布日期
+[ 2026-08-14 ]
+```
+
+它不仅生成视觉组件，同时生成：
+
+```json
+{
+  "semantic_var": "发布日期",
+  "editable": true,
+  "action_contract": {
+    "intent": "set",
+    "field_semantics": "发布日期",
+    "affected_surfaces": [
+      "Calendar: 项目发布会议",
+      "TaskBoard: 发布文案"
+    ]
+  }
+}
+```
+
+用户以后把：
+
+```text
+8/14 → 8/20
+```
+
+此时没必要再问一个 LLM：
+
+> “请帮我把这个转成人话。”
+
+Harness 完全可以 deterministic 地得到：
+
+```text
+Target: visible item "项目发布会议"
+Field: 日期
+Desired value: 2026-08-20
+```
+
+直接给 CUA。
+
+这已经足够。
+
+CUA 本身就是理解自然语言/结构化目标的模型。
+
+为什么还要再塞一个模型站在中间专门写作文？
+
+---
+
+## 所以我推荐最终只保留三个模型角色
+
+### ① Binding / State Compiler
+
+负责：
+
+> “世界上现在有什么和任务相关？”
+
+初始化 + 结构失效时使用。
+
+---
+
+### ② Task Architect / Projection Composer
+
+把原来三个角色合并：
+
+```text
+Milestone Suggester
++
+Workflow Planner
++
+GenUI Decoder
+```
+
+一次调用输出：
+
+```text
+workflow topology
+milestones/checkpoints
+projection UI schema
+variable semantics
+action contracts
+```
+
+这三个东西本来就是同一个设计问题。
+
+---
+
+### ③ CUA
+
+负责：
+
+> “知道目标以后，当前这个真实 UI 下一步怎么点？”
+
+就够了。
+
+这会让整套系统漂亮很多：
+
+```text
+观察层模型
+      ↓
+TaskVM architecture 模型
+      ↓
+CUA actuator
+```
+
+而不是现在：
+
+```text
+compiler
+milestone suggester
+planner
+GenUI
+subgoal writer
+CUA
+rollback NL writer
+……
+```
+
+---
+
+## 会牺牲什么？
+
+主要牺牲的是：
+
+> Subgoal instruction 的语言润色能力。
+
+但我认为完全不值两次 LLM call。
+
+CUA 真正需要的是：
+
+```text
+目标对象是谁
+目标字段是什么
+目标值是什么
+完成条件是什么
+```
+
+不是一段漂亮语言。
+
+所以我会砍。
+
+---
+
+## 这和 DuetUI 类工作的思想是否一致？
+
+方向上是相容的：这类系统的关键恰恰是**UI 本身成为用户意图与模型状态之间的双向接口**，用户直接操作生成界面，操作结果继续驱动生成/执行，而不是每一个 UI edit 后再额外引入一个“自然语言翻译 agent”。
+
+TaskVM 可以把这件事做得更强：
+
+> **GenUI 不只是 interaction surface，它产生 executable semantic bindings。**
+
+---
+
+# 3.1 PatchOp 什么时候会重新产生？绝对不只有 rollback
+
+而且我建议把它明确做成三类 Patch。
+
+这样学术叙述也很干净。
+
+## A. Local/Subgoal Patch
+
+**不改变最终目标和工作流拓扑。**
+
+例如：
+
+> 原来计划把会议改到 18 日，执行到 Calendar 时用户说“Calendar 先改成下午 4 点。”
+
+或者：
+
+> conflict 出现，用户选择“用 TaskVM 的值覆盖”。
+
+这属于：
+
+```text
+LocalPatch
+```
+
+只调整现有路径上的局部动作。
+
+通常：
+
+```text
+不 replan
+不重新生成 milestone
+```
+
+---
+
+## B. Goal Patch
+
+改变：
+
+- 终结状态；
+- scope；
+- constraint；
+- workflow topology。
+
+例如：
+
+> “不要 18 日了，整体目标改成 20 日，而且已经完成的任务不要动。”
+
+这应该：
+
+```text
+GoalPatch
+↓
+Task Architect
+↓
+重新生成受影响 milestones
+↓
+重新组织 workflow
+↓
+重新生成受影响 projection
+```
+
+这是你第 10 点说的东西，我非常赞同。
+
+---
+
+## C. Compensation Patch
+
+就是 rollback。
+
+例如：
+
+```text
+8/20 → 回到 8/14
+```
+
+它不是新目标，而是：
+
+> “让现实回到某个历史 commit state。”
+
+所以：
+
+```text
+CompensationPatch
+```
+
+---
+
+如果再要一个但不增加主要概念，可以有：
+
+```text
+Rebind Patch
+```
+
+页面漂移导致原来 h17 失效，重新找到对应 visible object。
+
+但我不建议把它写成论文主概念。
+
+**论文就讲 LocalPatch / GoalPatch / CompensationPatch 三种，已经有厚度，而且非常整齐。**
+
+---
+
+# 4. Workflow Planner 为什么是规则？合理吗？Milestone 是不是应该跟 Planner 合并？
+
+你说得对。
+
+**现在规则 planner 是阶段性工程实现，不应该成为最终 TaskVM 设计。**
+
+当前 `_classify_workflow()` 真的是：
+
+```python
+if any(loop_field):
+    LOOP
+elif exactly_one_edit and spans_multiple_apps:
+    PARALLEL
+else:
+    SEQUENTIAL
+```
+
+而且它判断跨几个 App 时读取的是 fixture `task.bindings`。
+
+这在 killtest 阶段的意义是：
+
+> 先证明 Sequential / Parallel / Loop 三种执行结构跑得通。
+
+但对于最终 prototype：
+
+> 用户说一个任意目标，系统必须自己理解控制流。
+
+所以不能留这个作为主 planner。
+
+---
+
+## 4.1 你说 milestone 和 workflow topology 天然是一件事——对
+
+例如：
+
+```text
+Goal
+│
+├─ C1：相关对象全部找到
+│
+├─ C2：Calendar 日期已修改
+│      ├─ TaskBoard A
+│      └─ TaskBoard B
+│            ↓
+│        fan-in verifier
+│
+└─ C3：全部一致
+```
+
+你一旦产生：
+
+- milestone；
+- milestone 之间的依赖；
+- 哪些动作共同到达一个 milestone；
+- loop termination；
+
+其实 workflow 已经存在。
+
+所以没理由：
+
+```text
+LLM A：想 milestones
+然后
+rule code：猜 topology
+```
+
+正确的是一次：
+
+```text
+Task Architect(goal, task_state)
+```
+
+输出：
+
+```json
+{
+  "milestones": [...],
+  "workflow": {
+    ...
+  },
+  "projection_schema": {...}
+}
+```
+
+我会把当前：
+
+```python
+_suggest_milestones()
+```
+
+删除为独立模型角色。
+
+它现在确实只是单独根据 `goal` 调一次模型，并不会真正决定 WorkflowPlan。
+
+---
+
+# 4.2 `mock` 是什么意思？
+
+`mock` 就是：
+
+> “为了测试代码，不真的花钱调模型，我用一个假的 deterministic 实现。”
+
+比如：
+
+```python
+mock=True
+```
+
+会直接拼：
+
+> “找到项目发布会议，把日期改成 X。”
+
+0 次 LLM。
+
+`mock=False`：
+
+真正调用 LLM。
+
+这在**测试代码**里很正常。
+
+问题是现在它渗进了 production/runtime 的行为分支。
+
+更糟的是当前这个：
+
+```python
+self.mock_subgoal = enable_llm_rollback_nl
+```
+
+语义非常混乱。
+
+`enable_llm_rollback_nl=False` 时反而会导致：
+
+```text
+mock_subgoal=False
+```
+
+从而 SubgoalGenerator 使用 LLM。turn852159view0
+
+我建议：
+
+```text
+runtime/
+    没有 mock flag
+
+tests/
+    FakeTaskArchitect
+    FakeCUA
+    FakeObserver
+```
+
+不要让研究系统运行时到处出现真假分叉。
+
+---
+
+# 4.3 “2N”是什么意思？
+
+对。
+
+如果：
+
+```text
+N = PatchOp 个数
+```
+
+而每个 PatchOp 的 SubgoalGenerator 生成两个候选：
+
+```text
+PatchOp1 → 2 次
+PatchOp2 → 2 次
+PatchOp3 → 2 次
+...
+```
+
+那么就是：
+
+```text
+2N 次模型调用
+```
+
+代码就是 `for _ in range(2)`。
+
+我现在的建议不是优化成：
+
+```text
+2N → N
+```
+
+而是：
+
+```text
+2N → 0
+```
+
+因为这个模型角色可以消失。
+
+---
+
+# 5. `use_genui=False` 为什么还存在？每次只读更新为什么重新调用 GenUI？
+
+这里你判断得基本完全正确。
+
+## `use_genui=False`
+
+现在 CLI 默认确实已经：
+
+```python
+--genui default=True
+```
+
+但：
+
+```python
+--no-genui
+```
+
+还保留 legacy f-string path。页面里甚至还有：
+
+> 如果模型漏了 binding，就额外显示 f-string fallback edit forms。
+
+turn138127view3
+
+如果我们的最终 claim 是：
+
+> “TaskVM 的治理表面由 Agentic GenUI 构成”
+
+那 production path 不该有这个 fallback。
+
+测试可以保留一个：
+
+```text
+StaticTestRenderer
+```
+
+但放进测试模块，不要和实际产品放在一个 runtime flag 下。
+
+---
+
+# 5.1 只读数值变化绝对没必要重新调用 GenUI
+
+这一点我完全同意你。
+
+Agentic GenUI 第一次生成的是：
+
+```text
+“界面的结构”
+```
+
+例如：
+
+```text
+这是 DateTimeInput
+这是只读卡片
+这是 checkpoint timeline
+这是 fan-out lane
+```
+
+之后：
+
+```text
+日期 8/14 → 8/20
+```
+
+只是 data mutation。
+
+应该：
+
+```text
+UI Schema
+固定
+
+RuntimeStore:
+release_date = 8/20
+
+前端:
+收到 delta
+↓
+刷新这个组件
+```
+
+**0 次 GenUI 模型调用。**
+
+而当前 GenUI decoder 本身其实已经有一个非常适合这种架构的概念：
+
+```text
+updateComponents
+updateDataModel
+```
+
+renderer 也已经能从 `updateDataModel` 读取 var → value。
+
+问题只是 server 现在没有把它作为 persistent surface 使用，而是在 render 时又 decode。
+
+---
+
+## 我建议的三个东西
+
+```text
+ProjectionSchema
+    GenUI 生成一次
+    “有什么组件、布局是什么”
+
+ProjectionStore
+    runtime 数据库
+    “现在每个变量是什么值”
+
+ProjectionRenderer
+    schema + store
+    → 页面
+```
+
+变化：
+
+```text
+8/14 → 8/20
+```
+
+只修改：
+
+```text
+ProjectionStore
+```
+
+然后 SSE 推：
+
+```json
+{
+  "event": "state_delta",
+  "release_date": "2026-08-20"
+}
+```
+
+JS 把数字换掉。
+
+完。
+
+---
+
+## 什么时候才重新调用 GenUI？
+
+只有：
+
+### 结构变化
+
+原来：
+
+```text
+发布日期
+会议室
+```
+
+现在用户把目标改成：
+
+> “另外联系 3 个参会者分别确认时间。”
+
+出现了新的：
+
+```text
+联系人列表
+循环进度
+确认状态
+```
+
+才需要重新 composition。
+
+### GoalPatch
+
+因为任务结构变了。
+
+### 用户明确要求重新组织 projection
+
+可以作为交互 feature。
+
+其他情况下：
+
+> **GenUI 不应出现在 hot loop。**
+
+---
+
+# 6. `max_steps=18`、`max_attempts=54`、外层重试 3 次分别是什么？
+
+这个非常容易混。
+
+举个例子。
+
+## `steps`
+
+代表：
+
+> CUA 真正给出了合法动作，而且 Playwright 真执行了。
+
+比如：
+
+```text
+step 1 click
+step 2 click
+step 3 type
+step 4 press Enter
+```
+
+最多：
+
+```text
+18 个真实动作
+```
+
+---
+
+## `attempts`
+
+代表：
+
+> “我向模型问了一次下一步是什么。”
+
+有时候你问模型：
+
+```text
+下一步干嘛？
+```
+
+结果：
+
+- 429；
+- timeout；
+- JSON 不合法；
+- 无法 parse。
+
+这一次：
+
+```text
+attempt += 1
+```
+
+但 Playwright 什么都没做：
+
+```text
+step 不加
+```
+
+所以代码设置：
+
+```python
+max_attempts = max_steps * 3
+```
+
+18 steps → 最多 54 次 model prediction attempts。代码注释也明确说 attempts 是为了防止 429/parse fail 无限重试。
+
+---
+
+## `_mutate_via_gui` 的 3 次是什么？
+
+这是更外面的一整轮“重新做这个 PatchOp”。
+
+例如第一轮：
+
+```text
+CUA 操作了 8 步
+↓
+自认为 done
+↓
+Verifier 看
+↓
+实际上日期还是 8/14
+```
+
+那么整个 GUI execution 判失败。
+
+于是：
+
+```text
+Attempt 1：完整 GUI execution
+失败
+
+Attempt 2：再完整 GUI execution
+失败
+
+Attempt 3：最后再来一次
+```
+
+代码是：
+
+```python
+GUI_WRITE_RETRIES = 2
+for attempt in range(1, GUI_WRITE_RETRIES + 2)
+```
+
+= 初始 1 次 + retry 2 次。
+
+所以是三层：
+
+```text
+PatchOp
+└─ full execution attempt × 最多3
+      └─ CUA model attempt × 最多54
+            └─ 成功 parse 的最多18个成为真正 GUI step
+```
+
+所以我之前说理论极端：
+
+```text
+3 × 54 = 162
+```
+
+没错。
+
+但这是极端 protection bound，不代表正常情况真的 162。
+
+最终我会把预算重新设计得更紧：
+
+```text
+每 PatchOp:
+max_actions ≈ 10–12
+max_invalid_predictions ≈ 3–5
+max_full_repair = 1
+```
+
+不要三级都给 3 倍富余。
+
+---
+
+# 7. SSE 是什么？它和 Flask / CSS / Playwright 是什么关系？
+
+把整个系统想象成一个剧院。
+
+## Flask = 剧院后台
+
+它负责：
+
+```text
+网页路由
+session
+TaskVM state
+start/pause/edit
+```
+
+比如：
+
+```text
+/start
+/pause
+/edit
+/poll
+```
+
+---
+
+## HTML/CSS = 舞台布景
+
+HTML 决定：
+
+> 这里有一个日期框、这里有一个 timeline。
+
+CSS 决定：
+
+> 日期框长什么样，checkpoint 是蓝的还是红的。
+
+CSS 没有智能。
+
+---
+
+## JavaScript = 舞台上的工作人员
+
+它可以：
+
+- 用户点按钮后发请求；
+- 收到状态变化后更新 DOM；
+- 播放动画。
+
+---
+
+## SSE = 后台给前台开的“单向广播电台”
+
+全称：
+
+> Server-Sent Events
+
+普通 HTTP 像：
+
+```text
+前端：有消息吗？
+后台：没有。
+连接断掉。
+
+5秒后：
+前端：有消息吗？
+后台：有。
+```
+
+SSE 是：
+
+```text
+前端：我打开一个长连接，之后你有事直接广播给我。
+
+后台：
+……workflow step finished
+→ 发一条
+
+……conflict
+→ 发一条
+
+……checkpoint reached
+→ 发一条
+```
+
+浏览器里：
+
+```javascript
+new EventSource("/session/poll")
+```
+
+Flask 那边保持连接：
+
+```python
+yield "event: conflict..."
+yield "event: workflow_progress..."
+```
+
+现在代码就是这样。turn138127view3
+
+所以：
+
+```text
+SSE
+= TaskVM Server → TaskVM UI 的广播管道
+
+Playwright
+= TaskVM → 外部目标 App 的机械手
+
+CUA
+= 决定机械手下一步做什么的脑子
+
+CSS
+= TaskVM 页面好不好看的皮肤
+
+Flask
+= 把所有这些组织起来的服务器
+```
+
+---
+
+# 7.1 `resync_with_conflicts()` 是什么？
+
+你理解得已经比较接近了。
+
+它相当于 TaskVM 的：
+
+> **“重新看一下现实世界有没有和我的投影分叉。”**
+
+当前：
+
+```python
+fresh_canonical = {
+    app: ad.read_canonical(sid)
+}
+```
+
+然后比较：
+
+```text
+TaskVM 上次显示的 Y
+vs
+现实 App 现在的 X
+```
+
+如果：
+
+```text
+X == Y
+```
+
+没事。
+
+如果：
+
+```text
+X != Y
+```
+
+就产生 conflict。
+
+---
+
+# 7.2 Adapter 是不是主要用来同步？
+
+不是。
+
+Adapter 当前承担了太多职责：
+
+```text
+reset
+seed
+read state
+mutate
+GUI execution switching
+internal API
+```
+
+所以显得特别混乱。
+
+我建议拆掉之后：
+
+```text
+SurfaceObserver
+    看
+
+SurfaceActuator
+    点
+
+BenchmarkOracle
+    偷看答案
+```
+
+这会清楚很多。
+
+---
+
+# 7.3 同步需要一个“协调模型”吗？
+
+**大多数时候不需要。**
+
+这是我非常想推你往前走的一点，因为实际上可以优雅解决，而且没必要发展成大型 systems project。
+
+你的核心 insight 是正确的：
+
+> 用户不操作 ≠ 世界不动。
+>
+> 相反，在 “governance over autonomy” 下，用户不操作的时候正是 CUA 在猛干活。
+
+当前代码也是如此：
+
+`/start` 会起一个后台 thread，`WorkflowExecutor` 自动连续往后执行，直到完成或者下一 node boundary 发现 pause。turn213946view0
+
+所以你的心智模型和**当前 autonomy semantics 是一致的**。
+
+---
+
+## 但现在状态同步方式和你的心智模型不完全一致
+
+当前其实有三套重复观察：
+
+### A. CUA 自己
+
+每执行一步：
+
+```text
+截图
+→ 模型看
+→ action
+→ 再截图
+```
+
+### B. `_mutate_via_gui`
+
+一个 PatchOp 前后：
+
+```text
+read_canonical before
+read_canonical after
+```
+
+### C. SSE heartbeat
+
+每 5 秒：
+
+```text
+read_canonical
+→ resync_with_conflicts
+```
+
+### D. Workflow verifier
+
+Subgoal 后又：
+
+```text
+read_canonical
+```
+
+所以现在不是：
+
+> CUA 的反馈自然成为 TaskVM 的新状态。
+
+而是：
+
+> CUA 看自己的截图；TaskVM 另外又频繁查后台 API。
+
+这是重复的。
+
+---
+
+# 7.4 我认为最优雅的新同步方案
+
+核心原则：
+
+> **CUA 产生的 observation 本身就是主同步信号；heartbeat 只负责补充 CUA 没有正在观察的世界。**
+
+变成：
+
+```text
+CUA action
+↓
+Playwright 执行
+↓
+得到新的 screenshot / a11y snapshot
+↓
+SurfaceObserver
+↓
+ProjectionStore 更新
+↓
+SSE push 给 TaskVM UI
+```
+
+因此 CUA 正在 Calendar 疯狂操作时：
+
+> Calendar 根本不需要另外每 5 秒完整 poll 一次。
+
+因为每一两秒已经有新 screenshot 了。
+
+---
+
+## heartbeat 什么时候有价值？
+
+CUA 正在 Calendar：
+
+```text
+Calendar
+→ CUA 一直观察
+```
+
+但是用户的手机上：
+
+```text
+WeChat
+```
+
+可能有人突然发来消息。
+
+TaskBoard 也可能被同事修改。
+
+这些 CUA 没在看。
+
+所以 heartbeat 只负责：
+
+```text
+inactive surfaces
+```
+
+---
+
+# 7.5 大多数 heartbeat 不调用模型，真的能做到吗？
+
+可以。
+
+非常现实。
+
+### Web
+
+保存上一次：
+
+```text
+visible text tree
+a11y tree
+layout signature
+```
+
+下一次 Playwright 再抓：
+
+```text
+hash(previous)
+vs
+hash(now)
+```
+
+一样：
+
+```text
+0 LLM
+```
+
+不一样：
+
+再做局部 DOM/a11y diff。
+
+比如：
+
+```text
+"Deadline: Aug 14"
+→
+"Deadline: Aug 20"
+```
+
+如果对应的是已经绑定过的 node：
+
+```text
+直接更新 ProjectionStore
+0 LLM
+```
+
+---
+
+只有这些情况才调 compiler：
+
+```text
+目标对象消失
+出现多个同名对象
+UI 结构完全变化
+原 anchor 无法恢复
+新增与任务有关的未知结构
+```
+
+也就是说：
+
+```text
+cheap observation
+    ↓
+known structure?
+   /     \
+ yes      no
+  |        |
+0 LLM   compiler
+```
+
+这其实就是普通系统里非常标准的：
+
+> fast path / slow path
+
+完全不需要搞成复杂系统论文。
+
+---
+
+## OS / Mobile 呢？
+
+同样思想：
+
+```text
+screenshot perceptual diff
+accessibility hierarchy diff
+known region OCR/text if available
+```
+
+便宜判断：
+
+> 有没有显著变化？
+
+只有需要理解“这变化到底意味着什么”时才调模型。
+
+---
+
+# 7.6 CHI prototype 需要做到多工程化？
+
+**不需要把它做到可以明天上 App Store。**
+
+我们要证明的不是：
+
+> TaskVM heartbeat 在全球亿万台设备上可以做到 99.999% SLA。
+
+我们要证明：
+
+> 新的 projection-layer paradigm 在现实动态环境里不是依赖 hidden API 才成立，而且存在一个合理、高效的 runtime realization。
+
+所以我建议只做到：
+
+```text
+Web observer
++
+一个 mobile/OS observer
++
+fast-path fingerprint
++
+slow-path incremental compiler
+```
+
+然后 benchmark 证明：
+
+```text
+80~95% heartbeat 不需要模型
+```
+
+具体多少以实验结果为准，不要先承诺数字。
+
+这就足够支撑 CHI claim。
+
+不要继续建设：
+
+- 分布式数据库；
+- CRDT；
+- 通用事件总线；
+- 生产级容错服务；
+- 多租户调度器。
+
+那真的会刹不住车。
+
+---
+
+# 8. 热拔插 / 冷拔插：我完全赞成，而且这是一个很好的治理概念
+
+你这个区分比当前实现好。
+
+## 冷拔插
+
+CUA 已经完成一个 commit unit：
+
+```text
+action
+action
+action
+done
+verify
+```
+
+这时用户说：
+
+> “改目标。”
+
+世界已经停在一个已知状态。
+
+简单：
+
+```text
+observe
+→ patch
+→ replan
+→ continue
+```
+
+---
+
+## 热拔插
+
+CUA 正在：
+
+```text
+看截图
+↓
+模型请求已发出去
+↓
+用户突然：停！改成20号！
+```
+
+这里就会发生你说的 stale response。
+
+例如：
+
+```text
+t0 CUA request:
+“旧目标 18号，下一步怎么办？”
+
+t1 用户 GoalPatch:
+“改成20号！”
+
+t2 模型旧请求回来:
+“点击 18号”
+```
+
+**绝对不能执行 t2。**
+
+---
+
+## 不需要非常复杂的异步系统
+
+我建议一个非常简单的：
+
+# Execution Epoch
+
+每次 plan 有一个：
+
+```text
+epoch = 17
+```
+
+发 CUA 请求的时候带上：
+
+```text
+request_epoch = 17
+```
+
+用户热干预：
+
+```text
+epoch = 18
+interrupt = true
+```
+
+旧模型回复回来：
+
+```python
+if response.epoch != current_epoch:
+    discard
+```
+
+直接扔掉。
+
+没有执行。
+
+---
+
+## 如果 Playwright 已经开始 click 了呢？
+
+一个 click/type 这种单动作，可以视为最小 atomic unit。
+
+不要试图把：
+
+```text
+mouse down
+```
+
+执行到一半突然杀掉。
+
+规则：
+
+> 已经开始的一个原子 GUI action 做完；下一 action 不允许开始。
+
+所以真正合理的最小 interruption boundary 应该从现在的：
+
+```text
+Workflow Node
+```
+
+下降到：
+
+```text
+GUI Action
+```
+
+当前代码非常明确：
+
+```text
+pause 只在 node top 检查
+never mid-gesture
+```
+
+而且 `gui_act_async` 没 cancel token。turn322195view2
+
+这部分我认为**值得改**，因为它直接服务于：
+
+> governance over autonomy
+
+不是 systems embellishment。
+
+---
+
+## 不可逆 action 再加一道门
+
+比如：
+
+```text
+Send
+Purchase
+Submit
+Delete permanently
+```
+
+模型说：
+
+```json
+{"action":"click", "target":"Send"}
+```
+
+执行前：
+
+```python
+check_epoch_again()
+```
+
+用户刚好中断：
+
+```text
+不发送
+```
+
+这是非常漂亮的 safety/governance 机制。
+
+---
+
+# 9. Saga 是什么意思？Rollback 到底有没有模型？有没有快照后门？
+
+## Saga 这个词来自分布式系统
+
+普通数据库 transaction：
+
+```text
+BEGIN
+
+A
+B
+C
+
+全部成功 → COMMIT
+任一个失败 → 全部 ROLLBACK
+```
+
+但是：
+
+```text
+Calendar
+TaskBoard
+WeChat
+```
+
+三个真实 App 没有共享一个数据库事务。
+
+你不能说：
+
+> “Calendar 和微信一起 transaction rollback。”
+
+所以有一种经典思想：
+
+> 一串独立的外部操作，每一步记录一个“补偿动作”。如果后面要撤销，就反向一个一个补偿。
+
+这个就叫 **Saga**。
+
+在 UI 上不用出现 Saga 这个词。
+
+可以显示：
+
+> “一次跨应用操作”
+
+内部工程里叫 saga 没问题。
+
+---
+
+# 9.1 当前 `undo_saga()` 是不是直接恢复 snapshot？
+
+Calendar / TaskBoard / Drive 这条主路径：
+
+**不是。**
+
+它保存：
+
+```text
+before
+after
+```
+
+例如：
+
+```text
+Calendar:
+8/14 → 8/20
+```
+
+rollback：
+
+```text
+8/20 → 8/14
+```
+
+然后代码：
+
+```python
+ad.mutate(
+    entity,
+    same_operator,
+    before_value
+)
+```
+
+而不是：
+
+```python
+database.restore(snapshot)
+```
+
+`undo_saga()` 本身也不调用一个专门“想逆动作”的 LLM。
+
+它只是把 compensation operation 重新交给正常 `mutate()`。
+
+---
+
+## 如果 adapter 是 GUI mode
+
+那么：
+
+```text
+undo_saga
+↓
+ad.mutate
+↓
+_mutate_via_gui
+↓
+gui_write
+↓
+CUA
+↓
+真实点击
+```
+
+所以真的会让 CUA 在界面上：
+
+> 找到原来的字段，再设置回旧值。
+
+---
+
+## 但是！
+
+因为 API executor 还存在：
+
+```text
+adapter=api
+```
+
+时 rollback 还是可能直接 API 写回。
+
+因此现在不能说：
+
+> “整个 repo 在结构上保证 rollback 永远 GUI。”
+
+只能说：
+
+> Workspace 默认 demo 是 GUI；遗留 API 模式仍可绕过。
+
+所以还是那句话：
+
+**API write executor 必须彻底移出 runtime。**
+
+---
+
+## 还有一个更深的问题：`before` 从哪来？
+
+现在 `_mutate_via_gui`：
+
+```python
+before_state = read_canonical()
+```
+
+也就是从隐藏 API 读旧值。
+
+按你新的真机标准，我也建议去掉。
+
+应该：
+
+```text
+ProjectionStore 当前观察到：
+发布日期 = 8/14
+
+执行成功后：
+8/14 → 8/20
+
+CompensationRecord:
+before=8/14
+after=8/20
+```
+
+这个 old value 是用户/agent 在屏幕上真实观察到的。
+
+Benchmark oracle 再偷偷验证：
+
+> 你确实变成 8/20 了吗？
+
+这样整个 rollback 就完全真实。
+
+---
+
+# 10. Subgoal PatchOp 和 Goal PatchOp：你提出的边界我赞成，但要形式化
+
+现在代码没有把这个哲学边界真正钉死。
+
+我建议用一个非常清楚的判定：
+
+> **它是否改变 TaskVM 的 terminal success predicate 或 control-flow topology？**
+
+如果没有：
+
+```text
+Local/Subgoal Patch
+```
+
+如果有：
+
+```text
+Goal Patch
+```
+
+---
+
+## Subgoal / Local Patch
+
+例如原目标：
+
+> “把发布准备推进到周五。”
+
+计划已经是：
+
+```text
+Calendar
+↓
+TaskBoard
+↓
+Notify
+```
+
+用户说：
+
+> “这个会议改成下午 4 点。”
+
+它没有改变：
+
+```text
+终结目标
+scope
+dependency graph
+milestone 结构
+```
+
+所以：
+
+```text
+LocalPatch
+```
+
+不用全局 replan。
+
+---
+
+## Goal Patch
+
+用户说：
+
+> “取消之前的周五计划，整体推到下周二，而且已经完成的 task 不要动，也不要再发通知。”
+
+这里改变了：
+
+```text
+目标值
+scope
+constraint
+一个 branch 是否存在
+终结条件
+```
+
+所以：
+
+```text
+GoalPatch
+```
+
+必须：
+
+```text
+pause/interrupt
+↓
+preserve committed history
+↓
+Task Architect
+↓
+重新设计剩余 milestones
+↓
+重新设计 affected workflow
+↓
+重新设计 affected GenUI
+↓
+resume
+```
+
+这就是我们必须实现的真正 replan。
+
+---
+
+## 一句话钉死边界
+
+```text
+Patch 改“怎么走/局部走哪里”
+→ LocalPatch
+
+Patch 改“最终要到哪里”
+→ GoalPatch
+
+Patch 要“回到以前”
+→ CompensationPatch
+```
+
+我认为这个三分法可以直接成为 prototype 的核心概念之一。
+
+---
+
+# 11. Fan-in/fan-out 不做完整 tree，我同意；Loop 稍微完整一点
+
+这点我现在反而建议你主动刹车。
+
+**不用实现 arbitrary DAG editor。**
+
+CHI 不会因为你支持：
+
+```text
+17层 nested branch
+```
+
+就更认可 TaskVM。
+
+真正需要的只要三个 workflow primitives：
+
+```text
+Sequence
+
+Fan-out → Barrier → Fan-in
+
+Bounded Loop
+```
+
+够了。
+
+---
+
+## Sequence
+
+```text
+A → B → C
+```
+
+---
+
+## Fan-out / fan-in
+
+```text
+          → Calendar ──┐
+Goal ────→ TaskBoard ──┼→ Verify Barrier
+          → Mobile ────┘
+```
+
+重点不是“完整树”。
+
+而是：
+
+> 一个抽象 task-state edit 可以 fan-out 到多个 substrate，再 fan-in 到一个 verified checkpoint。
+
+这个已经非常 TaskVM。
+
+---
+
+## Loop
+
+这个值得比现在稍微多做一步，因为 VM 味很强。
+
+当前 loop 主要是：
+
+```text
+for T1,T2,T3:
+    do X
+```
+
+我建议只再支持一个 termination predicate：
+
+```text
+repeat:
+    find next matching visible item
+    execute
+    verify
+until:
+    no matching item
+OR max_iter reached
+```
+
+这样就从：
+
+> 预枚举 for-loop
+
+升级到：
+
+> 状态驱动的 runtime loop。
+
+但是要强制：
+
+```text
+max_iter
+```
+
+防止无限跑。
+
+就停在这里。
+
+不要搞：
+
+- 任意递归；
+- nested loop；
+- arbitrary while language；
+- exception graph DSL。
+
+---
+
+# 12. Award-grade prototype 和“刹车”怎么同时做到？
+
+我现在会把 Award-grade prototype 的必须项压缩成**六个东西**。
+
+不是 30 个工程 feature。
+
+1. **真实开放入口**：`goal + visible observations`，不再是 fixture `task_id → GT binding`。现在 `/seed` 仍接受 `task_id`，`seed_session()` 仍 `_gt_binding(fixture)` + scripted driver，这必须改。turn932102view2
+
+2. **Runtime 没有 hidden write/read dependency**：GUI-only actuator；runtime projection 来自 visible observation；hidden API 只在 evaluator。
+
+3. **一次 Task Architect 调用**：milestones + workflow topology + GenUI schema 一起生成。
+
+4. **Autonomy loop + hot governance**：CUA 连续执行；用户任何时候可以 LocalPatch / GoalPatch / rollback；hot interrupt 用 epoch 防 stale action。
+
+5. **真正的 projection runtime**：Persistent `ProjectionStore`；数值改变 0 次 GenUI 调用；结构失效才 incremental compile / recomposition。
+
+6. **硬 benchmark**：同模型 direct-CUA vs TaskVM，测 success、cost、interaction compression、recovery、goal-change、rollback、open-world holdout。
+
+这六个做完，我会非常愿意叫它：
+
+> **Award-grade prototype ambition**
+
+然后停止。
+
+不要再扩成：
+
+```text
+完整 distributed transaction system
+完整 general-purpose workflow language
+production observability platform
+完整多用户协作
+```
+
+---
+
+# 13. 跨 substrate：OSWorld + MobileGym，一个 TaskVM 同时统领两个设备
+
+这个 bonus 我非常喜欢。
+
+而且最大的价值不是：
+
+> “哇，我们支持两个 benchmark。”
+
+而是它会非常直观地证明你论文标题/概念里的：
+
+> **Task VM 在 substrate 上方。**
+
+---
+
+想象 demo：
+
+用户面前 TaskVM：
+
+```text
+┌──────────── 我的出差协调任务 ────────────┐
+
+航班            ✓ desktop verified
+酒店            ✓ desktop verified
+接机联系人       ◐ phone executing
+日历            ✓ desktop verified
+
+              [整体 checkpoint C2]
+└───────────────────────────────────────┘
+```
+
+背后实际是：
+
+```text
+OSWorld / Desktop
+    Calendar
+    Browser
+    Files
+        │
+        │
+        ├──────── TaskVM Projection
+        │
+        │
+MobileGym / Phone
+    WeChat
+    Mobile App
+```
+
+用户根本不用关心：
+
+> 这一步是在 PC 还是手机。
+
+---
+
+## 架构上其实不用增加很多东西
+
+如果前面我们已经把 App-specific adapter 改成：
+
+```text
+SurfaceObserver
+SurfaceActuator
+```
+
+那么只需要：
+
+```python
+DesktopSurface(
+    observer=osworld_observer,
+    actuator=osworld_cua
+)
+
+MobileSurface(
+    observer=mobilegym_observer,
+    actuator=mobile_cua
+)
+```
+
+Task Architect 输出：
+
+```text
+Lane A:
+desktop
+
+Lane B:
+mobile
+```
+
+最后 barrier：
+
+```text
+两边都 verified
+↓
+checkpoint complete
+```
+
+就够了。
+
+---
+
+## 一个 demo 就足够
+
+千万别为 bonus 再做：
+
+```text
+20种设备
+动态设备发现
+分布式 scheduler
+跨设备锁
+```
+
+不要。
+
+一个非常漂亮的跨设备任务：
+
+> “在桌面读取今天金额最高的三笔支出，然后在手机微信把结果发给 Alice。”
+
+或者：
+
+> “在桌面确认会议时间和文件，在手机通知参会人。”
+
+只需要一两个 end-to-end task。
+
+它会让 reviewer **一眼看到 TaskVM 的 abstraction boundary**：
+
+> 同一个可操作任务投影，不属于任何一个 App，也不属于任何一台设备。
+
+这是非常强的 demo。
+
+但我会坚持顺序：
+
+```text
+P0 单 substrate 真闭环
+       ↓
+P1 GoalPatch + hot governance
+       ↓
+P2 benchmark
+       ↓
+Bonus cross-device
+```
+
+不要为了 bonus 让主链路继续带着 `_gt_binding` 跑。
+
+---
+
+# 最后，我现在建议把整个模型调用体系压缩成这样
+
+这其实是我这轮最重要的架构结论：
+
+```text
+用户：
+“帮我重新安排发布计划”
+        │
+        ▼
+┌─────────────────────────────┐
+│ 1. Binding / State Compiler │  ← 初始化通常 1 次
+│ visible world → task state  │
+└──────────────┬──────────────┘
+               ▼
+┌────────────────────────────────────────┐
+│ 2. Task Architect / Projection Composer│ ← 初始化 1 次
+│                                        │
+│ 一次产生：                              │
+│ • milestones                           │
+│ • sequence/fan-out/loop topology       │
+│ • GenUI schema                         │
+│ • semantic action contracts            │
+└──────────────┬─────────────────────────┘
+               ▼
+       ProjectionStore
+       + generated UI
+               │
+               ▼
+       ┌──────────────────┐
+       │ 3. CUA autonomy  │
+       │ screenshot→action│
+       │ →observe→action  │
+       └────────┬─────────┘
+                │
+       visible observation
+                ▼
+       ProjectionStore delta
+                │
+                ├────────→ SSE → UI 更新
+                │             0 GenUI calls
+                │
+                ▼
+          next commit unit
+```
+
+用户介入：
+
+```text
+                     Human Governance Event
+                              │
+            ┌─────────────────┼─────────────────┐
+            ▼                 ▼                 ▼
+       LocalPatch          GoalPatch      CompensationPatch
+            │                 │                 │
+       不 replan       Task Architect      rollback log
+            │              再调 1 次           │
+            └──────────────┬───────────────────┘
+                           ▼
+                         CUA
+```
+
+结构漂移：
+
+```text
+cheap fingerprint
+       │
+       ├─ 没变 → 0 model calls
+       │
+       └─ binding失效
+              ↓
+       incremental Compiler
+```
+
+这样初始化除了 CUA 以外，原则上只需要：
+
+> **2 次高层模型调用。**
+
+普通数据更新：
+
+> **0 次高层模型调用。**
+
+LocalPatch：
+
+> **0 次 planner / GenUI / subgoal 模型调用，只需要继续 CUA。**
+
+GoalPatch：
+
+> **1 次 Task Architect 重构受影响未来。**
+
+Rollback：
+
+> **0 次高层模型调用，直接由历史 compensation intent 驱动 CUA。**
+
+只有 UI 结构漂移导致 binding 失效：
+
+> **1 次 incremental compiler。**
+
+我认为这套比当前代码的 compiler + milestone + rule planner + GenUI + SubgoalGenerator + CUA + rollback NL **更像一个真正的 Task VM，也更像一篇 CHI，而不是一堆 Agent 模块拼起来的系统工程。**
+
+而且这里还有一个目前必须马上修的红线问题：现在 `GenUI Decoder` 的 prompt 明确包含 `entity_id` 和 `operator`，这直接违背 GG 文档“任何模型都不得看到 DB ID”的规定；不仅要优化调用次数，这个 prompt 本身就应该重构成纯 semantic projection state。turn138127view0
+
+**如果按优先级，我下一步会先动三刀：删除 runtime API executor/hidden-ID dependency → 合并 Task Architect → 建 ProjectionStore + action-driven resync。** 这三刀完成后，TaskVM 的整个心智模型会一下子从现在比较混乱的多层 adapter/fixture 架构变得非常清楚。
+
+
+【提问 轮数3】
+好的,现在按照我们这套对齐的来说,然后我希望你行,就首先第一个问题是现在太乱了,就是各个要素全堆叠在一块,一个图都画不完,就是一个这样的架构图你都画不完,更别说你一个图里面的这个元素本来就很多了。比如说现在你最后一轮给了我三个图,首先是任务初始化的一个图,然后是这个用户介入,然后是结构漂移,这就是三个图,然后每一个图的要素还特别特别多。我们确实不是做系统性的论文,但是确实是我们也希望它实现得更solid一点,就是说不定可以达到CHI-award-grade的prototype,对吧。但是问题就在于说,要素很多,这没问题,就是神说要素很多,但是它很乱,就是我重要的是它要多而不乱,你知道吧。你现在包括你的叙述,叙事啊,阐述啊,的这个逻辑也是,就是现在所有的东西全混杂在一块,然后最后全变成这个要素的线性堆叠和排列。包括其实我读起来也很累。就是有没有什么办法能够更模块化地去拆分,就是说这个它就是服务于这个目的,这个就是服务于那个目的,然后这个模块下就是做这个的。然后在叙事的时候,通过这套模块化的,甚至可以说是像那个计算机网络的那种协议层级的这种划分。就是对,我们也可以按照层级的划分嘛,就是从最上面是人类的高级指令,然后中间开始到这个GenUI层,然后再到中间的这个Task State的这样的一组数据保留,然后到最下边是CUA去具体执行,这样的感觉。你看着这个层级结构去组织,然后揭露在不同的时间节点,也就是说有的时候用户介入,有的时候用户不介入的情况下,分别这个层级结构会在不同的场景下表现出在什么样的这个行为变异,对吧。就是不只是叙事上以后要采取这套叙事,并且最好体现在代码的这个代码库的那个组织结构里面,也最好是采取这种组织结构的方式,让人一下就能看得懂。而且还是同样的,就是现在所有的,比如说 substrate吧,我的 substrate选取 mobile gym,或者是选取 buildin的平台的时候,我要求所有的差异性全部体现在一个文件夹,一个目录下面。而不是说你每一个目录下面,比如说你在 workspace UI上,也会因为选取不同的 substrate而有不同的体现。然后你选取这个 executor的时候,然后也是在不同的 substrate上有不同的体现,有不同的分支。就不要这么搞,我之前已经说过就像模块化,就是 substrate只保留在 substrate这个区域,然后它对外暴露一个统一的接口,然后外面其他所有出的这个文件夹,只要出的这个文件夹,其他的所有目录下的所有代码,都完全不可见,也不需要知道到底现在 substrate选取的是什么样的平台。就是现在好像还没做这一点,我总感觉。就不只是 substrate这一个点,就是其他的各个目录也都是同样的,就是出了这个目录以外,对于其他来说都是对于代码库的其他组织格式是透明的,所以这可能也需要重构一下。然后在这样重构模块化之后的划分之后,然后现在我要求你给出总结之前我们所有的对话的所有里面的内容,形成一个最终的交接文档,告诉我的coding agent现在要怎么做。之前,我的分工也是说会有一个审计agent,然后一个负责审计和规划的agent,还有一个coding agent。然后但是我不知道为什么,就是我的审计agent,它给出的那个交接prompt也好,然后包括我的coding agent在执行的过程中也好,总是感觉在隔靴搔痒,它离我最后预想的那个东西还是会差很多。我也不知道到底是哪个出了问题,我怀疑是上下文太长了,所以这也是为什么要求你采取模块化的划分,就是我可能没有办法说一轮就让它完成所有的这个目标,而且现在目标确实太多了。所以我希望你按模块化的拆分,拆分成若干个自洽的这样的一个任务目标,然后我可以同时交给多个这个子agent去开工、修改我的代码库。比如说一个子agent它就只修改substrate这一部分,然后另一个子agent就只修改另一部分,这样的感觉。并不是说一定要并行,但是总而言之就是你要明确地区分开它这个功能的边界。最后总而言之,基于上我们做的内容给出一个交接的prompt,不要遗漏任何重要的修改点。现在的prototype总是感觉四处漏风,你知道吗?就是这个地方有问题,那个地方有问题,大体框架好像搭起来了,但是每个具体的落实细节都离我们最终的预想的可交付的那个prototype有着很大很大的差距。而且VM moment也没有真正的完完全全地感觉涌现出来,就总还是感觉差那么一脚。然后每次debug的时候,就好像是说debug这个bug了,然后就临门一脚就踹开了。但是实际上修完这个bug之后还是有其他的bug。就是所以我现在才找你,让你完整的审计一轮,再,另外你也要具体去结合那个心智模型对齐的那个MD文件**https://github.com/HashTAG00002/A2UI/blob/gg-phase/docs/A2UI_%E5%BC%80%E5%B7%A5%E5%A4%A7%E7%BA%B2_v0_%E5%BF%83%E6%99%BA%E6%A8%A1%E5%9E%8B%E5%AF%B9%E9%BD%90%E7%89%88.md**,可能也需要去检查一下整个代码库的gate diff,然后主要是这个GG phase的这个分支,对。另外现在我本地的agent,我让他给我提交一个运行脚本,然后我跑起来了,然后发现整个前端到处都是bug,就是前端我之前说的时候什么那些代码啊,那些好好看的那些动画全都没实现,不知道为什么。就很莫名其妙。然后我刚刚又新交了一版本地agent修复过的,但是就是随便一点,它又会开始给我报错。然后,对。它就会说什么method not allowed,然后说什么this method is not allowed for the requested URL,然后就说这种屁话。就是现在前端也是完全用不了,基本上。 而且我也需要你去修复前端的现在展示形式,就是前端多个agent的这样的布局结构,就多个APP的这样的布局结构,就是我在一点之后,它是能实时动态地从我们维护那个数据库,而不是说再跑一轮这个进程,从那个维护的数据库由底层的这个CUA或者是其他的相关的东西来上报,一个具体的截图,然后你一点,它可以显示出这个截图,就是让他真实地看到当前执行到什么程度了,但不点的话就没有,就只是高层级的汇报这个东西。然后现在的就是你的workflow的多个milestone checkpoint组成的workflow也没有可视化出来,对吧?就是你也没有说一个进度条或者是一个fan in,fan out,或者是一个loop的这样的一个形式去把它可视化出来,展示,动态地展现当前执行到哪儿了。而且我一点就会报各种错,所以你就仔细去检查一下吧,就前端有很多bug要修现在。总而言之给出一个真正可用的交付文档,我可以直接丢给我的若干coating agent开工。对,你要交付若干个这样的交付文档,然后我丢给不同的agent开工,而每一个控制修改的长度是合理的,不要一下子一股脑全塞给一个agent,这样他会因为上下文过长而出现很多很多的问题,我还得重复反工。
+
+【回答内容 轮数3】
+I’ll re-audit `gg-phase`, its authoritative design, runtime boundaries, recent diffs, and frontend routes, then deliver a layered architecture plus bounded agent work orders with explicit interfaces and acceptance gates.
+
+【回答内容 轮数3】
+Initial findings point to missing single interfaces: `workspace_ui/server.py` and `StateAdapter` mix responsibilities across layers, while frontend 405/navigation failures include route-contract defects, not merely styling issues.
+
+【回答内容 轮数3】
+Frontend failures include malformed relative form routes, JSON-only navigation, duplicate SSE connections, and nested HTML documents. The handoff now contains nine bounded work orders plus frozen contracts and revised gates.
+
+【回答内容 轮数3】
+# 交接包已经完成
+
+我把之前所有讨论收束成了**一套五层协议架构、一个场景矩阵、八个核心 Coding Agent 工单、一个 Bonus 工单，以及一个独立 Audit Agent 验收 Prompt**。
+
+这次不再分别为“初始化、用户介入、结构漂移、回退”画四套架构。以后无论是代码、论文叙事还是演示，都只围绕下面这一套层级：
+
+```text
+L4  Governance
+    人类目标、LocalPatch、GoalPatch、CompensationPatch
+              ↓
+L3  Projection
+    Task Architect、ProjectionSchema、ProjectionStore、GenUI
+              ↓
+L2  VM Kernel
+    Task State、Workflow Runtime、Event Log、Checkpoint
+              ↓
+L1  Autonomy
+    CUA、GUIAction、Execution Epoch、Verifier、Compensation
+              ↓
+L0  Substrate
+    Builtin Web / OSWorld / MobileGym
+              ↓
+    真实应用和真实设备
+```
+
+Benchmark Oracle 是旁路实验设施，只能 reset、seed、读取 hidden GT 和判卷，**不得进入 Runtime 主链路**。
+
+这与心智模型对齐文档中的五个锚点是一致的：实时投影、双向可执行绑定、substrate independence、governance over autonomy，以及独立验证与可逆性；该文档同时明确要求开放场景写入必须经过真实 GUI，workflow 必须任务特异动态生成，任何模型输入不得包含用户屏幕上看不到的内部 ID。
+
+## 下载
+
+**推荐直接下载整个压缩包：**
+
+[下载 TaskVM Award-grade Prototype 完整交接包](sandbox:/mnt/data/TaskVM_Award_Grade_Handoff_Package.zip)
+
+也提供一个连续阅读版本：
+
+[阅读完整交接总文档](sandbox:/mnt/data/taskvm_award_handoff/TaskVM_Award_Grade_交接总文档.md)
+
+入口文档：
+
+[交接包 README 与派工顺序](sandbox:/mnt/data/taskvm_award_handoff/00_交接包_README.md)
+
+[五层协议架构与统一场景矩阵](sandbox:/mnt/data/taskvm_award_handoff/01_总架构_五层协议与场景矩阵.md)
+
+---
+
+# 这次审计得到的关键结论
+
+## 1. 当前最大问题不是“功能少”，而是协议层没有真正成立
+
+当前公共 `gg-phase` 中，`workspace_ui/server.py` 仍同时知道：
+
+- Flask route；
+- HTML；
+- SSE；
+- fixture；
+- GT binding；
+- adapter；
+- workflow；
+- GenUI 模型；
+- rollback；
+- App 和 MobileGym 布局。
+
+`substrate/base.py` 又同时承载：
+
+- 所有 App adapter；
+- API/GUI 双 executor；
+- reset/seed/read；
+- App port；
+- operator mapping；
+- MobileGym 特例。
+
+因此现在只是“目录看起来分开”，还不是：
+
+> 一个目录对外只暴露协议，其他层完全不知道内部实现。
+
+交接包把这一点改成了硬 Gate：
+
+```text
+workspace_ui 不得 import substrate 实现
+governance 不得 import Playwright
+autonomy 不得 import具体 App
+kernel 不得读取 benchmark oracle
+substrate 不得包含 workflow 语义
+Runtime 不得存在 API mutation
+模型输入不得出现 entity_id/operator/saga_id
+```
+
+---
+
+## 2. 前端 405 的高概率直接根因已经定位
+
+当前 fallback form 使用：
+
+```html
+<form method="post" action="edit">
+```
+
+而页面地址是：
+
+```text
+/<sid>
+```
+
+浏览器对相对 URL 的解析可能将它提交到：
+
+```text
+/edit
+```
+
+但真正的 Flask POST route 是：
+
+```text
+/<sid>/edit
+```
+
+所以请求会被其他 GET 路由匹配后返回 `405 Method Not Allowed`。代码注释声称它会提交到 `/<sid>/edit`，实际 HTML 却使用相对 `action="edit"`，这是静态代码中直接可见的不一致。turn658145view1
+
+更严重的是，现有测试还显式接受这个相对表单：
+
+```html
+action="edit"
+```
+
+并把 API-mode full loop 当作通过条件。也就是说，当前 Gate 不仅没有抓住错误，还在保护旧错误和旧架构。
+
+我在前端工单里没有只要求改成：
+
+```html
+action="/<sid>/edit"
+```
+
+因为那只是止血。最终方案是：
+
+- 所有治理操作统一走 versioned JSON API；
+- 前端 route 不再靠 HTML form 相对地址拼装；
+- 一个页面只有一个 SSE connection；
+- 页面加载先获取完整 `ProjectionSnapshot`；
+- 后续只接收 `ProjectionDelta`；
+- 不因 conflict 全页 reload；
+- 不因读值变化重新调用 GenUI；
+- 所有 route 都有 Flask client test 和 Playwright E2E test。
+
+---
+
+## 3. 当前 Runtime 仍保留 API executor
+
+`make_adapter()` 的默认 executor 仍然是 `"api"`，代码中也明确保留 legacy `requests.post` 写路径；read、seed、reset 也共同留在同一个 adapter 中。
+
+因此 Agent 1 工单要求的不是“默认改成 GUI”，而是：
+
+> **Runtime 类型系统里根本不再存在 API executor 这个选项。**
+
+最终拆成：
+
+```text
+Runtime Surface
+├── observe_visible()
+└── execute_gui_action()
+
+Benchmark Oracle
+├── reset()
+├── seed()
+├── read_hidden_state()
+└── evaluate()
+```
+
+两者不共享父类，不允许 Runtime 通过依赖注入拿到 Oracle。
+
+---
+
+## 4. 当前模型与内部 ID 的边界仍然泄漏
+
+当前 GenUI 输入会构造包含：
+
+```text
+entity_id
+field
+operator
+```
+
+的 binding 数据；编辑 workflow 还会生成：
+
+```text
+set app.entity_id.field → value
+```
+
+这样的自然语言。这和“模型输入只允许用户可见信息”的规则冲突。turn658145view1
+
+新架构把它改成：
+
+```text
+模型可见：
+“项目发布会议”
+“日期”
+“2026-08-20”
+“TaskBoard 中的发布文案”
+
+模型不可见：
+E1
+T1
+move_event
+set_deadline
+saga_173
+```
+
+内部寻址改用 TaskVM 自己维护的 `SurfaceHandle` cache，而不是 App 数据库 primary key。
+
+---
+
+## 5. 当前启动脚本不能作为可交付 artifact
+
+公开分支的 `run.sh` 仍硬编码：
+
+- 某位开发者的 Python 绝对路径；
+- repo 绝对路径；
+- Playwright browser 绝对路径；
+- `.chromelibs`；
+- 固定端口；
+- `fuser -k` 强杀端口；
+- Flask debug mode。
+
+Agent 7 工单专门负责：
+
+- 可移植 bootstrap；
+- 环境检查；
+- 进程生命周期；
+- readiness probe；
+- 日志目录；
+- Ctrl-C 清理；
+- 禁止杀死不属于本次启动的进程；
+- 一条命令启动；
+- 一条命令运行 smoke test。
+
+---
+
+# 模块化派工方式
+
+## Wave 0：先冻结协议，其他 Agent 不要同时自由开工
+
+[Agent 0：协议契约与架构 Gate](sandbox:/mnt/data/taskvm_award_handoff/02_Agent0_协议契约与架构Gate.md)
+
+Agent 0 不改业务，只建立：
+
+- 跨层 DTO；
+- Python `Protocol`；
+- import boundary tests；
+- hidden-ID leak gate；
+- API mutation gate；
+- substrate opacity gate。
+
+这是最重要的第一步。
+
+没有它，多个 Agent 会分别发明：
+
+- 不同版本的 task state；
+- 不同版本的 workflow node；
+- 不同版本的 event；
+- 不同版本的 screenshot payload；
+- 不同版本的 patch。
+
+最后仍会重新粘成一个大泥球。
+
+---
+
+## Wave 1：底层与状态内核可以并行
+
+### Agent 1：Substrate 隔离和 GUI-only
+
+[Agent 1 工单](sandbox:/mnt/data/taskvm_award_handoff/03_Agent1_Substrate隔离与GUIOnly.md)
+
+只负责：
+
+- Builtin Web；
+- OSWorld；
+- MobileGym；
+- observer；
+- GUI actuator；
+- substrate registry；
+- benchmark oracle 分离。
+
+上层不能知道当前使用的是哪一种 substrate。
+
+---
+
+### Agent 2：VM Kernel 和 ProjectionStore
+
+[Agent 2 工单](sandbox:/mnt/data/taskvm_award_handoff/04_Agent2_VMKernel与ProjectionStore.md)
+
+只负责：
+
+- `ObservedTaskState`；
+- `WorkflowRuntimeState`；
+- `ProjectionStore`；
+- `RuntimeEventLog`；
+- snapshot；
+- delta；
+- SurfaceHandle cache；
+- fast-path fingerprint；
+- incremental rebind 请求。
+
+这是 VM moment 在代码中的真正落脚点：
+
+> TaskVM 页面读的是 VM Store，而不是重新查询各个 App，更不是每次重新跑 GenUI。
+
+---
+
+## Wave 2：高层任务架构与底层自治执行并行
+
+### Agent 3：Task Architect 与 Governance
+
+[Agent 3 工单](sandbox:/mnt/data/taskvm_award_handoff/05_Agent3_TaskArchitect与Governance.md)
+
+把这些角色合并：
+
+```text
+Milestone Suggester
++ Workflow Planner
++ GenUI Composer
++ Action Contract Generator
+= Task Architect
+```
+
+一次输出：
+
+- task-specific milestones；
+- sequence / fan-out–fan-in / bounded-loop topology；
+- GenUI `ProjectionSchema`；
+- semantic action contracts；
+- checkpoint；
+- reversibility/risk metadata。
+
+同时形式化三类治理修改：
+
+```text
+LocalPatch
+GoalPatch
+CompensationPatch
+```
+
+独立的 model-based SubgoalGenerator 被删除。
+
+---
+
+### Agent 4：CUA 自治、热中断和真实回退
+
+[Agent 4 工单](sandbox:/mnt/data/taskvm_award_handoff/06_Agent4_CUA执行热中断与真实回退.md)
+
+只负责：
+
+- CUA screenshot → action loop；
+- GUIAction 最小打断点；
+- Execution Epoch；
+- stale response 丢弃；
+- hot/cold intervention；
+- task-level model budget；
+- verifier gate；
+- GUI compensation；
+- 不可逆动作确认。
+
+用户不操作时，CUA 持续自治推进；用户热干预时，旧目标下已经发出的模型结果不能继续落地。
+
+---
+
+## Wave 3：前端在 Store 和 Control API 稳定后开工
+
+[Agent 5：前端修复与动态 VM 可视化](sandbox:/mnt/data/taskvm_award_handoff/07_Agent5_前端修复与动态VM可视化.md)
+
+这份工单涵盖你提到的全部前端问题：
+
+### 立即修复
+
+- 405；
+- 错误 HTTP methods；
+- route matrix；
+- 重复 SSE；
+- SSE 断开后永不恢复；
+- full-page reload；
+- 刷新丢 workflow；
+- 点击按钮静默失败；
+- 空 workflow 区；
+- legacy fallback forms。
+
+### App / Surface 动态展示
+
+默认高层卡片只显示：
+
+```text
+Calendar
+正在修改项目发布会议
+状态：Executing
+最近更新：2 秒前
+```
+
+用户点开后，才展开：
+
+- 当前最新截图；
+- surface 状态；
+- CUA 正在实现的语义目标；
+- 最近 GUI action；
+- verifier 状态；
+- screenshot timestamp；
+- stale 标记。
+
+截图由 CUA/observer 写入 ProjectionStore，前端不启动新执行进程，也不直接访问 Playwright。
+
+### Workflow 可视化
+
+动态显示：
+
+- Sequence；
+- Fan-out；
+- Fan-in verifier barrier；
+- Bounded Loop；
+- checkpoint；
+- 当前 active node；
+- verified node；
+- waiting lane；
+- failed lane；
+- rolled-back node；
+- irreversible lock。
+
+节点必须显示业务语言：
+
+```text
+同步发布会议和依赖任务
+```
+
+而不是：
+
+```text
+parallel fanout
+step 1
+lane 2
+```
+
+### 动画
+
+动画只根据 runtime state transition 触发：
+
+```text
+waiting → executing
+executing → agent_done
+agent_done → verified
+verified → committed
+```
+
+不再用固定 timer 假装 Agent 正在执行。
+
+---
+
+## Wave 4：Benchmark 重建
+
+[Agent 6：Benchmark 与新 Gate 矩阵](sandbox:/mnt/data/taskvm_award_handoff/08_Agent6_Benchmark与新Gate矩阵.md)
+
+将当前一个 500 多行的大型测试文件拆成：
+
+```text
+L0 Architecture Gates
+L1 Component Gates
+L2 Runtime Contract Gates
+L3 Live GUI End-to-End Gates
+L4 Research Benchmark
+```
+
+主结果禁止：
+
+- API executor；
+- GT binding；
+- scripted workflow；
+- hidden state runtime read；
+- synthetic success without GUI trace。
+
+Benchmark Oracle 仍可以通过 API 布置和判卷，但 Agent 看不到。
+
+这份工单还包括：
+
+- direct CUA baseline；
+- planner + CUA baseline；
+- TaskVM full；
+- GT-binding oracle upper bound；
+- projection/rollback/replan ablations；
+- unseen task；
+- unseen App；
+- unseen operation；
+- cross-product holdout；
+- conflict；
+- hot GoalPatch；
+- rollback；
+- UI drift；
+- partial fan-out failure；
+- model calls、GUI actions、latency、recovery cost。
+
+---
+
+## Wave 5：最终集成和停线验收
+
+[Agent 7：集成、启动脚本与最终 Definition of Done](sandbox:/mnt/data/taskvm_award_handoff/09_Agent7_集成启动脚本与最终DoD.md)
+
+Agent 7 不再重新设计架构，只负责：
+
+- app factory；
+- dependency injection；
+- 删除迁移 shim；
+- 删除旧 fallback；
+- 清理 API executor；
+- 可移植启动；
+- 完整 smoke test；
+- README 对齐；
+- 最终 DoD。
+
+---
+
+# Bonus：跨设备统一投影
+
+[OSWorld + MobileGym 跨设备 Bonus 工单](sandbox:/mnt/data/taskvm_award_handoff/10_Bonus_跨设备统一投影.md)
+
+它被明确安排为核心 Gate 全绿后的 Bonus，不阻塞主线。
+
+只做一到两个高质量任务：
+
+```text
+同一个 TaskVM session
+        │
+        ├── desktop lane / OSWorld
+        └── mobile lane / MobileGym
+                    │
+              verifier fan-in
+```
+
+上层 workflow、projection、governance 和 VM Kernel 不出现任何 `if mobile` / `if osworld`。
+
+这会成为非常强的 substrate-independence 展示，但不会扩建成多设备分布式平台。
+
+---
+
+# 给审计 Agent 的独立验收机制
+
+[独立 Audit Agent Prompt](sandbox:/mnt/data/taskvm_award_handoff/12_AuditAgent_独立审计与逐模块验收Prompt.md)
+
+它要求审计 Agent 每次必须输出：
+
+```text
+A. PASS / CONDITIONAL PASS / FAIL
+B. Claim-to-code 映射
+C. 越层依赖
+D. 隐藏后门
+E. 运行证据
+F. Gate 质量
+G. P0/P1/P2
+H. 最小返工清单
+```
+
+每个问题必须带：
+
+- 文件；
+- 符号；
+- 代码证据；
+- 违反哪条 contract；
+- 如何动态复现；
+- 最小修复范围；
+- 修复后哪个 Gate 应失败转成功。
+
+它不得因为：
+
+- pytest 全绿；
+- 有一张截图；
+- 有一个 happy-path demo；
+- 函数名字看起来合理；
+- Coding Agent 声称已完成；
+
+就判 PASS。
+
+---
+
+# 当前代码证据汇总
+
+[公共 `gg-phase` 静态审计证据](sandbox:/mnt/data/taskvm_award_handoff/11_当前代码审计证据.md)
+
+这份文档按五层协议整理了当前所有主要越界点，不再按“发现问题的时间顺序”线性堆叠。
+
+包括：
+
+- `server.py` God module；
+- GT binding；
+- scripted driver；
+- relative form 405；
+- model-facing hidden ID；
+- GenUI render-time model call；
+- duplicate SSE；
+- API executor；
+- central adapter registry；
+- rule workflow；
+- node-boundary-only pause；
+- rollback hidden read；
+- API-mode tests；
+- non-portable run script。
+
+---
+
+# 实际派发时的上下文控制
+
+不要把完整 9 万字节总文档发送给每个 Coding Agent。
+
+每个 Agent 只接收四部分：
+
+```text
+1. 心智模型对齐文档
+2. 01_总架构_五层协议与场景矩阵.md
+3. 自己对应的一份 Agent 工单
+4. Agent0 已合并的 contracts 和当前 git diff
+```
+
+并要求它：
+
+```text
+先报告边界理解
+→ 列出将修改的文件
+→ 执行修改
+→ 提供原始测试输出
+→ 提供 git diff --stat
+→ 交给 Audit Agent
+```
+
+不要让 Coding Agent同时承担：
+
+```text
+发现架构
++ 设计接口
++ 改代码
++ 改前端
++ 改测试
++ 自己验收自己
+```
+
+这正是过去“隔靴搔痒”和不断返工的主要来源。
+
+---
+
+## 需要特别说明的范围限制
+
+这轮我审计的是 **2026 年 8 月 13 日可访问的 GitHub 公共 `gg-phase` 分支**。你刚刚在本地让 Agent 提交、但尚未 push 到这个公共分支的改动，我无法从仓库网页看到。
+
+因此：
+
+- 我定位了公共分支中 405 的高概率直接原因；
+- 我完成了架构审计和模块化交接；
+- 我没有在你的本地环境实际点击并复现每一个最新前端错误；
+- 我也没有在这轮直接修改你的 GitHub 代码。
+
+每份工单开头都要求 Coding Agent 先采集本地：
+
+```bash
+git status --short
+git rev-parse HEAD
+git diff --stat
+git diff
+```
+
+避免覆盖你本地刚修过但未 push 的内容。
+
+
+【提问 轮数4】
+好的,现在按照我们这套对齐的来说,然后我希望你行,就首先第一个问题是现在太乱了,就是各个要素全堆叠在一块,一个图都画不完,就是一个这样的架构图你都画不完,更别说你一个图里面的这个元素本来就很多了。比如说现在你最后一轮给了我三个图,首先是任务初始化的一个图,然后是这个用户介入,然后是结构漂移,这就是三个图,然后每一个图的要素还特别特别多。我们确实不是做系统性的论文,但是确实是我们也希望它实现得更solid一点,就是说不定可以达到CHI-award-grade的prototype,对吧。但是问题就在于说,要素很多,这没问题,就是神说要素很多,但是它很乱,就是我重要的是它要多而不乱,你知道吧。你现在包括你的叙述,叙事啊,阐述啊,的这个逻辑也是,就是现在所有的东西全混杂在一块,然后最后全变成这个要素的线性堆叠和排列。包括其实我读起来也很累。就是有没有什么办法能够更模块化地去拆分,就是说这个它就是服务于这个目的,这个就是服务于那个目的,然后这个模块下就是做这个的。然后在叙事的时候,通过这套模块化的,甚至可以说是像那个计算机网络的那种协议层级的这种划分。就是对,我们也可以按照层级的划分嘛,就是从最上面是人类的高级指令,然后中间开始到这个GenUI层,然后再到中间的这个Task State的这样的一组数据保留,然后到最下边是CUA去具体执行,这样的感觉。你看着这个层级结构去组织,然后揭露在不同的时间节点,也就是说有的时候用户介入,有的时候用户不介入的情况下,分别这个层级结构会在不同的场景下表现出在什么样的这个行为变异,对吧。就是不只是叙事上以后要采取这套叙事,并且最好体现在代码的这个代码库的那个组织结构里面,也最好是采取这种组织结构的方式,让人一下就能看得懂。而且还是同样的,就是现在所有的,比如说 substrate吧,我的 substrate选取 mobile gym,或者是选取 buildin的平台的时候,我要求所有的差异性全部体现在一个文件夹,一个目录下面。而不是说你每一个目录下面,比如说你在 workspace UI上,也会因为选取不同的 substrate而有不同的体现。然后你选取这个 executor的时候,然后也是在不同的 substrate上有不同的体现,有不同的分支。就不要这么搞,我之前已经说过就像模块化,就是 substrate只保留在 substrate这个区域,然后它对外暴露一个统一的接口,然后外面其他所有出的这个文件夹,只要出的这个文件夹,其他的所有目录下的所有代码,都完全不可见,也不需要知道到底现在 substrate选取的是什么样的平台。就是现在好像还没做这一点,我总感觉。就不只是 substrate这一个点,就是其他的各个目录也都是同样的,就是出了这个目录以外,对于其他来说都是对于代码库的其他组织格式是透明的,所以这可能也需要重构一下。然后在这样重构模块化之后的划分之后,然后现在我要求你给出总结之前我们所有的对话的所有里面的内容,形成一个最终的交接文档,告诉我的coding agent现在要怎么做。之前,我的分工也是说会有一个审计agent,然后一个负责审计和规划的agent,还有一个coding agent。然后但是我不知道为什么,就是我的审计agent,它给出的那个交接prompt也好,然后包括我的coding agent在执行的过程中也好,总是感觉在隔靴搔痒,它离我最后预想的那个东西还是会差很多。我也不知道到底是哪个出了问题,我怀疑是上下文太长了,所以这也是为什么要求你采取模块化的划分,就是我可能没有办法说一轮就让它完成所有的这个目标,而且现在目标确实太多了。所以我希望你按模块化的拆分,拆分成若干个自洽的这样的一个任务目标,然后我可以同时交给多个这个子agent去开工、修改我的代码库。比如说一个子agent它就只修改substrate这一部分,然后另一个子agent就只修改另一部分,这样的感觉。并不是说一定要并行,但是总而言之就是你要明确地区分开它这个功能的边界。最后总而言之,基于上我们做的内容给出一个交接的prompt,不要遗漏任何重要的修改点。现在的prototype总是感觉四处漏风,你知道吗?就是这个地方有问题,那个地方有问题,大体框架好像搭起来了,但是每个具体的落实细节都离我们最终的预想的可交付的那个prototype有着很大很大的差距。而且VM moment也没有真正的完完全全地感觉涌现出来,就总还是感觉差那么一脚。然后每次debug的时候,就好像是说debug这个bug了,然后就临门一脚就踹开了。但是实际上修完这个bug之后还是有其他的bug。就是所以我现在才找你,让你完整的审计一轮,再,另外你也要具体去结合那个心智模型对齐的那个MD文件**https://github.com/HashTAG00002/A2UI/blob/gg-phase/docs/A2UI_%E5%BC%80%E5%B7%A5%E5%A4%A7%E7%BA%B2_v0_%E5%BF%83%E6%99%BA%E6%A8%A1%E5%9E%8B%E5%AF%B9%E9%BD%90%E7%89%88.md**,可能也需要去检查一下整个代码库的gate diff,然后主要是这个GG phase的这个分支,对。另外现在我本地的agent,我让他给我提交一个运行脚本,然后我跑起来了,然后发现整个前端到处都是bug,就是前端我之前说的时候什么那些代码啊,那些好好看的那些动画全都没实现,不知道为什么。就很莫名其妙。然后我刚刚又新交了一版本地agent修复过的,但是就是随便一点,它又会开始给我报错。然后,对。它就会说什么method not allowed,然后说什么this method is not allowed for the requested URL,然后就说这种屁话。就是现在前端也是完全用不了,基本上。 而且我也需要你去修复前端的现在展示形式,就是前端多个agent的这样的布局结构,就多个APP的这样的布局结构,就是我在一点之后,它是能实时动态地从我们维护那个数据库,而不是说再跑一轮这个进程,从那个维护的数据库由底层的这个CUA或者是其他的相关的东西来上报,一个具体的截图,然后你一点,它可以显示出这个截图,就是让他真实地看到当前执行到什么程度了,但不点的话就没有,就只是高层级的汇报这个东西。然后现在的就是你的workflow的多个milestone checkpoint组成的workflow也没有可视化出来,对吧?就是你也没有说一个进度条或者是一个fan in,fan out,或者是一个loop的这样的一个形式去把它可视化出来,展示,动态地展现当前执行到哪儿了。而且我一点就会报各种错,所以你就仔细去检查一下吧,就前端有很多bug要修现在。总而言之给出一个真正可用的交付文档,我可以直接丢给我的若干coating agent开工。对,你要交付若干个这样的交付文档,然后我丢给不同的agent开工,而每一个控制修改的长度是合理的,不要一下子一股脑全塞给一个agent,这样他会因为上下文过长而出现很多很多的问题,我还得重复反工。
+
+你记,我发现那个性质模型对齐的MD文件现在已经开始成为历史包袱了,它里面说的很多东西都跟我们现在的东西是矛盾的,所以这个东西也可能需要适应的修改。我怀疑之前所有的修改的,我怀疑之前的修改之所以有的时候没有那么忠诚、忠实地追随我的指令的一个主要原因就是,我的性质,它是追随了这个性质模型对齐版.md文件的,但这个文件里面有很多过时的这个相关的设计的方法,而且有很多什么Kill test（我现在不要任何中间阶段的实现了，我只要最终交付结果prototype+benchmark+用户前端，killtest这些过时的中间产物全部删掉！！）啊,然后内部的什么API结构实现啊,甚至还有entity ID这种东西啊之类的。这些都是我后来反复重申要删掉的,但是我并且我也没有仔细地去看这个性质模型对齐的MD文件里面到底有没有相关的阐述。所以我现在要求你,就是把性质模型对齐版这个MD里面的所有具体实现层级的细节全部删掉。请注意,不是用你这一轮的实现去替代它以前的过时的实现,而是把相关的实现全部都删掉,好吧。因为本来这个东西就应该是一个抽象的指导性的大纲,它不应该具体地去指导说在每个地方做什么。所以你要把具体的实现层面的细节,就是Task VM到底要怎么实现的这方面的东西全给删掉。但是要保留所有的实现目标,就是什么呢?就是我们最后实现完这个 Task VM之后要达到一个什么样的结果,要形成一个什么样的这个特性的这样的一个东西,重点描述的是结果,就是我们要实现成什么,而不是说我们怎么去实现,具体设计什么字段啊,然后输入什么字段,输出什么字段这种感觉的细粒度的,因为随时都在变嘛。所以我发现过去的工作流也有瑕疵,你也是要帮我改正一下
+
+最终交付若干个.md文件，我会复制给每个coding agent一个，来完成一部分的coding
+
+【回答内容 轮数4】
+I’ll first audit `gg-phase` end-to-end, including boundaries, routes, frontend, scripts, and legacy killtest/API/entity-ID remnants. Then I’ll produce layered, non-overlapping agent handoffs with explicit scopes and acceptance gates.
+
+【回答内容 轮数4】
+The audit already found stale architecture guidance and a hard-coded `run.sh`; these can keep misleading agents. The frontend 405s specifically stem from relative form actions dropping `/<sid>`.
+
+【回答内容 轮数4】
+The deeper issue is boundary leakage: `substrate/base.py`, `harness/`, and `workspace_ui/server.py` currently mix platform, evaluation, execution, and UI concerns. Handoffs will enforce directory ownership and centralized composition.
+
+【回答内容 轮数4】
+已经整理成一套**可直接分发给多个 Coding Agent 的模块化交接包**。共包含：
+
+- 1 份总交接与主架构；
+- 1 份心智模型对齐文档完整替换稿；
+- 6 份核心 Coding Agent 任务；
+- 1 份最终集成任务；
+- 1 份跨设备 Bonus；
+- 1 份精简 Agent Rules 替换稿；
+- 1 份当前仓库详细审计矩阵；
+- 1 份索引。
+
+整套交接采用同一张六层架构图，不再分别为初始化、自治、干预、漂移和回退堆叠多套概念：
+
+```text
+Human Governance & Projection UI
+                 ↓
+           Task Architect
+                 ↓
+            TaskVM Kernel
+                 ↓
+          Autonomy Runtime
+                 ↓
+           Substrate Port
+
+Evaluation Plane 独立在旁边，只负责布置考场和判卷
+```
+
+## 这轮审计确认的三个关键问题
+
+第一，前端的 `405 Method Not Allowed` 并不是随机 Flask 故障。当前多个表单使用 `action="edit"`、`action="checkpoint"`、`action="resolve"` 等相对地址；在 `/<sid>` 这种没有尾斜杠的页面上，浏览器会将其解析成 `/edit`、`/checkpoint`，而不是 `/<sid>/edit`。POST 随后命中 GET-only 动态路由，稳定地产生 405。交接文档已经要求彻底改成统一的 URL/API contract，并为每一个按钮做 route-method 自动化测试。turn641015view4turn641015view5turn641015view6
+
+第二，Coding Agent 反复偏离目标，很可能不只是上下文太长，而是**仓库中同时存在多个相互矛盾的权威来源**。当前心智模型文档仍包含 SSE、内部 ID、operator、精确字段、kill-test 与阈值等具体实现；根目录 `.mrules` 又是一份约 1900 行的演化史，并要求所有 Agent 必读和持续追加。这会让新 Agent 优先服从旧阶段实现，而不是你现在重新对齐的最终目标。turn400545view0
+
+第三，当前 `evaluation/` 仍主要由 W1/W2/W3、MobileGym、open-world、reconciliation、substrate-invariance 等多套 `run_*killtest.py` 组成，`pyproject.toml` 也仍把项目描述成 `0.1.0-w1` 和 “W1 kill-test”。这些历史产物必须删除，而不是继续叠加一层“最终评估”。turn762089view2
+
+---
+
+# 建议分发顺序
+
+不要一次性把全部文件交给一个 Agent。
+
+### 第一阶段：冻结架构合同
+
+先把总交接交给所有 Agent阅读，再让 Agent A 单独完成 Kernel/Domain：
+
+1. `00_README_MASTER_HANDOFF.md`
+2. `01_MENTAL_MODEL_ALIGNMENT_REPLACEMENT.md`
+3. `02_LAYERED_KERNEL_REFACTOR_AGENT.md`
+
+Agent A 完成并冻结公共类型和接口之后，再启动并行任务。
+
+### 第二阶段：四个 Agent 并行
+
+分别只给它们总交接、心智模型和自己的任务文件：
+
+- Agent B：Substrate 隔离；
+- Agent C：Task Architect / Governance；
+- Agent D：Projection / Frontend；
+- Agent E：CUA Runtime / 同步 / Rollback。
+
+### 第三阶段：Benchmark
+
+公共接口稳定后，再给 Benchmark Agent 开工，防止它继续围绕旧 adapter、GT binding 和 API executor 写评估。
+
+### 第四阶段：Integration
+
+最后一个 Agent 负责合并、删除旧代码、修运行脚本、替换 `.mrules`、跑完整 E2E。
+
+### 第五阶段：Bonus
+
+OSWorld + MobileGym 跨设备投影只在主链通过后开始，绝不阻塞核心 prototype。
+
+---
+
+# 完整交付包
+
+[下载全部交接文档 ZIP](sandbox:/mnt/data/taskvm_agent_handoffs.zip)
+
+[交付包索引 INDEX.md](sandbox:/mnt/data/taskvm_agent_handoffs/INDEX.md)
+
+| 顺序 | 用途 | 文件 |
+|---|---|---|
+| 00 | 所有 Agent 必读；主架构、边界、顺序与最终 DoD | [总交接文档](sandbox:/mnt/data/taskvm_agent_handoffs/00_README_MASTER_HANDOFF.md) |
+| 01 | 完整替换当前心智模型对齐文档，只保留结果性原则 | [心智模型替换稿](sandbox:/mnt/data/taskvm_agent_handoffs/01_MENTAL_MODEL_ALIGNMENT_REPLACEMENT.md) |
+| 02 | Agent A：纯 Domain、Kernel、Store、Event、依赖 Gate | [Layered Kernel 重构任务](sandbox:/mnt/data/taskvm_agent_handoffs/02_LAYERED_KERNEL_REFACTOR_AGENT.md) |
+| 03 | Agent B：删除 API executor、隔离 Web/Mobile/OS substrate | [Substrate 隔离任务](sandbox:/mnt/data/taskvm_agent_handoffs/03_SUBSTRATE_ISOLATION_AGENT.md) |
+| 04 | Agent C：State Compiler、Task Architect、GoalPatch、Replan | [Task Architect 与 Governance 任务](sandbox:/mnt/data/taskvm_agent_handoffs/04_TASK_ARCHITECT_GOVERNANCE_AGENT.md) |
+| 05 | Agent D：修复 405、Projection Store、workflow 图和截图界面 | [Projection Frontend 任务](sandbox:/mnt/data/taskvm_agent_handoffs/05_PROJECTION_FRONTEND_AGENT.md) |
+| 06 | Agent E：自治循环、热中断、epoch、同步、验证和真实 rollback | [CUA Runtime 与 Rollback 任务](sandbox:/mnt/data/taskvm_agent_handoffs/06_CUA_EXECUTION_SYNC_ROLLBACK_AGENT.md) |
+| 07 | Agent F：删除 kill-test，建立唯一 final benchmark | [最终 Benchmark 任务](sandbox:/mnt/data/taskvm_agent_handoffs/07_FINAL_BENCHMARK_AGENT.md) |
+| 08 | Agent G：合并、启动脚本、README、docs、旧代码清理、最终 E2E | [集成与发布任务](sandbox:/mnt/data/taskvm_agent_handoffs/08_INTEGRATION_RELEASE_CLEANUP_AGENT.md) |
+| 09 | Agent H：OSWorld + MobileGym 跨设备统一投影 | [跨设备 Bonus 任务](sandbox:/mnt/data/taskvm_agent_handoffs/09_CROSS_DEVICE_BONUS_AGENT.md) |
+| 10 | 替换当前超长 `.mrules` 或作为根目录 `AGENTS.md` | [精简 Agent Rules](sandbox:/mnt/data/taskvm_agent_handoffs/10_AGENT_RULES_REPLACEMENT.md) |
+| 11 | 给审计 Agent；当前问题、文件路径、Owner 和最终核对表 | [当前仓库审计矩阵](sandbox:/mnt/data/taskvm_agent_handoffs/11_CURRENT_REPOSITORY_AUDIT.md) |
+
+---
+
+# 每个任务包已经钉死的边界
+
+## Agent A：只搭 TaskVM 的“内核”
+
+它只负责：
+
+- Task State；
+- Projection Schema/Data；
+- Workflow primitive；
+- Local/Goal/Compensation Patch；
+- Event Log；
+- Checkpoint；
+- Store；
+- import dependency gate。
+
+它不能碰 Flask、Playwright、OpenAI、benchmark 或具体 substrate。
+
+这样其他 Agent 才不会再各自发明一套 `PatchOp`、`WorkflowPlan` 和 session state。
+
+## Agent B：所有平台差异只能在 Substrate 目录
+
+它负责把：
+
+- built-in Web；
+- MobileGym；
+- OSWorld；
+
+全部包装成统一的：
+
+```text
+observe
+act
+capture
+close
+```
+
+Workspace UI、Kernel、Runtime、Architect 不允许知道当前到底是 Web、MobileGym 还是 OSWorld。
+
+它还负责彻底删除：
+
+- `executor="api"`；
+- app mutation API；
+- `read_canonical()` runtime dependency；
+- hidden DB entity ID；
+- simulator `setState`；
+- snapshot restore；
+- `harness/state_adapter.py` shim。
+
+## Agent C：合并高层模型角色
+
+不再保留：
+
+```text
+Milestone Suggester
++ Rule Planner
++ GenUI Decoder
++ SubgoalGenerator
+```
+
+这种角色堆叠。
+
+新的高层结构是：
+
+```text
+State Compiler
+Task Architect / Projection Composer
+CUA
+```
+
+Task Architect 一次产生：
+
+- milestone；
+- sequence/fan-out/bounded-loop topology；
+- projection schema；
+- action contracts；
+- risk/reversibility；
+- verification intent。
+
+普通数值变化不会再调用 GenUI 模型。
+
+## Agent D：只做 Projection 和前端
+
+该任务包已经把你提出的前端要求全部写成验收项：
+
+- 修复所有 405/500；
+- 多 App / 多 surface 卡片；
+- 默认只显示高层状态；
+- 点击卡片读取已缓存的最新真实截图；
+- 点击不重新调用模型，不重新执行 App；
+- 实时显示 CUA 当前进度；
+- workflow 可视化 sequence、fan-out、fan-in 和 bounded loop；
+- milestone/checkpoint 业务化命名；
+- LocalPatch、GoalPatch、pause、rollback、conflict 可操作；
+- SSE 断线重连；
+- 动画与状态变化一致；
+- Playwright UI E2E；
+- 浏览器 console error 必须为零。
+
+## Agent E：把“用户不操作”真正变成自治运行
+
+这个任务明确要求：
+
+> 用户不操作时，CUA 持续自治推进，不是每五秒静态轮询。
+
+同步改为：
+
+```text
+CUA action
+→ 新 observation
+→ Projection Store delta
+→ SSE
+→ UI 更新
+```
+
+Heartbeat 只补充当前 CUA 没在看的 inactive surfaces。
+
+它也实现你提出的热拔插：
+
+```text
+CUA 请求 epoch=17
+用户 GoalPatch
+current epoch=18
+旧回复回来
+→ 丢弃，不执行
+```
+
+最小打断点从 workflow node 降到单个原子 GUI action。
+
+## Agent F：只保留唯一最终 Benchmark
+
+所有 `run_*killtest.py` 都在删除清单中。
+
+最终统一比较：
+
+- Direct CUA；
+- Planner + CUA；
+- TaskVM；
+- TaskVM oracle-binding upper bound；
+- 必要 ablations。
+
+并报告：
+
+- task success；
+- non-interference；
+- model calls；
+- tokens；
+- GUI actions；
+- latency；
+- GoalPatch；
+- hot interruption；
+- conflict；
+- rollback；
+- OOD；
+- substrate invariance；
+- heartbeat fast-path 比例。
+
+## Agent G：负责真正“交付”
+
+它不再新增研究功能，只负责：
+
+- 按顺序合并；
+- 替换心智模型文档；
+- 删除 GG/EE/HANDOFF/kill-test 历史；
+- 替换超长 `.mrules`；
+- 重写 README；
+- 重写不可移植的 `run.sh`；
+- 停止默认 Flask debug reloader；
+- 清理 shim/stub/fallback；
+- 自动遍历所有 route，确保无 405/500；
+- 从干净环境单命令启动；
+- 跑完整真实 E2E。
+
+---
+
+# 关于你要求删除实现细节的心智模型文档
+
+替换稿中已经彻底删除：
+
+- `entity_id`；
+- operator；
+- SSE；
+- Flask；
+- Playwright；
+- API 路由；
+- PatchOp 字段；
+- exact model-call 数；
+- kill-test；
+- W1/W2/W3/GG/EE；
+- exact benchmark threshold；
+- 具体类名和目录；
+- 具体 Stack A/B 实现规定。
+
+它只保留：
+
+- TaskVM 要改变什么；
+- 五种最终性质；
+- 人与自治的关系；
+- task-state 而非 trajectory；
+- sequence/fan-out/loop 的研究范围；
+- 局部调整、目标重构和回退的语义区别；
+- 开放场景边界；
+- 用户体验目标；
+- benchmark 应回答的科学问题；
+- 非目标和工程刹车线。
+
+这份文档以后不会因为换一个字段、模型、前端框架或 substrate 就再次成为历史包袱。
+
+---
+
+# 一个重要使用提醒
+
+本轮审计对应的是 **GitHub 当前公开的 `gg-phase` 分支**。我没有访问你机器上尚未 push 的本地 commit，也没有在本轮真正启动你本地的模型端点、Playwright 浏览器、MobileGym 和 OSWorld，因此 `11_CURRENT_REPOSITORY_AUDIT.md` 明确标注为静态审计。
+
+不过前端 405 的相对 URL 问题、API executor/hidden canonical 残留、god server、GenUI prompt 内部 ID、kill-test 堆叠、`.mrules` 上下文污染和启动脚本绝对路径等问题，都有当前仓库代码直接支持，不是基于猜测。当前根目录和 `taskvm/` 的目录结构也仍然保留 `_shim`、`harness`、`workspace_ui`、`evaluation` 等多套历史层级，说明这次重构确实需要以“删除旧真源”为完成条件，而不能只在旁边再建一套新目录。turn112923view3
