@@ -72,9 +72,14 @@ class ProjectionSchema:
 class ProjectionData:
     """The volatile part: current display values, node statuses, progress.
 
-    ``values`` maps a task variable's semantic key to its display value;
+    ``values`` maps a task variable's semantic key to a small display
+    record ``{"observed": ..., "desired": ..., "diverged": bool}`` so the
+    projection layer can render pending divergence honestly (a user edit
+    that reality has not yet confirmed must NOT look done).
     ``node_status`` maps a workflow node id to its business-visible status
-    string. Both are replaced wholesale per update (small by design).
+    string. Both are REPLACED wholesale by the kernel on every refresh —
+    keys removed from the task state or the workflow must disappear here
+    (authoritative replace, never a merge that leaves stale keys).
     """
 
     values: dict[str, Any] = field(default_factory=dict)

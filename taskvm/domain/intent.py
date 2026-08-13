@@ -34,7 +34,8 @@ class TaskIntent:
             object.__setattr__(self, f, tuple(getattr(self, f)))
 
     def describes_same_terminal(self, other: "TaskIntent") -> bool:
-        """Whether two intents share goal/scope/success criteria.
+        """Whether two intents share goal/scope/constraints/success
+        criteria — ALL four define the terminal condition.
 
         Used by the kernel to detect that a GoalPatch actually changes the
         terminal condition (vs. a pure topology re-organisation, which is
@@ -43,5 +44,6 @@ class TaskIntent:
         return (
             self.goal == other.goal
             and self.scope == other.scope
+            and self.constraints == other.constraints
             and self.success_criteria == other.success_criteria
         )

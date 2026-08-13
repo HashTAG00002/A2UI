@@ -48,6 +48,22 @@ class ProjectionStore:
             return copy.deepcopy(stamped)
 
     # ── data (ordinary value/progress updates) ───────────────────────────
+    def replace_data(self, *, values: dict[str, Any],
+                     node_status: dict[str, str],
+                     progress: float) -> ProjectionData:
+        """AUTHORITATIVE wholesale replace of the volatile projection data.
+        This is the kernel's refresh path: keys that no longer exist in
+        the task state or workflow must disappear here (no stale merge).
+        """
+        with self._lock:
+            data = ProjectionData(values=dict(values),
+                                  node_status=dict(node_status),
+                                  progress=progress,
+                                  revision=self._data_rev + 1)
+            self._data = data
+            self._data_rev += 1
+            return copy.deepcopy(data)
+
     def update_data(self, *, values: dict[str, Any] | None = None,
                     node_status: dict[str, str] | None = None,
                     progress: float | None = None) -> ProjectionData:

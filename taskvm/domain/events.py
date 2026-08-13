@@ -29,6 +29,8 @@ class EventKind(str, Enum):
     # verification
     VERIFICATION_PASSED = "verification_passed"
     VERIFICATION_FAILED = "verification_failed"
+    # control-node advancement (barrier / terminal fan-in confirmations)
+    NODE_COMMITTED = "node_committed"
     # checkpoints
     CHECKPOINT_COMMITTED = "checkpoint_committed"
     # governance

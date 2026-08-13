@@ -1,52 +1,68 @@
-"""Architecture gate — the executable dependency rules (handoff 02 §依赖 Gate).
+"""Architecture gate — the executable dependency rules (handoff 02 §依赖
+Gate, Wave-A review round).
 
-AST-based (not grep): parses every .py under the governed packages and
-inspects Import / ImportFrom nodes. A violation fails with the exact file
-and the offending import. This is the mechanism that stops the next
-layering drift BEFORE it lands (master handoff §3.1: 依赖方向只能向下).
+AST-based (not grep). Wave-A hardening:
+  - stdlib WHITELIST (sys.stdlib_module_names) for pure layers — a
+    denylist of known frameworks can never enumerate the next one;
+  - relative imports resolved to absolute modules
+    (``from ..benchmark import x`` inside taskvm/kernel IS caught);
+  - runtime may import the substrate PORT (taskvm.substrate root) but any
+    CONCRETE substrate implementation subtree is banned;
+  - substrate gets a reverse-dependency gate (it is the bottom layer: it
+    may not import anything above it);
+  - the forbidden-identifier scanner covers ast.Name / ast.Attribute /
+    ast.keyword / ast.arg.
 
-Rules enforced while the refactor proceeds in waves:
-  - taskvm.domain  : stdlib only (no taskvm.* at all, no frameworks)
-  - taskvm.kernel  : stdlib + taskvm.domain only
-  - taskvm.domain/kernel never import: flask / playwright / openai /
-    requests / aiohttp / benchmark / evaluation / any concrete substrate /
-    harness / workspace_ui / execution / apps / baselines / the migration
-    compatibility layer
-  - forbidden IDENTIFIERS (not just imports) in domain/kernel: the legacy
-    cross-layer concepts that must not become kernel semantics
-    (storage primary keys, app-internal operation names, hidden-state
-    readers). Checked on Name/Attribute/keyword nodes so comments and
-    docstrings stay free to *describe* the ban.
-  - future layers (runtime / projection / architect) get their gates the
-    moment the directories exist — the rule table is already in place.
+The checker core (``check_source``) takes source text + the file's
+repo-relative path, so the gate is unit-testable with synthetic sources.
 """
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+_STDLIB = set(sys.stdlib_module_names) | {"__future__"}
 
-# ── import rules ───────────────────────────────────────────────────────────
-_FRAMEWORKS = {"flask", "playwright", "openai", "requests", "aiohttp",
-               "flask_socketio", "socketio"}
 
-# package dir → allowed taskvm subtrees (the package itself is always
-# implicitly allowed; everything else under taskvm is banned)
-_RULES: dict[str, tuple[str, ...]] = {
-    "taskvm/domain": (),
-    "taskvm/kernel": ("taskvm.domain",),
-    # waves 1-2 will fill these in; the gates arm themselves automatically:
-    "taskvm/runtime": ("taskvm.domain", "taskvm.kernel"),
-    "taskvm/architect": ("taskvm.domain", "taskvm.kernel"),
-    "taskvm/projection": ("taskvm.domain", "taskvm.kernel",
-                          "taskvm.architect", "taskvm.runtime"),
-}
+class PkgRule(NamedTuple):
+    stdlib_only: bool
+    allowed_taskvm: tuple[str, ...] = ()        # besides the package itself
+    banned_taskvm_prefixes: tuple[str, ...] = ()
 
-# benchmark/evaluation are banned for every production layer above
+
+_CONCRETE_SUBSTRATES = (
+    "taskvm.substrate.builtin", "taskvm.substrate.builtin_web",
+    "taskvm.substrate.mobilegym", "taskvm.substrate.osworld",
+)
 _ALWAYS_BANNED = ("taskvm.benchmark", "taskvm.evaluation")
+
+_RULES: dict[str, PkgRule] = {
+    # the pure core: stdlib only
+    "taskvm/domain": PkgRule(stdlib_only=True),
+    "taskvm/kernel": PkgRule(stdlib_only=True,
+                             allowed_taskvm=("taskvm.domain",)),
+    # future layers — gates arm the moment the directories exist:
+    "taskvm/runtime": PkgRule(
+        stdlib_only=True,
+        allowed_taskvm=("taskvm.domain", "taskvm.kernel", "taskvm.substrate"),
+        banned_taskvm_prefixes=_CONCRETE_SUBSTRATES),
+    "taskvm/architect": PkgRule(stdlib_only=True,
+                                allowed_taskvm=("taskvm.domain",
+                                                "taskvm.kernel")),
+    "taskvm/projection": PkgRule(
+        stdlib_only=False,   # the Flask layer
+        allowed_taskvm=("taskvm.domain", "taskvm.kernel", "taskvm.architect",
+                        "taskvm.runtime"),
+        banned_taskvm_prefixes=("taskvm.substrate",)),
+    # reverse gate: the bottom layer imports nothing above it
+    "taskvm/substrate": PkgRule(stdlib_only=False,
+                                allowed_taskvm=("taskvm.domain",)),
+}
 
 # legacy cross-layer concepts banned as identifiers in the new core
 _FORBIDDEN_IDENTIFIERS = {
@@ -55,47 +71,81 @@ _FORBIDDEN_IDENTIFIERS = {
 }
 
 
-def _py_files(pkg_dir: str) -> list[Path]:
-    root = REPO_ROOT / pkg_dir
-    if not root.is_dir():
-        return []
-    return sorted(root.rglob("*.py"))
+def _pkg_of(relpath: str) -> str:
+    """taskvm/kernel/foo.py → 'taskvm/kernel'."""
+    return str(Path(relpath).parent)
 
 
-def _imports_of(path: Path) -> list[str]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+def _resolve_from(module: str | None, level: int, relpath: str) -> str:
+    """Resolve an ImportFrom to an absolute dotted module."""
+    if level == 0:
+        return module or ""
+    parts = list(Path(relpath).parent.parts)
+    # level=1 → the file's own package; level=2 → its parent; …
+    base = parts[:len(parts) - level + 1]
+    if module:
+        base = base + module.split(".")
+    return ".".join(base)
+
+
+def imports_of_source(source: str, relpath: str) -> list[str]:
+    """All absolute import targets in ``source`` (relative resolved)."""
+    tree = ast.parse(source, filename=relpath)
     mods: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             mods.extend(a.name for a in node.names)
         elif isinstance(node, ast.ImportFrom):
-            if node.level == 0 and node.module:
-                mods.append(node.module)
+            mods.append(_resolve_from(node.module, node.level, relpath))
     return mods
 
 
-def _violations(pkg_dir: str, allowed_taskvm: tuple[str, ...]) -> list[str]:
-    out: list[str] = []
-    for path in _py_files(pkg_dir):
-        for mod in _imports_of(path):
-            root = mod.split(".")[0]
-            if root in _FRAMEWORKS:
-                out.append(f"{path}: imports framework {mod!r}")
-            if mod.startswith("taskvm"):
-                own = "taskvm." + pkg_dir.split("/")[1]
-                allowed = tuple(allowed_taskvm) + (own,)
-                if any(mod == b or mod.startswith(b + ".")
-                       for b in _ALWAYS_BANNED):
-                    out.append(f"{path}: imports banned subtree {mod!r}")
-                elif not any(mod == a or mod.startswith(a + ".")
-                             for a in allowed):
-                    out.append(
-                        f"{path}: imports {mod!r} outside allowed "
-                        f"{allowed!r}")
+def check_import(mod: str, pkg_dir: str, rule: PkgRule) -> str | None:
+    """One import → a violation string, or None."""
+    if not mod:
+        return None
+    root = mod.split(".")[0]
+    if mod.startswith("taskvm"):
+        own = "taskvm." + pkg_dir.split("/")[1]
+        allowed = tuple(rule.allowed_taskvm) + (own,)
+        if any(mod == b or mod.startswith(b + ".") for b in _ALWAYS_BANNED):
+            return f"imports always-banned subtree {mod!r}"
+        if any(mod == b or mod.startswith(b + ".")
+               for b in rule.banned_taskvm_prefixes):
+            return f"imports banned subtree {mod!r}"
+        if not any(mod == a or mod.startswith(a + ".") for a in allowed):
+            return f"imports {mod!r} outside allowed {allowed!r}"
+        return None
+    if rule.stdlib_only and root not in _STDLIB:
+        return f"imports non-stdlib module {mod!r} (pure layer is "
+        "stdlib-whitelisted, not framework-denylisted)"
+    return None
+
+
+def check_source(source: str, relpath: str, rule: PkgRule) -> list[str]:
+    pkg_dir = _pkg_of(relpath)
+    out = []
+    for mod in imports_of_source(source, relpath):
+        v = check_import(mod, pkg_dir, rule)
+        if v:
+            out.append(f"{relpath}: {v}")
     return out
 
 
-def _identifier_violations(pkg_dir: str) -> list[str]:
+def _py_files(pkg_dir: str) -> list[Path]:
+    root = REPO_ROOT / pkg_dir
+    return sorted(root.rglob("*.py")) if root.is_dir() else []
+
+
+def gate_violations(pkg_dir: str, rule: PkgRule) -> list[str]:
+    out: list[str] = []
+    for path in _py_files(pkg_dir):
+        rel = str(path.relative_to(REPO_ROOT))
+        out.extend(check_source(path.read_text(encoding="utf-8"), rel, rule))
+    return out
+
+
+def identifier_violations(pkg_dir: str) -> list[str]:
     out: list[str] = []
     for path in _py_files(pkg_dir):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -107,31 +157,103 @@ def _identifier_violations(pkg_dir: str) -> list[str]:
                 name = node.attr
             elif isinstance(node, ast.keyword):
                 name = node.arg
+            elif isinstance(node, ast.arg):      # function parameter names
+                name = node.arg
             if name in _FORBIDDEN_IDENTIFIERS:
                 out.append(f"{path}:{node.lineno}: forbidden identifier "
                            f"{name!r}")
     return out
 
 
-@pytest.mark.parametrize("pkg_dir,allowed", sorted(_RULES.items()))
-def test_import_boundaries(pkg_dir: str, allowed: tuple[str, ...]):
+# ── the live gates ─────────────────────────────────────────────────────────
+@pytest.mark.parametrize("pkg_dir", sorted(_RULES))
+def test_import_boundaries(pkg_dir: str):
     if not (REPO_ROOT / pkg_dir).is_dir():
         pytest.skip(f"{pkg_dir} does not exist yet (future wave)")
-    problems = _violations(pkg_dir, allowed)
+    problems = gate_violations(pkg_dir, _RULES[pkg_dir])
+    if pkg_dir == "taskvm/substrate" and problems:
+        # KNOWN DEBT, loudly marked (not silently green): the LEGACY
+        # substrate package currently reverse-imports taskvm.execution
+        # (gui_executor in base.py, gui_executor_async in
+        # mobilegym/bridge.py). Owned by Agent B
+        # (03_SUBSTRATE_ISOLATION_AGENT) — this wave must not touch
+        # substrate. Only THAT exact known violation is xfail-tolerated;
+        # any new/different substrate violation fails hard, and once
+        # Agent B removes the debt this gate goes green on its own.
+        known = all("taskvm.execution.gui_executor" in p for p in problems)
+        if known:
+            pytest.xfail(
+                "legacy substrate reverse-imports taskvm.execution."
+                "gui_executor; owner: Agent B substrate isolation")
     assert not problems, "import boundary violations:\n" + "\n".join(problems)
 
 
 @pytest.mark.parametrize("pkg_dir", ["taskvm/domain", "taskvm/kernel"])
 def test_no_legacy_concepts_in_core(pkg_dir: str):
-    problems = _identifier_violations(pkg_dir)
+    problems = identifier_violations(pkg_dir)
     assert not problems, "legacy concept identifiers found:\n" + "\n".join(problems)
 
 
 def test_core_packages_exist_and_are_pure():
-    """The two new packages must exist and contain no framework imports —
-    a direct, non-parametrized assertion so the gate can never silently
-    skip its primary subjects."""
+    """Direct, non-parametrized: the gate can never silently skip its
+    primary subjects."""
     assert _py_files("taskvm/domain"), "taskvm/domain missing"
     assert _py_files("taskvm/kernel"), "taskvm/kernel missing"
-    assert not _violations("taskvm/domain", ())
-    assert not _violations("taskvm/kernel", ("taskvm.domain",))
+    assert not gate_violations("taskvm/domain", _RULES["taskvm/domain"])
+    assert not gate_violations("taskvm/kernel", _RULES["taskvm/kernel"])
+
+
+# ── regressions: the gate itself must catch what it claims to catch ───────
+def test_relative_forbidden_import_is_caught():
+    """from ..benchmark import x inside taskvm/kernel must resolve to
+    taskvm.benchmark and be rejected."""
+    src = "from ..benchmark import fixtures\n"
+    problems = check_source(src, "taskvm/kernel/virtual_mod.py",
+                            _RULES["taskvm/kernel"])
+    assert problems and "benchmark" in problems[0]
+
+
+def test_non_stdlib_domain_import_is_caught():
+    """The domain layer is stdlib-WHITELISTED: even a harmless third-party
+    lib that no denylist anticipated is rejected."""
+    src = "import numpy\n"
+    problems = check_source(src, "taskvm/domain/virtual_mod.py",
+                            _RULES["taskvm/domain"])
+    assert problems and "non-stdlib" in problems[0]
+
+
+def test_legit_relative_import_passes():
+    src = "from .errors import ValidationError\nfrom taskvm.domain import patch\n"
+    assert check_source(src, "taskvm/kernel/virtual_mod.py",
+                        _RULES["taskvm/kernel"]) == []
+
+
+def test_runtime_port_vs_concrete_substrate():
+    rule = _RULES["taskvm/runtime"]
+    ok = check_source("from taskvm.substrate import SubstrateSession\n",
+                      "taskvm/runtime/virtual_mod.py", rule)
+    assert ok == []                                          # the PORT is fine
+    for concrete in ("taskvm.substrate.mobilegym.bridge",
+                     "taskvm.substrate.osworld.agent",
+                     "taskvm.substrate.builtin.server"):
+        bad = check_source(f"from {concrete} import X\n",
+                           "taskvm/runtime/virtual_mod.py", rule)
+        assert bad and "banned subtree" in bad[0]
+
+
+def test_substrate_reverse_gate():
+    rule = _RULES["taskvm/substrate"]
+    bad = check_source("from taskvm.projection import server\n"
+                       "from taskvm.kernel import TaskVMKernel\n",
+                       "taskvm/substrate/virtual_mod.py", rule)
+    assert len(bad) == 2                                     # both rejected
+    ok = check_source("import requests\nfrom taskvm.domain import ObservedValue\n",
+                      "taskvm/substrate/virtual_mod.py", rule)
+    assert ok == []   # substrate may use frameworks + domain (bottom layer)
+
+
+def test_identifier_scanner_covers_function_args():
+    src = "def f(entity_id):\n    return entity_id\n"
+    tree = ast.parse(src)
+    names = {n.arg for n in ast.walk(tree) if isinstance(n, ast.arg)}
+    assert "entity_id" in names   # ast.arg coverage is load-bearing

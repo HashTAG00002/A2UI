@@ -52,7 +52,8 @@ def test_legacy_graph_conversion_strips_platform_concepts():
     ])
     state = legacy_graph_to_task_state(g, intent=TaskIntent(goal="g"))
     v = state.variable("release_date")
-    assert v.semantic_key == "release_date" and v.value == "2026-08-14"
+    assert v.semantic_key == "release_date"
+    assert v.observed == "2026-08-14" and v.desired == "2026-08-14"
     assert v.value_type == "date"
     # the visible locator survived as evidence; the platform addressing did not
     assert v.evidence[0].visible_label == "项目发布会议"

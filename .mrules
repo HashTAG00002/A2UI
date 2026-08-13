@@ -1,6 +1,6 @@
 # TaskVM · 项目规则与心智模型索引
 
-> **完整纠错历史**见 `.mrules.log`（2329行）。本文件只保留强制规则 + 每个 Episode 的一句话摘要 + 行号索引。
+> **完整纠错历史**见 `.mrules.log`（2404行）。本文件只保留强制规则 + 每个 Episode 的一句话摘要 + 行号索引。
 > **关键文档动态链接**（精确到行）：
 > - 大纲/VM五性质/开放场景判据：`docs/A2UI_开工大纲_v0_心智模型对齐版.md:9-48`
 > - GG 阶段红线（内部信息零暴露）：`docs/A2UI_GG阶段开工目标.md:9-30`
@@ -33,7 +33,7 @@
 
 ---
 
-## Episode 纠错摘要索引（E1-E22）
+## Episode 纠错摘要索引（E1-E24）
 
 | # | 一句话摘要 | .mrules.log 行 |
 |---|---|---|
@@ -61,6 +61,8 @@
 | **E20** | FF 阶段完整交接文档（UI重设计/UISimDriver/milestone建议/WorkflowPlanner/动画/benchmark），FF.1-FF.8 全部执行结果附后 | L1539-2239 |
 | **E21** | 内部数据库 ID 渗入四层（渲染/观测/指令/执行）；FF.7 的 4/4 PASS 数字在开放场景证明力为零；GG 阶段开工文档已交付 | L2241-2276 |
 | **E22** | GG 阶段完成：entity_id 零暴露契约落地（GG.1-GG.6 全 PASS）；locator(visible title)替代 entity_id 进模型；open-world killtest 证明真泛化 | L2278-2329 |
+| **E23** | Wave 1 Agent A：taskvm/domain + taskvm/kernel 落地（三类 Patch 类型即语义、三 primitive workflow、7 不变量测试锁定、AST 架构 gate）；平行结构逻辑合并为唯一真源 | L2333-2364 |
+| **E24** | Wave-A 评审打回后 12 条全修：节点推进协议分立、observed/desired 双平面、ObservedValue 证据合同、patch 原子性、compensation 全量对账+spoof 面消除、recompose 结构入口、projection authoritative replace、stdlib 白名单 gate、SurfaceHandle 只留 handle_id、事件语义统一；66 全绿 | L2368-2404 |
 
 ---
 
@@ -78,4 +80,4 @@
 10. **内部信息零暴露**：entity_id / data-\* / get_state 产物 / 深链 URL / operator 黑话全禁进模型输入（E16/E21/E22）——泄露的总源头在渲染层，不能只在"最后一环"堵。
 
 ---
-*本文件最后更新：2026-08-14（Wave 1 Agent A：domain/kernel 冻结基线完成后）。下一次更新时在此修改日期并在 Episode 表格追加新行。*
+*本文件最后更新：2026-08-14（Wave-A 评审修订后，kernel contract v2 冻结基线）。下一次更新时在此修改日期并在 Episode 表格追加新行。*

@@ -18,14 +18,21 @@ from taskvm.domain.errors import UnknownCheckpointError, ValidationError
 
 @dataclass(frozen=True)
 class CheckpointRecord:
-    """One committed checkpoint boundary."""
+    """One committed checkpoint boundary.
+
+    ``observed`` / ``desired`` snapshot BOTH value planes of every task
+    variable: compensation targets the observed plane (reality) and
+    restores the desired plane (intent) so the task world returns to the
+    boundary as a whole.
+    """
 
     checkpoint_id: str
     label: str
     state_revision: int        # TaskState.revision at the boundary
     event_index: int           # EventLog length at the boundary (exclusive end)
     epoch: int                 # execution epoch at the boundary
-    variables: dict[str, Any] = field(default_factory=dict)   # observed values
+    observed: dict[str, Any] = field(default_factory=dict)
+    desired: dict[str, Any] = field(default_factory=dict)
     committed_nodes: tuple[str, ...] = ()
     created_at: float = 0.0
 

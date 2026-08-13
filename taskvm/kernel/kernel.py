@@ -1,22 +1,39 @@
 """TaskVMKernel — the state machine at L3 (master handoff §2).
 
-The kernel owns the ONLY writers for every store and turns each accepted
-mutation into exactly one event. It is deliberately small and boring:
-no Flask, no Playwright, no model calls, no substrate, no benchmark —
-those live above/below and talk to the kernel through the public methods
-here (docs/contracts/kernel.md).
+The kernel owns the ONLY writers for every store. It is deliberately
+small and boring: no Flask, no Playwright, no model calls, no substrate,
+no benchmark — those live above/below and talk to the kernel through the
+public methods here (docs/contracts/kernel.md).
 
-Enforced invariants (handoff 02 §Kernel 服务):
+EVENT SEMANTICS (fixed): every public mutating call appends EXACTLY ONE
+event whose kind names the semantic operation. An observation folded by
+``finish_action`` is part of the action landing (its keys ride in the
+ACTION_FINISHED payload), not a separate event.
+
+NODE ADVANCEMENT PROTOCOL (fixed):
+  - ACTION (executable): request_action → start_action → finish_action →
+    record_verification. Only ACTION nodes produce CUA work handles.
+  - VERIFY (control): record_verification directly from READY — the
+    runtime observes independently and reports; no action handle exists.
+  - BARRIER / CHECKPOINT / TERMINAL (control): advance_control from
+    READY. CHECKPOINT additionally writes a CheckpointRecord; TERMINAL
+    commit means the plan is complete.
+
+Enforced invariants (handoff 02 §Kernel 服务 + Wave-A review):
   1. revisions are store-assigned and strictly monotonic;
   2. projection schema/data revisions are independent counters;
-  3. GoalPatch can never silently rewrite or drop committed nodes
-     (WorkflowStore.replace_future raises CommittedNodeViolationError);
+  3. GoalPatch can never silently rewrite or drop committed nodes;
   4. action results from a stale epoch are discarded without touching
-     TaskState (finish_action returns False, ActionDiscarded is emitted);
+     TaskState (finish_action returns False, ActionDiscarded emitted);
   5. checkpoints pin an exact event-log index + state revision + epoch;
-  6. CompensationPatch is validated against what the kernel itself
-     recorded at the checkpoint — never against an external oracle;
-  7. every read returns an immutable snapshot / defensive deep copy.
+  6. compensation is grounded ONLY in the kernel's own checkpoint
+     records, and a reported compensation is accepted only when freshly
+     observed values match the plan's targets exactly;
+  7. every read returns an immutable snapshot / defensive deep copy;
+  8. patches are atomic: full validation before ANY mutation — a
+     rejected patch leaves state, epoch, graph, and events untouched;
+  9. observed vs desired are separate planes: observations write only
+     ``observed``, patches write only ``desired``.
 """
 from __future__ import annotations
 
@@ -26,9 +43,8 @@ import time
 from dataclasses import replace
 from typing import Any, Iterable
 
-from taskvm.domain.contract import ActionContract
 from taskvm.domain.errors import (
-    CompensationMismatchError,
+    CommittedNodeViolationError,
     PatchSemanticsError,
     ValidationError,
 )
@@ -41,14 +57,19 @@ from taskvm.domain.patch import (
     GoalPatch,
     LocalPatch,
 )
-from taskvm.domain.projection import ProjectionData, ProjectionSchema
-from taskvm.domain.state import SurfaceEvidence, TaskState, TaskVariable
+from taskvm.domain.projection import ProjectionSchema
+from taskvm.domain.state import ObservedValue, TaskState, TaskVariable
 from taskvm.domain.workflow import NodeKind, NodeStatus, WorkflowGraph
 from taskvm.kernel.checkpoint_store import CheckpointRecord, CheckpointStore
 from taskvm.kernel.event_log import EventLog
 from taskvm.kernel.projection_store import ProjectionSnapshot, ProjectionStore
 from taskvm.kernel.session_store import TaskSessionStore
 from taskvm.kernel.workflow_store import WorkflowSnapshot, WorkflowStore
+
+_CONTROL_CONFIRM_KINDS = (NodeKind.BARRIER, NodeKind.CHECKPOINT,
+                          NodeKind.TERMINAL)
+_PROGRESS_KINDS = (NodeKind.ACTION, NodeKind.VERIFY, NodeKind.BARRIER,
+                   NodeKind.CHECKPOINT, NodeKind.TERMINAL)
 
 
 class TaskVMKernel:
@@ -107,17 +128,69 @@ class TaskVMKernel:
         self._events.append(ev)
         return ev
 
-    # ══ initial composition (Task Architect output) ═════════════════════
+    # ══ composition (State Compiler / Task Architect output) ════════════
     def init_task_state(self, variables: Iterable[TaskVariable],
                         *, correlation_id: str = "") -> TaskState:
-        """Install the compiled variables (State Compiler output)."""
+        """Install the initially compiled variables. ONE-SHOT: once
+        variables exist, structural changes MUST go through
+        ``recompose`` — this method cannot be (ab)used as a structural
+        update channel."""
         with self._lock:
+            if self._sessions.task_state().variables:
+                raise ValidationError(
+                    "init_task_state is one-shot; use recompose() for "
+                    "structural updates")
             state = self._sessions.set_task_state(
                 TaskState(intent=self._sessions.task_state().intent,
                           variables=tuple(variables)))
             self._emit(EventKind.STATE_UPDATED,
                        {"source": "initial_composition",
                         "keys": [v.semantic_key for v in state.variables]},
+                       correlation_id)
+            self._refresh_projection_data()
+            return state
+
+    def recompose(self, variables: Iterable[TaskVariable], *,
+                  reason: str,
+                  new_graph: WorkflowGraph | None = None,
+                  new_schema: ProjectionSchema | None = None,
+                  correlation_id: str = "") -> TaskState:
+        """Structure-level recomposition: the legitimate entry for the
+        State Compiler to replace/add/remove task variables + evidence
+        after a GoalPatch or structure drift.
+
+        Atomic (invariant 8): the graph is fully validated BEFORE any
+        mutation. Bumps the epoch — existing surface handles and in-flight
+        work predated the recomposition.
+        """
+        if not reason:
+            raise ValidationError("recompose requires a reason")
+        with self._lock:
+            if not self._sessions.task_state().variables:
+                raise ValidationError(
+                    "recompose requires an initialised state; use "
+                    "init_task_state first")
+            if new_graph is not None:
+                self._workflows.validate_replace_future(new_graph)
+            # ── all validation passed; mutate ──
+            old = self._sessions.task_state()
+            epoch = self._bump_epoch_locked()
+            state = self._sessions.set_task_state(
+                TaskState(intent=old.intent, variables=tuple(variables)))
+            graph_revision = None
+            if new_graph is not None:
+                graph_revision = self._workflows.replace_future(
+                    new_graph, epoch=epoch).revision
+            if new_schema is not None:
+                self._projections.set_schema(new_schema)
+            old_keys = {v.semantic_key for v in old.variables}
+            new_keys = {v.semantic_key for v in state.variables}
+            self._emit(EventKind.STATE_UPDATED,
+                       {"source": "recomposition", "reason": reason,
+                        "added": sorted(new_keys - old_keys),
+                        "removed": sorted(old_keys - new_keys),
+                        "kept": sorted(old_keys & new_keys),
+                        "graph_revision": graph_revision, "epoch": epoch},
                        correlation_id)
             self._refresh_projection_data()
             return state
@@ -140,46 +213,37 @@ class TaskVMKernel:
             return installed
 
     # ══ observation (bottom-up projection — mental-model §3.1) ══════════
-    def apply_observation(
-            self, values: dict[str, Any],
-            evidence: Iterable[SurfaceEvidence] = (),
-            *, correlation_id: str = "") -> TaskState:
-        """Fold a fresh observation into the task state. Unknown semantic
-        keys are rejected: discovering NEW variables is a structural change
-        and belongs to the State Compiler, not to a value sync."""
+    def apply_observation(self, observations: Iterable[ObservedValue],
+                          *, correlation_id: str = "") -> TaskState:
+        """Fold fresh observations into the task state — OBSERVED plane
+        only (invariant 9); ``desired`` is never touched here.
+
+        The observation contract is ``ObservedValue``: value and its
+        visible evidence travel together and land on the SAME variable.
+        Unknown semantic keys are rejected: discovering NEW variables is
+        a structural change and belongs to ``recompose``."""
         with self._lock:
-            self._emit(EventKind.OBSERVATION_RECEIVED,
-                       {"keys": sorted(values),
-                        "n_evidence": len(tuple(evidence))}, correlation_id)
+            updated, with_evidence = self._fold_observations_locked(
+                observations)
             state = self._sessions.task_state()
-            unknown = [k for k in values if state.variable(k) is None]
-            if unknown:
-                raise ValidationError(
-                    f"observation carries unknown semantic keys {unknown}; "
-                    "structural discovery must go through re-composition")
-            new_vars = tuple(
-                v.with_value(values[v.semantic_key])
-                if v.semantic_key in values else v
-                for v in state.variables)
-            state = self._sessions.set_task_state(replace(state, variables=new_vars))
-            self._emit(EventKind.STATE_UPDATED,
-                       {"source": "observation", "keys": sorted(values)},
+            self._emit(EventKind.OBSERVATION_RECEIVED,
+                       {"keys": updated, "keys_with_evidence": with_evidence},
                        correlation_id)
             self._refresh_projection_data()
             return state
 
-    # ══ action lifecycle (epoch-stamped — invariant 4) ══════════════════
+    # ══ action lifecycle (ACTION nodes only; epoch-stamped — inv. 4) ════
     def request_action(self, node_id: str, *,
                        correlation_id: str = "") -> dict[str, Any]:
-        """Register an action request for a READY ACTION or VERIFY node.
-        Returns the handle the runtime must present back:
-        {action_id, node_id, epoch, contract, verification}."""
+        """Register an action request for a READY ACTION node — the only
+        kind that produces CUA work. Returns the handle the runtime must
+        present back: {action_id, node_id, epoch, contract}."""
         with self._lock:
             node = self._workflows.node(node_id)
-            if node is None or node.kind not in (NodeKind.ACTION,
-                                                 NodeKind.VERIFY):
+            if node is None or node.kind is not NodeKind.ACTION:
                 raise ValidationError(
-                    f"node {node_id!r} is not an action/verify node")
+                    f"node {node_id!r} is not an ACTION node; control nodes "
+                    "advance via record_verification / advance_control")
             st = self._workflows.snapshot().statuses.get(node_id)
             if st is not NodeStatus.READY:
                 raise ValidationError(
@@ -188,8 +252,7 @@ class TaskVMKernel:
             action_id = f"act_{self._action_seq:05d}"
             handle = {"action_id": action_id, "node_id": node_id,
                       "epoch": self.epoch,
-                      "contract": copy.deepcopy(node.contract),
-                      "verification": node.verification}
+                      "contract": copy.deepcopy(node.contract)}
             self._actions[action_id] = handle
             self._emit(EventKind.ACTION_REQUESTED,
                        {"action_id": action_id, "node_id": node_id},
@@ -206,11 +269,11 @@ class TaskVMKernel:
             self._refresh_projection_data()
 
     def finish_action(self, action_id: str, *,
-                      observed_values: dict[str, Any] | None = None,
-                      evidence: Iterable[SurfaceEvidence] = ()) -> bool:
+                      observations: Iterable[ObservedValue] = ()) -> bool:
         """Land an action result. A result carrying a stale epoch is
         DISCARDED: no state change, ActionDiscarded emitted, False
-        returned (invariant 4)."""
+        returned (invariant 4). Observations fold into the OBSERVED
+        plane as part of the landing (single ACTION_FINISHED event)."""
         with self._lock:
             handle = self._require_action(action_id)
             if handle["epoch"] != self.epoch:
@@ -221,30 +284,74 @@ class TaskVMKernel:
                             "current_epoch": self.epoch}, action_id)
                 self._refresh_projection_data()
                 return False
-            if observed_values:
-                self.apply_observation(observed_values, evidence,
-                                       correlation_id=action_id)
+            updated, with_evidence = self._fold_observations_locked(
+                observations)
             self._emit(EventKind.ACTION_FINISHED,
-                       {"action_id": action_id, "node_id": handle["node_id"]},
+                       {"action_id": action_id, "node_id": handle["node_id"],
+                        "keys": updated, "keys_with_evidence": with_evidence},
                        action_id)
+            self._refresh_projection_data()
             return True
 
-    # ══ verification (independent — mental-model §3.5) ══════════════════
+    # ══ verification & control-node advancement ═════════════════════════
     def record_verification(self, node_id: str, passed: bool, *,
                             detail: str = "",
                             correlation_id: str = "") -> None:
-        """Commit (or fail) a RUNNING node based on independent evidence."""
+        """Commit (or fail) a node based on independent evidence.
+
+        ACTION nodes must be RUNNING (their result has landed);
+        VERIFY nodes confirm directly from READY (they ARE the
+        verification — no action handle exists for them)."""
         with self._lock:
+            node = self._workflows.node(node_id)
+            if node is None:
+                raise ValidationError(f"unknown node {node_id!r}")
             st = self._workflows.snapshot().statuses.get(node_id)
-            if st is not NodeStatus.RUNNING:
+            if node.kind is NodeKind.ACTION and st is not NodeStatus.RUNNING:
                 raise ValidationError(
-                    f"node {node_id!r} not RUNNING (status={st})")
+                    f"ACTION node {node_id!r} not RUNNING (status={st})")
+            if node.kind is NodeKind.VERIFY and st is not NodeStatus.READY:
+                raise ValidationError(
+                    f"VERIFY node {node_id!r} not READY (status={st})")
+            if node.kind not in (NodeKind.ACTION, NodeKind.VERIFY):
+                raise ValidationError(
+                    f"node {node_id!r} is {node.kind.value}; control nodes "
+                    "advance via advance_control")
             self._workflows.set_status(
                 node_id, NodeStatus.COMMITTED if passed else NodeStatus.FAILED)
             self._emit(EventKind.VERIFICATION_PASSED if passed
                        else EventKind.VERIFICATION_FAILED,
-                       {"node_id": node_id, "detail": detail}, correlation_id)
+                       {"node_id": node_id, "kind": node.kind.value,
+                        "detail": detail}, correlation_id)
             self._refresh_projection_data()
+
+    def advance_control(self, node_id: str, *,
+                        correlation_id: str = "") -> CheckpointRecord | None:
+        """Advance a READY control node (BARRIER / CHECKPOINT / TERMINAL)
+        to COMMITTED. A CHECKPOINT node additionally writes a
+        CheckpointRecord keyed by its node id (the fan-in point IS the
+        verified boundary). A TERMINAL commit means the plan is complete.
+        Returns the CheckpointRecord for checkpoints, else None."""
+        with self._lock:
+            node = self._workflows.node(node_id)
+            if node is None or node.kind not in _CONTROL_CONFIRM_KINDS:
+                raise ValidationError(
+                    f"node {node_id!r} is not a BARRIER/CHECKPOINT/TERMINAL "
+                    "control node")
+            st = self._workflows.snapshot().statuses.get(node_id)
+            if st is not NodeStatus.READY:
+                raise ValidationError(
+                    f"control node {node_id!r} not READY (status={st})")
+            rec = None
+            if node.kind is NodeKind.CHECKPOINT:
+                rec = self._commit_checkpoint_locked(node.node_id, node.label)
+            else:
+                self._workflows.set_status(node_id, NodeStatus.COMMITTED)
+                self._emit(EventKind.NODE_COMMITTED,
+                           {"node_id": node_id, "kind": node.kind.value},
+                           correlation_id or node_id)
+            self._refresh_projection_data()
+            return rec
 
     def requeue(self, node_id: str, *, correlation_id: str = "") -> None:
         """Retry path: FAILED → READY."""
@@ -257,34 +364,53 @@ class TaskVMKernel:
     # ══ checkpoints (invariant 5) ════════════════════════════════════════
     def commit_checkpoint(self, checkpoint_id: str, label: str, *,
                           correlation_id: str = "") -> CheckpointRecord:
+        """Governance-driven checkpoint (the user's 'mark this as a
+        checkpoint' gesture). Workflow CHECKPOINT nodes use
+        ``advance_control`` instead."""
         with self._lock:
-            state = self._sessions.task_state()
-            rec = CheckpointRecord(
-                checkpoint_id=checkpoint_id,
-                label=label,
-                state_revision=state.revision,
-                event_index=len(self._events),  # exclusive boundary
-                epoch=self.epoch,
-                variables=state.values(),
-                committed_nodes=self._workflows.committed_node_ids(),
-                created_at=time.time())
-            rec = self._checkpoints.add(rec)
-            self._emit(EventKind.CHECKPOINT_COMMITTED,
-                       {"checkpoint_id": checkpoint_id, "label": label,
-                        "state_revision": rec.state_revision,
-                        "event_index": rec.event_index},
-                       correlation_id or checkpoint_id)
-            return rec
+            return self._commit_checkpoint_locked(
+                checkpoint_id, label, correlation_id=correlation_id)
 
-    # ══ governance patches ═══════════════════════════════════════════════
+    def _commit_checkpoint_locked(self, checkpoint_id: str, label: str,
+                                  *, correlation_id: str = ""
+                                  ) -> CheckpointRecord:
+        state = self._sessions.task_state()
+        rec = CheckpointRecord(
+            checkpoint_id=checkpoint_id,
+            label=label,
+            state_revision=state.revision,
+            event_index=len(self._events),  # exclusive boundary
+            epoch=self.epoch,
+            observed=state.observed_values(),
+            desired=state.desired_values(),
+            committed_nodes=self._workflows.committed_node_ids(),
+            created_at=time.time())
+        rec = self._checkpoints.add(rec)
+        # a workflow CHECKPOINT node being advanced commits itself
+        wf_node = self._workflows.node(checkpoint_id)
+        if (wf_node is not None and wf_node.kind is NodeKind.CHECKPOINT
+                and self._workflows.snapshot().statuses.get(checkpoint_id)
+                is NodeStatus.READY):
+            self._workflows.set_status(checkpoint_id, NodeStatus.COMMITTED)
+        self._emit(EventKind.CHECKPOINT_COMMITTED,
+                   {"checkpoint_id": checkpoint_id, "label": label,
+                    "state_revision": rec.state_revision,
+                    "event_index": rec.event_index},
+                   correlation_id or checkpoint_id)
+        return rec
+
+    # ══ governance patches (atomic — invariant 8) ═══════════════════════
     def apply_local_patch(self, patch: LocalPatch) -> dict[str, Any]:
-        """Local adjustment: variables + not-yet-committed node contracts
-        only. Topology and terminal intent are structurally out of reach
-        here. Bumps the epoch: in-flight work predates the adjustment."""
+        """Local adjustment: DESIRED values + not-yet-committed node
+        contracts only. Topology and terminal intent are structurally out
+        of reach here. Atomic: every validation runs before any mutation;
+        a rejected patch changes nothing. Bumps the epoch on success:
+        in-flight work predates the adjustment."""
         if not isinstance(patch, LocalPatch):
             raise PatchSemanticsError(
                 "apply_local_patch accepts LocalPatch only")
         with self._lock:
+            # ── validate everything first ──
             state = self._sessions.task_state()
             unknown = [u.semantic_key for u in patch.variable_updates
                        if state.variable(u.semantic_key) is None]
@@ -292,9 +418,27 @@ class TaskVMKernel:
                 raise PatchSemanticsError(
                     f"LocalPatch introduces unknown variables {unknown}; "
                     "adding variables is a scope change — use GoalPatch")
+            wf = self._workflows.snapshot()
+            for ov in patch.node_overrides:
+                node = self._workflows.node(ov.node_id)
+                if node is None:
+                    raise ValidationError(
+                        f"LocalPatch override targets unknown node "
+                        f"{ov.node_id!r}")
+                if node.kind is not NodeKind.ACTION:
+                    raise PatchSemanticsError(
+                        f"LocalPatch override targets {node.kind.value} node "
+                        f"{ov.node_id!r}; only ACTION contracts can be "
+                        "overridden")
+                st = wf.statuses.get(ov.node_id)
+                if st in (NodeStatus.COMMITTED, NodeStatus.COMPENSATED):
+                    raise CommittedNodeViolationError(
+                        f"cannot override contract of committed node "
+                        f"{ov.node_id!r}")
+            # ── all validation passed; mutate ──
             if patch.variable_updates:
                 new_vars = tuple(
-                    v.with_value(u.new_value)
+                    v.with_desired(u.new_value)
                     if (u := self._find_update(patch, v.semantic_key)) else v
                     for v in state.variables)
                 state = self._sessions.set_task_state(
@@ -320,14 +464,23 @@ class TaskVMKernel:
                          ) -> dict[str, Any]:
         """Terminal change: new intent and/or re-organised future subgraph.
 
-        ALWAYS bumps the epoch and reports requires_replan=True — with no
-        ``new_graph`` the Task Architect MUST re-plan the uncommitted
-        future before execution continues; with one, committed nodes are
-        carried verbatim (invariant 3) and only the future is replaced.
+        Atomic: the replacement graph is fully validated BEFORE the epoch
+        bump / intent change — a rejected GoalPatch leaves intent, epoch,
+        graph, and event log untouched (invariant 8).
+
+        On success ALWAYS bumps the epoch and reports requires_replan=True
+        — with no ``new_graph`` the Task Architect MUST re-plan the
+        uncommitted future before execution continues; with one, committed
+        nodes are carried verbatim (invariant 3) and only the future is
+        replaced.
         """
         if not isinstance(patch, GoalPatch):
             raise PatchSemanticsError("apply_goal_patch accepts GoalPatch only")
         with self._lock:
+            # ── validate everything first ──
+            if new_graph is not None:
+                self._workflows.validate_replace_future(new_graph)
+            # ── all validation passed; mutate ──
             epoch = self._bump_epoch_locked()
             intent_changed = False
             if patch.new_intent is not None:
@@ -353,26 +506,25 @@ class TaskVMKernel:
                     "graph_revision": graph_revision}
 
     def request_compensation(self, patch: CompensationPatch) -> CompensationPlan:
-        """Validate a CompensationPatch against the kernel's OWN recorded
-        checkpoint history (invariant 6) and produce the reversion plan
-        the runtime must execute through the real action path."""
+        """Build the reversion plan for a CompensationPatch from the
+        kernel's OWN checkpoint record (invariant 6) — the patch carries
+        only the target checkpoint id, so there is no caller-supplied
+        history to spoof. The runtime must execute the reversions through
+        the SAME real action path as forward work."""
         if not isinstance(patch, CompensationPatch):
             raise PatchSemanticsError(
                 "request_compensation accepts CompensationPatch only")
         with self._lock:
             rec = self._checkpoints.get(patch.target_checkpoint_id)
-            fabricated = {k: v for k, v in patch.observed_before.items()
-                          if k not in rec.variables or rec.variables[k] != v}
-            if fabricated:
-                raise CompensationMismatchError(
-                    f"CompensationPatch 'before' values not grounded in the "
-                    f"recorded checkpoint {rec.checkpoint_id!r}: {sorted(fabricated)}")
-            current = self._sessions.task_state().values()
+            state = self._sessions.task_state()
+            current_observed = state.observed_values()
             entries = tuple(
-                CompensationEntry(semantic_key=k, from_value=current.get(k),
-                                  to_value=target)
-                for k, target in rec.variables.items()
-                if current.get(k) != target)
+                CompensationEntry(semantic_key=k,
+                                  from_observed=current_observed.get(k),
+                                  to_observed=target,
+                                  to_desired=rec.desired.get(k))
+                for k, target in rec.observed.items()
+                if current_observed.get(k) != target)
             epoch = self._bump_epoch_locked()
             self._comp_seq += 1
             plan = CompensationPlan(
@@ -384,7 +536,8 @@ class TaskVMKernel:
                        {"patch_id": patch.patch_id, "plan_id": plan.plan_id,
                         "target_checkpoint_id": rec.checkpoint_id,
                         "entries": [{"semantic_key": e.semantic_key,
-                                     "from": e.from_value, "to": e.to_value}
+                                     "from": e.from_observed,
+                                     "to": e.to_observed}
                                     for e in entries],
                         "epoch": epoch},
                        patch.correlation_id or patch.patch_id)
@@ -396,35 +549,62 @@ class TaskVMKernel:
             detail: str = "") -> None:
         """Land the outcome of a compensation execution.
 
-        ``applied=True`` REQUIRES freshly observed values — the kernel
-        records what reality shows after the compensation actions, never
-        an assumed echo of the plan (mental-model §3.5: independent
-        verification, honest reversibility). Nodes committed after the
-        target checkpoint are marked COMPENSATED.
+        ``applied=True`` is NEVER taken on faith (invariant 6): the
+        caller must supply freshly observed values, and EVERY plan entry's
+        target must match — a single mismatch (or a missing key) turns
+        the outcome into CompensationFailed. Only on full match does the
+        kernel restore both planes (observed + desired) of the affected
+        variables and mark post-checkpoint commits COMPENSATED.
         """
         with self._lock:
             plan = self._comp_plans.get(plan_id)
             if plan is None:
                 raise ValidationError(f"unknown compensation plan {plan_id!r}")
+            if applied and observed_values is None:
+                raise ValidationError(
+                    "applied compensation requires freshly observed values")
+            mismatches: dict[str, dict[str, Any]] = {}
             if applied:
-                if observed_values is None:
-                    raise ValidationError(
-                        "applied compensation requires freshly observed values")
-                self.apply_observation(
-                    {k: observed_values[k] for k in observed_values
-                     if self._sessions.task_state().variable(k) is not None},
-                    correlation_id=plan_id)
-                rec = self._checkpoints.get(plan.target_checkpoint_id)
-                kept = set(rec.committed_nodes)
-                for nid in self._workflows.committed_node_ids():
-                    if nid not in kept:
-                        self._workflows.set_status(nid, NodeStatus.COMPENSATED)
-                self._emit(EventKind.COMPENSATION_APPLIED,
-                           {"plan_id": plan_id, "detail": detail,
-                            "observed": dict(observed_values)}, plan_id)
-            else:
+                for e in plan.entries:
+                    got = observed_values.get(e.semantic_key, _MISSING)
+                    if got is _MISSING or got != e.to_observed:
+                        mismatches[e.semantic_key] = {
+                            "expected": e.to_observed,
+                            "observed": None if got is _MISSING else got}
+            if not applied or mismatches:
                 self._emit(EventKind.COMPENSATION_FAILED,
-                           {"plan_id": plan_id, "detail": detail}, plan_id)
+                           {"plan_id": plan_id, "detail": detail,
+                            "mismatches": mismatches,
+                            "caller_claimed_applied": applied}, plan_id)
+                self._refresh_projection_data()
+                return
+            # ── full match confirmed; restore both planes ──
+            # observed: only the executed+verified entries. desired: EVERY
+            # variable recorded at the checkpoint — rollback returns the
+            # task world to that boundary wholesale, including intent.
+            rec = self._checkpoints.get(plan.target_checkpoint_id)
+            by_key = {e.semantic_key: e for e in plan.entries}
+            state = self._sessions.task_state()
+            new_vars = tuple(
+                replace(v,
+                        observed=(by_key[v.semantic_key].to_observed
+                                  if v.semantic_key in by_key else v.observed),
+                        desired=(rec.desired[v.semantic_key]
+                                 if v.semantic_key in rec.desired
+                                 else v.desired))
+                for v in state.variables)
+            self._sessions.set_task_state(replace(state, variables=new_vars))
+            kept = set(rec.committed_nodes)
+            compensated_nodes = []
+            for nid in self._workflows.committed_node_ids():
+                if nid not in kept:
+                    self._workflows.set_status(nid, NodeStatus.COMPENSATED)
+                    compensated_nodes.append(nid)
+            self._emit(EventKind.COMPENSATION_APPLIED,
+                       {"plan_id": plan_id, "detail": detail,
+                        "restored": {k: e.to_observed
+                                     for k, e in by_key.items()},
+                        "compensated_nodes": compensated_nodes}, plan_id)
             self._refresh_projection_data()
 
     # ══ governance events & conflicts ════════════════════════════════════
@@ -460,6 +640,34 @@ class TaskVMKernel:
             raise ValidationError(f"unknown action {action_id!r}")
         return handle
 
+    def _fold_observations_locked(
+            self, observations: Iterable[ObservedValue]
+    ) -> tuple[list[str], list[str]]:
+        """Validate (all keys known) then fold observations into the
+        OBSERVED plane with their evidence. Returns (updated keys,
+        keys that carried evidence). No event is emitted here — the
+        calling public method owns the single event."""
+        obs = tuple(observations)
+        state = self._sessions.task_state()
+        unknown = [o.semantic_key for o in obs
+                   if state.variable(o.semantic_key) is None]
+        if unknown:
+            raise ValidationError(
+                f"observation carries unknown semantic keys {unknown}; "
+                "structural discovery must go through recompose()")
+        if not obs:
+            return [], []
+        by_key = {o.semantic_key: o for o in obs}
+        new_vars = tuple(
+            v.with_observed(by_key[v.semantic_key].value,
+                            evidence=by_key[v.semantic_key].evidence,
+                            confidence=by_key[v.semantic_key].confidence)
+            if v.semantic_key in by_key else v
+            for v in state.variables)
+        self._sessions.set_task_state(replace(state, variables=new_vars))
+        return (sorted(by_key),
+                sorted(k for k, o in by_key.items() if o.evidence))
+
     def _bump_epoch_locked(self) -> int:
         epoch = self._sessions.bump_epoch()
         self._workflows.mark_running_stale_reset()
@@ -478,16 +686,31 @@ class TaskVMKernel:
         return None
 
     def _refresh_projection_data(self) -> None:
-        """Projection data always mirrors the stores (single truth)."""
+        """Projection data always mirrors the stores (single truth) via an
+        AUTHORITATIVE replace — nodes/variables removed from the plan or
+        the state disappear here too (no stale keys)."""
         state = self._sessions.task_state()
         wf = self._workflows.snapshot()
+        values = {v.semantic_key: {"observed": v.observed,
+                                   "desired": v.desired,
+                                   "diverged": v.diverged}
+                  for v in state.variables}
         node_status = {nid: st.value for nid, st in wf.statuses.items()}
         countable = [] if wf.graph is None else [
-            n for n in wf.graph.nodes
-            if n.kind in (NodeKind.ACTION, NodeKind.VERIFY, NodeKind.CHECKPOINT)]
+            n for n in wf.graph.nodes if n.kind in _PROGRESS_KINDS]
         done = [n for n in countable
                 if wf.statuses.get(n.node_id) is NodeStatus.COMMITTED]
         progress = (len(done) / len(countable)) if countable else 0.0
-        self._projections.update_data(values=state.values(),
-                                      node_status=node_status,
-                                      progress=progress)
+        self._projections.replace_data(values=values,
+                                       node_status=node_status,
+                                       progress=progress)
+
+
+class _Missing:
+    """Sentinel distinguishing 'key absent' from 'value is None'."""
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return "<MISSING>"
+
+
+_MISSING = _Missing()

@@ -47,7 +47,8 @@ def legacy_graph_to_task_state(graph: Any, *, intent: TaskIntent) -> TaskState:
         variables.append(TaskVariable(
             semantic_key=v.var_id,
             label=v.label,
-            value=v.value,
+            observed=v.value,   # legacy value came from observed app state
+            desired=v.value,    # at composition time, intent == reality
             value_type=getattr(v, "kind", "string"),
             mutability=(MUTABILITY_EDITABLE if getattr(v, "editable", True)
                         else MUTABILITY_READONLY),

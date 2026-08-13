@@ -16,6 +16,7 @@ from dataclasses import dataclass, replace
 from taskvm.domain.errors import CommittedNodeViolationError, ValidationError
 from taskvm.domain.workflow import (
     HISTORICAL_STATUSES,
+    NodeKind,
     NodeStatus,
     WorkflowGraph,
     WorkflowNode,
@@ -30,10 +31,13 @@ class WorkflowSnapshot:
     statuses: dict[str, NodeStatus]
 
 
-# legal forward transitions; COMMITTED may only move to COMPENSATED
+# legal forward transitions; COMMITTED may only move to COMPENSATED.
+# READY → COMMITTED exists for CONTROL nodes (VERIFY / BARRIER /
+# CHECKPOINT / TERMINAL): the kernel gates which kinds may use it.
 _TRANSITIONS: dict[NodeStatus, frozenset[NodeStatus]] = {
     NodeStatus.PENDING: frozenset({NodeStatus.READY, NodeStatus.INVALIDATED}),
-    NodeStatus.READY: frozenset({NodeStatus.RUNNING, NodeStatus.INVALIDATED}),
+    NodeStatus.READY: frozenset({NodeStatus.RUNNING, NodeStatus.COMMITTED,
+                                 NodeStatus.INVALIDATED}),
     NodeStatus.RUNNING: frozenset({NodeStatus.READY, NodeStatus.FAILED,
                                    NodeStatus.COMMITTED, NodeStatus.INVALIDATED}),
     NodeStatus.FAILED: frozenset({NodeStatus.READY, NodeStatus.INVALIDATED}),
@@ -64,17 +68,13 @@ class WorkflowStore:
             self._recompute_ready_locked()
             return copy.deepcopy(stamped)
 
-    def replace_future(self, new_graph: WorkflowGraph, *, epoch: int) -> WorkflowGraph:
-        """Apply the plan half of a GoalPatch: keep committed history,
-        replace the uncommitted future (invariant 3).
+    def validate_replace_future(self, new_graph: WorkflowGraph) -> None:
+        """NON-MUTATING pre-flight check for ``replace_future`` (patch
+        atomicity: callers validate fully before any state changes).
 
         Every node currently in a historical status must appear in
         ``new_graph`` with an IDENTICAL definition; otherwise the patch is
         rejected — the caller must route through compensation instead.
-        Carried-over nodes keep their status; all other new nodes start
-        PENDING/READY. Uncommitted nodes absent from the new graph are
-        dropped (they were INVALIDATED by the patch — visible in the event
-        payload emitted by the kernel).
         """
         with self._lock:
             if self._graph is None:
@@ -82,7 +82,7 @@ class WorkflowStore:
             new_by_id = {n.node_id: n for n in new_graph.nodes}
             historical = {nid: st for nid, st in self._statuses.items()
                           if st in HISTORICAL_STATUSES}
-            for nid, st in historical.items():
+            for nid in historical:
                 carried = new_by_id.get(nid)
                 if carried is None:
                     raise CommittedNodeViolationError(
@@ -91,6 +91,21 @@ class WorkflowStore:
                 if carried != self._graph.node(nid):
                     raise CommittedNodeViolationError(
                         f"GoalPatch silently rewrites committed node {nid!r}")
+
+    def replace_future(self, new_graph: WorkflowGraph, *, epoch: int) -> WorkflowGraph:
+        """Apply the plan half of a GoalPatch: keep committed history,
+        replace the uncommitted future (invariant 3). Assumes
+        ``validate_replace_future`` has already passed (re-checks it).
+
+        Carried-over nodes keep their status; all other new nodes start
+        PENDING/READY. Uncommitted nodes absent from the new graph are
+        dropped (they were INVALIDATED by the patch — visible in the event
+        payload emitted by the kernel).
+        """
+        with self._lock:
+            self.validate_replace_future(new_graph)
+            historical = {nid: st for nid, st in self._statuses.items()
+                          if st in HISTORICAL_STATUSES}
             stamped = replace(new_graph, revision=self._graph_rev + 1, epoch=epoch)
             self._graph = stamped
             self._graph_rev += 1
@@ -151,16 +166,32 @@ class WorkflowStore:
 
     def _recompute_ready_locked(self) -> None:
         """Propagate READY to a fixpoint (a container becoming READY can in
-        turn unblock its child lanes)."""
+        turn unblock its child lanes), then auto-commit containers whose
+        children have ALL committed (a finished fan-out/sequence is itself
+        complete — this keeps the topology view honest)."""
         if self._graph is None:
             return
         while True:
-            newly = [n.node_id for n in self._graph.ready_nodes(self._statuses)
-                     if self._statuses.get(n.node_id) is NodeStatus.PENDING]
-            if not newly:
+            changed = False
+            for n in self._graph.ready_nodes(self._statuses):
+                if self._statuses.get(n.node_id) is NodeStatus.PENDING:
+                    self._statuses[n.node_id] = NodeStatus.READY
+                    changed = True
+            for n in self._graph.nodes:
+                if n.kind not in (NodeKind.SEQUENCE, NodeKind.FAN_OUT,
+                                  NodeKind.BOUNDED_LOOP):
+                    continue
+                if self._statuses.get(n.node_id) not in (
+                        NodeStatus.PENDING, NodeStatus.READY):
+                    continue
+                children = self._graph.children_of(n.node_id)
+                if children and all(
+                        self._statuses.get(c.node_id) is NodeStatus.COMMITTED
+                        for c in children):
+                    self._statuses[n.node_id] = NodeStatus.COMMITTED
+                    changed = True
+            if not changed:
                 return
-            for nid in newly:
-                self._statuses[nid] = NodeStatus.READY
 
     def committed_node_ids(self) -> tuple[str, ...]:
         with self._lock:

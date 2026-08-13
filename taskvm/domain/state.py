@@ -1,25 +1,36 @@
 """Task state — the first-class object of TaskVM (mental-model doc §4).
 
-A task state is a set of *task variables* (semantic quantities the user
-can see and govern) plus the *surface evidence* that grounds each variable
-in what was actually visible on some substrate.
+A task state is a set of *task variables*. Each variable carries TWO
+values, because TaskVM is a control system over reality, not a scratchpad:
 
-Hard boundary (master handoff §3.2 / §5): nothing in this module may carry
-a database primary key, an app-internal operation name, or a
+- ``observed``: what reality currently shows. Written ONLY by
+  observation paths (bottom-up sync, action results, compensation
+  re-observation). Never by a patch.
+- ``desired``: what the task layer wants reality to become. Written ONLY
+  by governance paths (initial composition, LocalPatch, GoalPatch,
+  recomposition). Never by an observation.
+
+When ``desired != observed`` the variable is in *pending divergence* —
+work is in flight or not yet started. The kernel never lets a patch
+pretend the world already moved, and never lets an observation rewrite
+the user's intent (master handoff §3.2 双向可执行性 + §3.5 诚实性).
+
+Hard boundary (master handoff §3.2 / §5): nothing in this module may
+carry a database primary key, an app-internal operation name, or a
 substrate-specific selector. ``SurfaceHandle`` is a TaskVM-owned,
-short-lived handle; its ``opaque_token`` may wrap whatever a substrate
-session produced, but the domain never interprets it.
+short-lived handle id ONLY; the mapping from handle id to any concrete
+substrate locator is held privately by the substrate session, never by
+domain objects.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 from taskvm.domain.errors import ValidationError
 from taskvm.domain.intent import TaskIntent
 
-# Mutability values (kept as plain str constants — an Enum adds no value
-# for a 3-way display/behaviour hint and complicates serialisation).
+# Mutability values (plain str constants — a 3-way display/behaviour hint).
 MUTABILITY_EDITABLE = "editable"
 MUTABILITY_READONLY = "readonly"
 MUTABILITY_LOCKED = "locked"  # e.g. behind an irreversible action
@@ -27,15 +38,14 @@ MUTABILITY_LOCKED = "locked"  # e.g. behind an irreversible action
 
 @dataclass(frozen=True)
 class SurfaceHandle:
-    """A TaskVM-owned short-lived handle to a visible surface element.
+    """A TaskVM-owned short-lived handle id — the ONLY cross-layer field.
 
-    ``opaque_token`` may carry a substrate-session token (DOM path, a11y
-    node ref, coordinates — the domain does not know and does not care).
-    It is never a stable cross-session identity and never a storage key.
+    Concrete locators (whatever a substrate session uses to find the
+    element again) are substrate-private and must never appear on this
+    object; upper layers reference surfaces exclusively by handle id.
     """
 
     handle_id: str
-    opaque_token: str | None = None
 
     def __post_init__(self) -> None:
         if not self.handle_id:
@@ -64,18 +74,39 @@ class SurfaceEvidence:
 
 
 @dataclass(frozen=True)
-class TaskVariable:
-    """One governable task quantity.
+class ObservedValue:
+    """The observation contract: one freshly-observed value for one task
+    variable, with the visible evidence that grounds it.
 
-    ``semantic_key`` is the cross-layer identity (e.g. "release_date").
-    It is a semantic name, not a binding into any app. ``value`` is the
-    value TaskVM currently believes (sourced from observations or from a
-    user edit awaiting execution).
+    This is the only way new reality enters the kernel — value and its
+    evidence travel together and land on the SAME variable.
+    """
+
+    semantic_key: str
+    value: Any
+    evidence: tuple[SurfaceEvidence, ...] = ()
+    confidence: float | None = None  # None → keep the variable's current confidence
+
+    def __post_init__(self) -> None:
+        if not self.semantic_key:
+            raise ValidationError("ObservedValue.semantic_key must be non-empty")
+        object.__setattr__(self, "evidence", tuple(self.evidence))
+        if self.confidence is not None and not 0.0 <= self.confidence <= 1.0:
+            raise ValidationError("ObservedValue.confidence must be in [0, 1]")
+
+
+@dataclass(frozen=True)
+class TaskVariable:
+    """One governable task quantity: identity + observed + desired.
+
+    ``semantic_key`` is the cross-layer identity (e.g. "release_date") —
+    a semantic name, not a binding into any app.
     """
 
     semantic_key: str
     label: str
-    value: Any = None
+    observed: Any = None
+    desired: Any = None
     value_type: str = "string"  # display/serialisation hint: "date" | "status" | ...
     mutability: str = MUTABILITY_EDITABLE
     confidence: float = 1.0
@@ -91,10 +122,25 @@ class TaskVariable:
             raise ValidationError("TaskVariable.confidence must be in [0, 1]")
         object.__setattr__(self, "evidence", tuple(self.evidence))
 
-    def with_value(self, value: Any, *, confidence: float | None = None) -> "TaskVariable":
+    @property
+    def diverged(self) -> bool:
+        """Pending divergence: the task layer wants something reality has
+        not (yet) shown. The honest 'in flight' signal."""
+        return self.desired != self.observed
+
+    def with_observed(self, value: Any, *,
+                      evidence: tuple[SurfaceEvidence, ...] | None = None,
+                      confidence: float | None = None) -> "TaskVariable":
+        """Observation path only. An empty evidence tuple keeps the prior
+        evidence (a value sync does not invalidate where it was last seen)."""
         return replace(
-            self, value=value,
+            self, observed=value,
+            evidence=self.evidence if not evidence else tuple(evidence),
             confidence=self.confidence if confidence is None else confidence)
+
+    def with_desired(self, value: Any) -> "TaskVariable":
+        """Governance path only."""
+        return replace(self, desired=value)
 
 
 @dataclass(frozen=True)
@@ -123,5 +169,11 @@ class TaskState:
                 return v
         return None
 
-    def values(self) -> dict[str, Any]:
-        return {v.semantic_key: v.value for v in self.variables}
+    def observed_values(self) -> dict[str, Any]:
+        return {v.semantic_key: v.observed for v in self.variables}
+
+    def desired_values(self) -> dict[str, Any]:
+        return {v.semantic_key: v.desired for v in self.variables}
+
+    def diverged_keys(self) -> tuple[str, ...]:
+        return tuple(v.semantic_key for v in self.variables if v.diverged)

@@ -40,16 +40,25 @@ def test_task_state_rejects_duplicate_keys():
 
 
 def test_domain_objects_are_frozen():
-    v = TaskVariable(semantic_key="k", label="l", value=1)
+    v = TaskVariable(semantic_key="k", label="l", observed=1)
     with pytest.raises(dataclasses.FrozenInstanceError):
-        v.value = 2
+        v.observed = 2
 
 
-def test_surface_handle_is_taskvm_owned_not_a_storage_key():
-    h = SurfaceHandle(handle_id="h1", opaque_token="opaque:whatever-substrate")
+def test_task_variable_has_two_value_planes():
+    v = TaskVariable(semantic_key="k", label="l", observed="old",
+                     desired="new")
+    assert v.diverged is True
+    assert v.with_observed("new").diverged is False
+    assert v.with_desired("newer").observed == "old"  # desired-only write
+
+
+def test_surface_handle_carries_only_the_taskvm_owned_id():
+    # Wave-A: no opaque substrate locator on the domain object — the
+    # handle_id → concrete locator registry is substrate-private.
+    assert {f.name for f in dataclasses.fields(SurfaceHandle)} == {"handle_id"}
+    h = SurfaceHandle(handle_id="h1")
     assert h.handle_id == "h1"
-    # the token is opaque: the domain exposes no accessor that interprets it
-    assert not hasattr(h, "app") and not hasattr(h, "field")
 
 
 def test_evidence_confidence_bounds():
@@ -153,8 +162,7 @@ def test_patch_classes_encode_the_replan_boundary():
     lp = LocalPatch(patch_id="p1",
                     variable_updates=(VariableUpdate("release_date", "08-18"),))
     gp = GoalPatch(patch_id="p2", new_intent=TaskIntent(goal="new goal"))
-    cp = CompensationPatch(patch_id="p3", target_checkpoint_id="C1",
-                           observed_before={"release_date": "08-14"})
+    cp = CompensationPatch(patch_id="p3", target_checkpoint_id="C1")
     assert requires_replan(lp) is False
     assert requires_replan(gp) is True
     assert requires_replan(cp) is False
@@ -204,9 +212,18 @@ def test_event_kinds_cover_the_handoff_minimum():
         "action_requested", "action_started", "action_finished",
         "action_discarded",
         "verification_passed", "verification_failed",
+        "node_committed",
         "checkpoint_committed", "governance_requested",
         "conflict_detected", "conflict_resolved",
         "compensation_requested", "compensation_applied",
         "compensation_failed",
     }
     assert required <= names
+
+
+def test_intent_terminal_comparison_includes_constraints():
+    a = TaskIntent(goal="g", constraints=("c1",))
+    b = TaskIntent(goal="g", constraints=("c2",))
+    assert not a.describes_same_terminal(b)
+    assert a.describes_same_terminal(TaskIntent(goal="g",
+                                                constraints=("c1",)))

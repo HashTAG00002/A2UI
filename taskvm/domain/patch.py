@@ -100,15 +100,13 @@ class GoalPatch(Patch):
 class CompensationPatch(Patch):
     """Return to a previously confirmed task state.
 
-    ``observed_before`` maps semantic keys to the values the requester
-    believes were in effect at the target checkpoint. The kernel accepts
-    the patch only if those values match what IT recorded at that
-    checkpoint boundary — compensation is grounded in TaskVM's own
-    observation history, never in an external oracle.
+    Carries ONLY the target checkpoint. The 'before' values come from the
+    kernel's OWN checkpoint record — the requester cannot supply, amend,
+    or spoof them (an empty/partial caller-supplied history would be a
+    vacuous-pass hole; eliminating the parameter eliminates the hole).
     """
 
     target_checkpoint_id: str = ""
-    observed_before: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -119,12 +117,18 @@ class CompensationPatch(Patch):
 
 @dataclass(frozen=True)
 class CompensationEntry:
-    """One variable reversion inside a compensation plan: undo the current
-    believed value back to the value observed at the target checkpoint."""
+    """One variable reversion inside a compensation plan.
+
+    ``to_observed`` is the reality the runtime must restore (verified by
+    fresh observation before the kernel accepts the result);
+    ``to_desired`` is the task-layer value the kernel restores alongside,
+    so the task world returns to the checkpoint as a whole.
+    """
 
     semantic_key: str
-    from_value: Any
-    to_value: Any
+    from_observed: Any
+    to_observed: Any
+    to_desired: Any = None
 
 
 @dataclass(frozen=True)

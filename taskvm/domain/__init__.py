@@ -51,6 +51,7 @@ from taskvm.domain.state import (
     MUTABILITY_EDITABLE,
     MUTABILITY_LOCKED,
     MUTABILITY_READONLY,
+    ObservedValue,
     SurfaceEvidence,
     SurfaceHandle,
     TaskState,
@@ -66,7 +67,7 @@ from taskvm.domain.workflow import (
 
 __all__ = [
     # intent & state
-    "TaskIntent", "TaskVariable", "TaskState",
+    "TaskIntent", "TaskVariable", "TaskState", "ObservedValue",
     "SurfaceHandle", "SurfaceEvidence",
     "MUTABILITY_EDITABLE", "MUTABILITY_READONLY", "MUTABILITY_LOCKED",
     # projection
