@@ -238,7 +238,7 @@ _PAGE_TPL = """\
 <html lang="zh"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TaskVM · {{ sid }}</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=gg1">
 </head>
 <body>
   <header>
@@ -316,6 +316,8 @@ _PAGE_TPL = """\
 # When non-empty, the two-zone page embeds a live MobileGym sim iframe (split-
 # screen). Set via ``--sim-url`` at startup (mobilegym demo only).
 SIM_URL: str = ""
+CLI_TASK: str = "doc_handoff"
+CLI_EXECUTOR: str = "gui_agent"
 
 
 def _genui_rw_zone_html(sess: WorkspaceSession,
@@ -669,6 +671,17 @@ def _wants_json() -> bool:
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "site": SITE})
+
+
+@app.route("/", methods=["GET"])
+def index_route():
+    """GET / auto-seeds a session for the configured --task and redirects.
+    Convenience entry point so browsers hitting the root URL get a usable page
+    instead of a 404 (the real route is POST /seed → /<sid>)."""
+    fixture, adapters = _get_fixture_and_adapters(
+        CLI_TASK, "localhost", executor=CLI_EXECUTOR)
+    sess = seed_session(fixture, adapters, host="localhost")
+    return redirect(f"/{sess.sid}")
 
 
 @app.route("/seed", methods=["POST"])
@@ -1313,6 +1326,9 @@ def main(argv=None):
                         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s")
     global SIM_URL
     SIM_URL = args.sim_url
+    global CLI_TASK, CLI_EXECUTOR
+    CLI_TASK = args.task
+    CLI_EXECUTOR = args.executor
     fixture, adapters = _get_fixture_and_adapters(args.task, args.app_host,
                                                   executor=args.executor)
     # EE.1: log the executor so it's never silently on the backdoor path. When
