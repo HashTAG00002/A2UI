@@ -61,8 +61,7 @@ class WorkflowStore:
             self._graph = stamped
             self._graph_rev += 1
             self._statuses = {n.node_id: NodeStatus.PENDING for n in stamped.nodes}
-            for n in stamped.ready_nodes(self._statuses):
-                self._statuses[n.node_id] = NodeStatus.READY
+            self._recompute_ready_locked()
             return copy.deepcopy(stamped)
 
     def replace_future(self, new_graph: WorkflowGraph, *, epoch: int) -> WorkflowGraph:
@@ -102,8 +101,7 @@ class WorkflowStore:
                 else:
                     new_statuses[n.node_id] = NodeStatus.PENDING
             self._statuses = new_statuses
-            for n in stamped.ready_nodes(self._statuses):
-                self._statuses[n.node_id] = NodeStatus.READY
+            self._recompute_ready_locked()
             return copy.deepcopy(stamped)
 
     def override_contract(self, node_id: str, contract) -> None:
@@ -135,10 +133,10 @@ class WorkflowStore:
                     f"illegal node transition {cur.value} -> {status.value} "
                     f"for {node_id!r}")
             self._statuses[node_id] = status
-            # a commit may unblock dependents
+            # a commit may unblock dependents (transitively: containers then
+            # their lanes) — recompute to a fixpoint
             if status is NodeStatus.COMMITTED:
-                for n in self._graph.ready_nodes(self._statuses):
-                    self._statuses[n.node_id] = NodeStatus.READY
+                self._recompute_ready_locked()
 
     def mark_running_stale_reset(self) -> list[str]:
         """Epoch bump: every in-flight (RUNNING) node returns to READY; its
@@ -150,6 +148,19 @@ class WorkflowStore:
             for nid in reset:
                 self._statuses[nid] = NodeStatus.READY
             return reset
+
+    def _recompute_ready_locked(self) -> None:
+        """Propagate READY to a fixpoint (a container becoming READY can in
+        turn unblock its child lanes)."""
+        if self._graph is None:
+            return
+        while True:
+            newly = [n.node_id for n in self._graph.ready_nodes(self._statuses)
+                     if self._statuses.get(n.node_id) is NodeStatus.PENDING]
+            if not newly:
+                return
+            for nid in newly:
+                self._statuses[nid] = NodeStatus.READY
 
     def committed_node_ids(self) -> tuple[str, ...]:
         with self._lock:

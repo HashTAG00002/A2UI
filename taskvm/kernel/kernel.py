@@ -171,13 +171,15 @@ class TaskVMKernel:
     # ══ action lifecycle (epoch-stamped — invariant 4) ══════════════════
     def request_action(self, node_id: str, *,
                        correlation_id: str = "") -> dict[str, Any]:
-        """Register an action request for a READY action node. Returns the
-        handle the runtime must present back: {action_id, node_id, epoch,
-        contract}."""
+        """Register an action request for a READY ACTION or VERIFY node.
+        Returns the handle the runtime must present back:
+        {action_id, node_id, epoch, contract, verification}."""
         with self._lock:
             node = self._workflows.node(node_id)
-            if node is None or node.kind is not NodeKind.ACTION:
-                raise ValidationError(f"node {node_id!r} is not an action node")
+            if node is None or node.kind not in (NodeKind.ACTION,
+                                                 NodeKind.VERIFY):
+                raise ValidationError(
+                    f"node {node_id!r} is not an action/verify node")
             st = self._workflows.snapshot().statuses.get(node_id)
             if st is not NodeStatus.READY:
                 raise ValidationError(
@@ -186,7 +188,8 @@ class TaskVMKernel:
             action_id = f"act_{self._action_seq:05d}"
             handle = {"action_id": action_id, "node_id": node_id,
                       "epoch": self.epoch,
-                      "contract": copy.deepcopy(node.contract)}
+                      "contract": copy.deepcopy(node.contract),
+                      "verification": node.verification}
             self._actions[action_id] = handle
             self._emit(EventKind.ACTION_REQUESTED,
                        {"action_id": action_id, "node_id": node_id},
