@@ -124,11 +124,13 @@ def test_bounded_loop_requires_guards():
                                           label="loop",
                                           termination_predicate="all synced"),))
     # a valid loop also needs an executable body (Wave-A.1: ACTION/VERIFY
-    # children; no nested loops)
+    # children; no nested loops) — and every plan has exactly one terminal
     ok = WorkflowGraph(nodes=(
         WorkflowNode(node_id="L", kind=NodeKind.BOUNDED_LOOP, label="loop",
                      termination_predicate="all synced", max_iterations=5),
         _action("body", parent_id="L"),
+        WorkflowNode(node_id="t", kind=NodeKind.TERMINAL, label="done",
+                     depends_on=("L",)),
     ))
     assert ok.node("L").max_iterations == 5
     # body-less loop rejected even with both guards
@@ -171,7 +173,9 @@ def test_fan_out_requires_lanes():
 def test_ready_nodes_dependency_semantics():
     a = _action("a")
     b = _action("b", depends_on=("a",))
-    g = WorkflowGraph(nodes=(a, b))
+    g = WorkflowGraph(nodes=(a, b, WorkflowNode(
+        node_id="t", kind=NodeKind.TERMINAL, label="done",
+        depends_on=("b",))))
     ready = g.ready_nodes({"a": NodeStatus.COMMITTED, "b": NodeStatus.PENDING})
     assert [n.node_id for n in ready] == ["b"]
     assert g.ready_nodes({"a": NodeStatus.PENDING, "b": NodeStatus.PENDING}) == (a,)

@@ -1,14 +1,15 @@
-"""Pure in-memory end-to-end scenarios (handoff 02 §迁移策略 5 + Wave-A
-regression: a full workflow must REACH TERMINAL through public APIs).
+"""Pure in-memory end-to-end scenarios (handoff 02 §迁移策略 5; v4 contract).
 
 Two arcs:
   1. test_full_workflow_reaches_terminal — the node advancement protocol:
      ACTION nodes ride the action lifecycle; VERIFY commits from READY;
      BARRIER / CHECKPOINT / TERMINAL advance via advance_control; the
      fan-out container auto-commits when its lanes are done.
-  2. test_full_governance_scenario — LocalPatch → GoalPatch (future-only
-     replacement) → stale epoch rejection → CompensationPatch restoring
-     the observed checkpoint state.
+  2. test_full_governance_scenario — LocalPatch (deterministic retarget) →
+     GoalPatch (phase one: invalidate + block) → stale epoch rejection →
+     recompose (phase two: atomic closure) → CompensationPatch derived
+     from committed action history, restoring the observed checkpoint
+     state and marking undone work COMPENSATED.
 
 No Flask, no browser, no model, no substrate.
 """
@@ -20,7 +21,6 @@ from taskvm.domain import (
     EventKind,
     GoalPatch,
     LocalPatch,
-    NodeContractOverride,
     NodeKind,
     NodeStatus,
     ObservedValue,
@@ -43,16 +43,19 @@ def _contract(cid, key, value):
                           completion_condition=f"{key} visibly shows {value}")
 
 
-def _vars():
+def _vars(desired="2026-08-18", release_observed="2026-08-14",
+          copy_observed="2026-08-14", qa_observed="2026-08-14",
+          qa_desired=None):
     return (
         TaskVariable(semantic_key="release_date", label="发布日期",
-                     observed="2026-08-14", desired="2026-08-18",
+                     observed=release_observed, desired=desired,
                      value_type="date"),
         TaskVariable(semantic_key="copy_deadline", label="文案截止",
-                     observed="2026-08-14", desired="2026-08-18",
+                     observed=copy_observed, desired=desired,
                      value_type="date"),
         TaskVariable(semantic_key="qa_deadline", label="测试截止",
-                     observed="2026-08-14", desired="2026-08-18",
+                     observed=qa_observed,
+                     desired=qa_desired if qa_desired is not None else desired,
                      value_type="date"),
     )
 
@@ -130,6 +133,7 @@ def test_full_workflow_reaches_terminal():
     rec = k.advance_control("cp1")
     assert rec is not None and rec.checkpoint_id == "cp1"
     assert rec.observed["qa_deadline"] == "2026-08-18"
+    assert "cp1" in rec.committed_nodes   # the node belongs to its boundary
     assert k.advance_control("t1") is None
     # every node committed; the plan is complete
     statuses = k.workflow().statuses
@@ -156,15 +160,14 @@ def test_full_governance_scenario():
     assert set(rec.committed_nodes) == {"a1", "v1"}
     _run_action(k, "l1", "copy_deadline", "2026-08-18")
 
-    # ── LocalPatch: 局部调整（同一变量/节点，下午 4 点），不改拓扑 ──────────
+    # ── LocalPatch: 局部调整（下午 4 点），单一真源 + 确定性 retarget ──────
     epoch_before = k.epoch
     out = k.apply_local_patch(LocalPatch(
         patch_id="lp1", rationale="测试截止改成下午 4 点",
-        variable_updates=(VariableUpdate("qa_deadline", "2026-08-18T16:00"),),
-        node_overrides=(NodeContractOverride(
-            "l2", _contract("c_l2b", "qa_deadline", "2026-08-18T16:00")),)))
+        variable_updates=(VariableUpdate("qa_deadline", "2026-08-18T16:00"),)))
     assert out["requires_replan"] is False
-    assert k.epoch > epoch_before
+    assert out["retargeted_nodes"] == ["l2"]   # the kernel retargets — no
+    assert k.epoch > epoch_before              # manual contract override
     qa = k.task_state().variable("qa_deadline")
     assert qa.desired == "2026-08-18T16:00"   # desired moved …
     assert qa.observed == "2026-08-14"        # … reality NOT faked
@@ -172,47 +175,26 @@ def test_full_governance_scenario():
     assert {n.node_id for n in k.workflow().graph.nodes} == \
            {n.node_id for n in _full_graph().nodes}   # topology untouched
     assert k.workflow().graph.node("l2").contract.desired_state[
-        "qa_deadline"] == "2026-08-18T16:00"
+        "qa_deadline"] == "2026-08-18T16:00"   # runtime gets the NEW target
 
-    # ── GoalPatch: 终点改为 8/20，已 commit 的历史保留，只换未来 ──────
+    # ── GoalPatch phase one: 终点改为 8/20 → 旧未来作废 + 执行阻断 ──────
     h2 = k.request_action("l2")          # in-flight when the patch lands
     k.start_action(h2["action_id"])
     stale_epoch = h2["epoch"]
-    # carried history: committed nodes verbatim; "fo" comes along because
-    # the committed lane l1 still lives inside it.
-    carried = tuple(k.workflow().graph.node(nid)
-                    for nid in ("a1", "v1", "fo", "l1"))
-    new_graph = WorkflowGraph(nodes=carried + (
-        WorkflowNode(node_id="a3", kind=NodeKind.ACTION, label="改会议到 8/20",
-                     depends_on=("v1",),
-                     contract=_contract("c_a3", "release_date", "2026-08-20")),
-        WorkflowNode(node_id="l3", kind=NodeKind.ACTION, label="同步全部依赖",
-                     depends_on=("a3",),
-                     contract=_contract("c_l3", "qa_deadline", "2026-08-20")),
-        WorkflowNode(node_id="t2", kind=NodeKind.TERMINAL, label="完成",
-                     depends_on=("l3",)),
-    ))
     out = k.apply_goal_patch(
         GoalPatch(patch_id="gp1", rationale="不要 18 日了，改 20 日",
                   new_intent=TaskIntent(
                       goal="把项目发布会议推迟到 2026-08-20 并同步所有依赖任务",
-                      success_criteria=("会议日期为 2026-08-20",))),
-        new_graph=new_graph)
+                      success_criteria=("会议日期为 2026-08-20",))))
     assert out["requires_replan"] is True and out["intent_changed"] is True
     statuses = k.workflow().statuses
     assert statuses["a1"] is NodeStatus.COMMITTED   # history preserved
+    assert statuses["v1"] is NodeStatus.COMMITTED
     assert statuses["l1"] is NodeStatus.COMMITTED
-    assert "l2" not in statuses                     # future replaced
-    assert statuses["a3"] is NodeStatus.READY
-    # the architect recomposes: desired moves to 8/20 (observed untouched)
-    k.recompose(tuple(
-        TaskVariable(semantic_key=v.semantic_key, label=v.label,
-                     observed=v.observed,
-                     desired={"release_date": "2026-08-20",
-                              "copy_deadline": "2026-08-20",
-                              "qa_deadline": "2026-08-20"}[v.semantic_key],
-                     value_type=v.value_type)
-        for v in k.task_state().variables), reason="GoalPatch gp1 replan")
+    assert statuses["l2"] is NodeStatus.INVALIDATED  # old future void
+    with pytest.raises(ValidationError, match="recompose"):
+        k.request_action("l2")           # execution blocked until closure
+    assert k.pending_recompose is not None
 
     # ── stale epoch result 被拒绝，不污染 TaskState ───────────────────
     assert stale_epoch < k.epoch
@@ -224,30 +206,65 @@ def test_full_governance_scenario():
                  if e.kind is EventKind.ACTION_DISCARDED]
     assert discarded and discarded[-1].payload["action_epoch"] == stale_epoch
 
-    # ── CompensationPatch: 回到 C1（kernel 自录的 observed state）────────
+    # ── GoalPatch phase two: recompose 原子闭环（携带已验证历史）─────────
+    # carried history: committed nodes verbatim; "fo" comes along because
+    # the committed lane l1 still lives inside it.
+    carried = tuple(k.workflow().graph.node(nid)
+                    for nid in ("a1", "v1", "fo", "l1"))
+    k.recompose(_vars(desired="2026-08-20", release_observed="2026-08-18",
+                      copy_observed="2026-08-18"),
+                reason="gp1 replan",
+                new_graph=WorkflowGraph(nodes=carried + (
+                    WorkflowNode(node_id="a3", kind=NodeKind.ACTION,
+                                 label="改会议到 8/20", depends_on=("v1",),
+                                 contract=_contract("c_a3", "release_date",
+                                                    "2026-08-20")),
+                    WorkflowNode(node_id="l3", kind=NodeKind.ACTION,
+                                 label="同步测试到 8/20", depends_on=("a3",),
+                                 contract=_contract("c_l3", "qa_deadline",
+                                                    "2026-08-20")),
+                    WorkflowNode(node_id="t2", kind=NodeKind.TERMINAL,
+                                 label="完成", depends_on=("l3",)),
+                )))
+    assert k.pending_recompose is None    # closed
+    statuses = k.workflow().statuses
+    assert statuses["a1"] is NodeStatus.COMMITTED
+    assert statuses["l1"] is NodeStatus.COMMITTED
+    assert statuses["a3"] is NodeStatus.READY
+    # no split-brain: desired plane and future contracts agree
+    assert k.task_state().variable("release_date").desired == "2026-08-20"
+    assert k.task_state().variable("qa_deadline").desired == "2026-08-20"
+
+    # ── CompensationPatch: 回到 C1（由已提交动作历史推导，非快照 diff）───
     _run_action(k, "a3", "release_date", "2026-08-20")   # new epoch work
     plan = k.request_compensation(CompensationPatch(
         patch_id="rb1", target_checkpoint_id="C1"))
-    targets = {e.semantic_key: e.to_observed for e in plan.entries}
-    assert targets["release_date"] == "2026-08-18"     # 8/20 → back to 8/18
-    assert targets["copy_deadline"] == "2026-08-14"    # l1's commit reverted
+    # LIFO over what TaskVM ACTUALLY committed after C1: a3 then l1
+    assert [(e.node_id, e.semantic_key, e.from_observed, e.to_observed)
+            for e in plan.entries] == [
+        ("a3", "release_date", "2026-08-20", "2026-08-18"),
+        ("l1", "copy_deadline", "2026-08-18", "2026-08-14")]
+    assert plan.requires_recompose is True   # crosses the GoalPatch boundary
     # runtime executed the reversions through the real path, then re-observed
-    k.record_compensation_result(
+    assert k.record_compensation_result(
         plan.plan_id, applied=True,
         observed_values={"release_date": "2026-08-18",
                          "copy_deadline": "2026-08-14"},
-        detail="inverse actions executed + re-observed")
+        detail="inverse actions executed + re-observed") is True
     state = k.task_state()
     assert state.variable("release_date").observed == "2026-08-18"
     assert state.variable("copy_deadline").observed == "2026-08-14"
-    # desired plane restored to the checkpoint wholesale (rollback returns
-    # the task world, not just reality)
+    # the checkpoint intent is really restored; desired follows C1's plane
+    assert state.intent.goal.startswith("把项目发布会议推迟到 2026-08-18")
     assert state.variable("release_date").desired == "2026-08-18"
-    # nodes committed AFTER C1 are honestly marked COMPENSATED
+    # undone post-C1 commits are honestly marked COMPENSATED (audit trail),
+    # the abandoned future is invalidated, and recompose is required
     statuses = k.workflow().statuses
-    assert statuses["l1"] is NodeStatus.COMPENSATED
     assert statuses["a3"] is NodeStatus.COMPENSATED
+    assert statuses["l1"] is NodeStatus.COMPENSATED
     assert statuses["a1"] is NodeStatus.COMMITTED      # kept (at C1)
+    assert statuses["l3"] is NodeStatus.INVALIDATED
+    assert k.pending_recompose is not None
     kinds = [e.kind for e in k.events()]
     assert EventKind.COMPENSATION_REQUESTED in kinds
     assert EventKind.COMPENSATION_APPLIED in kinds

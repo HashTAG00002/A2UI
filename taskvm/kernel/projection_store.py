@@ -42,7 +42,10 @@ class ProjectionStore:
     # ── schema (architect composition only) ──────────────────────────────
     def set_schema(self, schema: ProjectionSchema) -> ProjectionSchema:
         with self._lock:
-            stamped = replace(schema, revision=self._schema_rev + 1)
+            # deep copy at the WRITE boundary too (audit G10): caller-side
+            # mutation of nested props must never reach the store
+            stamped = replace(copy.deepcopy(schema),
+                              revision=self._schema_rev + 1)
             self._schema = stamped
             self._schema_rev += 1
             return copy.deepcopy(stamped)
@@ -56,7 +59,7 @@ class ProjectionStore:
         the task state or workflow must disappear here (no stale merge).
         """
         with self._lock:
-            data = ProjectionData(values=dict(values),
+            data = ProjectionData(values=copy.deepcopy(values),
                                   node_status=dict(node_status),
                                   progress=progress,
                                   revision=self._data_rev + 1)
@@ -70,8 +73,8 @@ class ProjectionStore:
         with self._lock:
             data = self._data
             if values is not None:
-                merged = dict(data.values)
-                merged.update(values)
+                merged = copy.deepcopy(data.values)
+                merged.update(copy.deepcopy(values))
                 data = replace(data, values=merged)
             if node_status is not None:
                 merged_status = dict(data.node_status)

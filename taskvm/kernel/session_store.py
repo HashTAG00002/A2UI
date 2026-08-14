@@ -27,6 +27,10 @@ class TaskSessionStore:
         self._session_id = session_id
         self._state = TaskState(intent=intent, variables=(), revision=0)
         self._epoch = 0
+        # an EMPTY variable set is a legitimate initial composition — the
+        # one-shot guard must key on this flag, not on variable emptiness
+        # (Wave-A.2 audit G13a)
+        self._initialized = False
         self._lock = threading.RLock()
 
     @property
@@ -38,13 +42,24 @@ class TaskSessionStore:
         with self._lock:
             return copy.deepcopy(self._state)
 
+    @property
+    def initialized(self) -> bool:
+        with self._lock:
+            return self._initialized
+
+    def mark_initialized(self) -> None:
+        with self._lock:
+            self._initialized = True
+
     def set_task_state(self, state: TaskState) -> TaskState:
         """Install a new state head. The given state's revision is ignored;
         the store assigns ``current + 1`` so revisions are monotonic by
-        construction. Returns the installed (re-stamped) state."""
+        construction. The incoming object is DEEP-COPIED at the write
+        boundary (invariant 7 is bidirectional — audit G10). Returns the
+        installed (re-stamped) state."""
         with self._lock:
             stamped = replace(state, revision=self._state.revision + 1)
-            self._state = stamped
+            self._state = copy.deepcopy(stamped)
             return copy.deepcopy(stamped)
 
     def check_revision(self, state: TaskState) -> None:
@@ -59,7 +74,8 @@ class TaskSessionStore:
     def set_intent(self, intent: TaskIntent) -> TaskState:
         with self._lock:
             self._state = replace(
-                self._state, intent=intent, revision=self._state.revision + 1)
+                self._state, intent=copy.deepcopy(intent),
+                revision=self._state.revision + 1)
             return copy.deepcopy(self._state)
 
     # ── execution epoch / generation ─────────────────────────────────────

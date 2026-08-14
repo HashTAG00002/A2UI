@@ -1,8 +1,9 @@
-"""Kernel invariant + Wave-A regression tests.
+"""Kernel invariant + regression tests (v4 contract).
 
 Invariants 1-7 from handoff 02; 8 (atomicity) and 9 (observed/desired
-planes) from the Wave-A review. Every regression the reviewer demanded
-lives here or in test_scenario.py / test_import_boundaries.py.
+planes) from Wave-A; 13/14 (composition coherence, one-shot/two-phase
+closure) from the Wave-A.2 audit. Adversarial coverage lives in
+test_adversarial_contracts.py and test_v4_audit_fixes.py.
 """
 import dataclasses
 
@@ -15,7 +16,6 @@ from taskvm.domain import (
     EventKind,
     GoalPatch,
     LocalPatch,
-    NodeContractOverride,
     NodeKind,
     NodeStatus,
     ObservedValue,
@@ -42,18 +42,18 @@ def _intent(goal="把发布会议改到 8/18 并同步依赖任务"):
                       success_criteria=("会议日期为 2026-08-18",))
 
 
-def _vars():
+def _vars(desired="2026-08-18", release_observed="2026-08-14"):
     """Composition time: reality is 08-14, the goal is 08-18 → every
     variable starts in pending divergence (observed != desired)."""
     return (
         TaskVariable(semantic_key="release_date", label="发布日期",
-                     observed="2026-08-14", desired="2026-08-18",
+                     observed=release_observed, desired=desired,
                      value_type="date"),
         TaskVariable(semantic_key="copy_deadline", label="文案截止",
-                     observed="2026-08-14", desired="2026-08-18",
+                     observed="2026-08-14", desired=desired,
                      value_type="date"),
         TaskVariable(semantic_key="qa_deadline", label="测试截止",
-                     observed="2026-08-14", desired="2026-08-18",
+                     observed="2026-08-14", desired=desired,
                      value_type="date"),
     )
 
@@ -131,33 +131,44 @@ def test_schema_and_data_revisions_are_independent():
     assert rev1.schema_revision == rev0.schema_revision  # untouched by values
 
 
-# ── invariant 3: committed nodes survive GoalPatch verbatim ───────────────
+# ── invariant 3 + 14: GoalPatch two-phase closure ─────────────────────────
 def test_goal_patch_preserves_committed_nodes():
     k = _kernel()
     _run_action(k, "a1", [_obs("release_date", "2026-08-18")])
     k.record_verification("v1", True)  # VERIFY: READY → COMMITTED directly
-    old_graph = k.workflow().graph
-    carried = tuple(old_graph.node(nid) for nid in ("a1", "v1"))
-    new_graph = WorkflowGraph(nodes=carried + (
-        WorkflowNode(node_id="a2", kind=NodeKind.ACTION, label="改到 8/20",
-                     depends_on=("v1",),
-                     contract=_contract("c_a2", "release_date", "2026-08-20")),
-        WorkflowNode(node_id="t2", kind=NodeKind.TERMINAL, label="完成",
-                     depends_on=("a2",)),
-    ))
-    out = k.apply_goal_patch(
-        GoalPatch(patch_id="gp1", new_intent=_intent("改到 8/20")),
-        new_graph=new_graph)
+    out = k.apply_goal_patch(GoalPatch(patch_id="gp1",
+                                       new_intent=_intent("改到 8/20")))
     assert out["requires_replan"] is True
+    statuses = k.workflow().statuses
+    assert statuses["a1"] is NodeStatus.COMMITTED     # history preserved
+    assert statuses["v1"] is NodeStatus.COMMITTED
+    assert statuses["l1"] is NodeStatus.INVALIDATED   # old future void
+    # phase two: recompose carries history verbatim + installs the future
+    carried = tuple(k.workflow().graph.node(nid) for nid in ("a1", "v1"))
+    k.recompose(_vars(desired="2026-08-20", release_observed="2026-08-18"),
+                reason="gp1 replan",
+                new_graph=WorkflowGraph(nodes=carried + (
+                    WorkflowNode(node_id="a2", kind=NodeKind.ACTION,
+                                 label="改到 8/20", depends_on=("v1",),
+                                 contract=_contract("c_a2", "release_date",
+                                                    "2026-08-20")),
+                    WorkflowNode(node_id="t2", kind=NodeKind.TERMINAL,
+                                 label="完成", depends_on=("a2",)),
+                )))
     statuses = k.workflow().statuses
     assert statuses["a1"] is NodeStatus.COMMITTED
     assert statuses["v1"] is NodeStatus.COMMITTED
     assert statuses["a2"] is NodeStatus.READY
+    # no split-brain: desired plane and the future contract agree
+    assert k.task_state().variable("release_date").desired == "2026-08-20"
+    assert k.workflow().graph.node("a2").contract.desired_state[
+        "release_date"] == "2026-08-20"
 
 
-def test_goal_patch_cannot_rewrite_committed_node():
+def test_committed_history_cannot_be_rewritten_via_recompose():
     k = _kernel()
     _run_action(k, "a1", [_obs("release_date", "2026-08-18")])
+    k.apply_goal_patch(GoalPatch(patch_id="gp", new_intent=_intent("改到 8/20")))
     tampered = WorkflowGraph(nodes=(
         WorkflowNode(node_id="a1", kind=NodeKind.ACTION, label="篡改",
                      contract=_contract("c_x", "release_date", "2026-01-01")),
@@ -165,17 +176,18 @@ def test_goal_patch_cannot_rewrite_committed_node():
                      depends_on=("a1",)),
     ))
     with pytest.raises(CommittedNodeViolationError):
-        k.apply_goal_patch(GoalPatch(patch_id="gp_bad"), new_graph=tampered)
+        k.recompose(_vars(), reason="replan", new_graph=tampered)
 
 
-def test_goal_patch_cannot_drop_committed_node():
+def test_committed_history_cannot_be_dropped_via_recompose():
     k = _kernel()
     _run_action(k, "a1", [_obs("release_date", "2026-08-18")])
+    k.apply_goal_patch(GoalPatch(patch_id="gp", new_intent=_intent("改到 8/20")))
     dropped = WorkflowGraph(nodes=(
         WorkflowNode(node_id="t1", kind=NodeKind.TERMINAL, label="完成"),
     ))
     with pytest.raises(CommittedNodeViolationError):
-        k.apply_goal_patch(GoalPatch(patch_id="gp_bad2"), new_graph=dropped)
+        k.recompose(_vars(), reason="replan", new_graph=dropped)
 
 
 # ── invariant 4: stale epoch results are discarded ─────────────────────────
@@ -192,7 +204,8 @@ def test_stale_epoch_action_result_is_discarded():
     kinds = [e.kind for e in k.events()]
     assert EventKind.ACTION_DISCARDED in kinds
     assert EventKind.ACTION_FINISHED not in kinds
-    assert k.workflow().statuses["a1"] is NodeStatus.READY
+    # the node belongs to the voided future now — never silently re-armed
+    assert k.workflow().statuses["a1"] is NodeStatus.INVALIDATED
 
 
 def test_current_epoch_action_result_lands():
@@ -220,7 +233,7 @@ def test_checkpoint_pins_event_revision_boundary():
             patch_id="cp_x", target_checkpoint_id="C99"))
 
 
-# ── invariant 6: compensation grounded + verified, never on faith ─────────
+# ── invariant 6: compensation = committed action history, verified ────────
 def test_compensation_patch_carries_no_caller_supplied_history():
     """The spoof surface is ELIMINATED: CompensationPatch has exactly one
     payload field (the target checkpoint). Passing any history map is a
@@ -233,21 +246,28 @@ def test_compensation_patch_carries_no_caller_supplied_history():
                           observed_before={})
 
 
-def test_compensation_wrong_observed_result_cannot_pass():
+def _kernel_with_post_checkpoint_commit():
+    """C1 taken after a1+v1; lane l1 commits AFTER the checkpoint."""
     k = _kernel()
     _run_action(k, "a1", [_obs("release_date", "2026-08-18")])
+    k.record_verification("v1", True)
     k.commit_checkpoint("C1", "会议已改期")
-    k.apply_observation([_obs("release_date", "2026-08-20")])  # moved again
+    _run_action(k, "l1", [_obs("copy_deadline", "2026-08-18")])
+    return k
+
+
+def test_compensation_wrong_observed_result_cannot_pass():
+    k = _kernel_with_post_checkpoint_commit()
     plan = k.request_compensation(CompensationPatch(
         patch_id="rb1", target_checkpoint_id="C1"))
     assert {e.semantic_key: e.to_observed
-            for e in plan.entries} == {"release_date": "2026-08-18"}
+            for e in plan.entries} == {"copy_deadline": "2026-08-14"}
     before = k.task_state()
     n_events = len(k.events())
     # the runtime CLAIMS success but reality shows the wrong value
     k.record_compensation_result(
         plan.plan_id, applied=True,
-        observed_values={"release_date": "2026-08-19"})
+        observed_values={"copy_deadline": "2026-08-15"})
     kinds = [e.kind for e in k.events()]
     assert EventKind.COMPENSATION_FAILED in kinds
     assert EventKind.COMPENSATION_APPLIED not in kinds
@@ -256,15 +276,29 @@ def test_compensation_wrong_observed_result_cannot_pass():
 
 
 def test_compensation_missing_observed_key_cannot_pass():
-    k = _kernel()
-    _run_action(k, "a1", [_obs("release_date", "2026-08-18")])
-    k.commit_checkpoint("C1", "会议已改期")
-    k.apply_observation([_obs("release_date", "2026-08-20")])
+    k = _kernel_with_post_checkpoint_commit()
     plan = k.request_compensation(CompensationPatch(
         patch_id="rb1", target_checkpoint_id="C1"))
     k.record_compensation_result(plan.plan_id, applied=True,
                                  observed_values={})  # key missing entirely
     assert EventKind.COMPENSATION_APPLIED not in [e.kind for e in k.events()]
+
+
+def test_applied_compensation_restores_and_rearms():
+    k = _kernel_with_post_checkpoint_commit()
+    plan = k.request_compensation(CompensationPatch(
+        patch_id="rb1", target_checkpoint_id="C1"))
+    assert k.record_compensation_result(
+        plan.plan_id, applied=True,
+        observed_values={"copy_deadline": "2026-08-14"}) is True
+    v = k.task_state().variable("copy_deadline")
+    assert v.observed == "2026-08-14" and v.desired == "2026-08-18"
+    assert v.diverged is True               # honestly back to pending work
+    # same intent/structure ⇒ deterministic frontier rewind: l1 re-armed
+    statuses = k.workflow().statuses
+    assert statuses["a1"] is NodeStatus.COMMITTED
+    assert statuses["v1"] is NodeStatus.COMMITTED
+    assert statuses["l1"] is NodeStatus.READY
 
 
 # ── invariant 7: defensive copies ─────────────────────────────────────────
@@ -280,33 +314,32 @@ def test_snapshots_are_defensive_copies():
 
 # ── invariant 8: patch atomicity ───────────────────────────────────────────
 def test_local_patch_failure_is_atomic():
-    """A LocalPatch with a VALID variable update but an INVALID node
-    override (committed node) must leave state/epoch/graph/events
-    completely untouched."""
+    """A LocalPatch mixing a VALID update with an UNKNOWN variable must
+    leave state/epoch/graph/events completely untouched."""
     k = _kernel()
-    _run_action(k, "a1", [_obs("release_date", "2026-08-18")])
     before_state, before_epoch = k.task_state(), k.epoch
     before_graph = k.workflow().graph
     n_events = len(k.events())
-    with pytest.raises(CommittedNodeViolationError):
+    with pytest.raises(PatchSemanticsError):
         k.apply_local_patch(LocalPatch(
             patch_id="lp_bad",
-            variable_updates=(VariableUpdate("qa_deadline", "2026-08-19"),),
-            node_overrides=(NodeContractOverride(
-                "a1", _contract("c_new", "release_date", "2026-08-19")),)))
+            variable_updates=(VariableUpdate("qa_deadline", "2026-08-19"),
+                              VariableUpdate("ghost", "x"))))
     assert k.task_state() == before_state       # desired NOT half-updated
     assert k.epoch == before_epoch              # epoch NOT bumped
     assert k.workflow().graph == before_graph   # graph NOT touched
     assert len(k.events()) == n_events          # no half-event
 
 
-def test_goal_patch_failure_is_atomic():
-    """A GoalPatch whose new_graph tampers with committed history must
-    leave intent/epoch/graph/events untouched."""
+def test_recompose_failure_is_atomic():
+    """A recompose whose new_graph tampers with committed history must
+    leave the (GoalPatch-updated) intent, epoch, graph, and events
+    untouched."""
     k = _kernel()
     _run_action(k, "a1", [_obs("release_date", "2026-08-18")])
-    before_intent = k.task_state().intent
-    before_epoch = k.epoch
+    k.apply_goal_patch(GoalPatch(patch_id="gp",
+                                 new_intent=_intent("改到 8/20")))
+    before_state, before_epoch = k.task_state(), k.epoch
     before_graph = k.workflow().graph
     n_events = len(k.events())
     tampered = WorkflowGraph(nodes=(
@@ -316,13 +349,14 @@ def test_goal_patch_failure_is_atomic():
                      depends_on=("a1",)),
     ))
     with pytest.raises(CommittedNodeViolationError):
-        k.apply_goal_patch(GoalPatch(patch_id="gp_bad",
-                                     new_intent=_intent("改到 8/20")),
-                           new_graph=tampered)
-    assert k.task_state().intent == before_intent
+        k.recompose(_vars(desired="2026-08-20",
+                          release_observed="2026-08-18"),
+                    reason="replan", new_graph=tampered)
+    assert k.task_state() == before_state
     assert k.epoch == before_epoch
     assert k.workflow().graph == before_graph
     assert len(k.events()) == n_events
+    assert k.pending_recompose is not None   # still awaiting a valid closure
 
 
 # ── invariant 9: observed vs desired planes ────────────────────────────────
@@ -397,19 +431,37 @@ def test_init_task_state_is_one_shot():
 def test_recompose_adds_removes_variables_and_syncs_projection():
     k = _kernel()
     old_epoch = k.epoch
-    new_vars = _vars()[:2] + (
-        TaskVariable(semantic_key="owner", label="负责人",
-                     observed="Alice", desired="Bob"),)
-    k.recompose(new_vars, reason="structure drift: qa surface gone")
+    owner = TaskVariable(semantic_key="owner", label="负责人",
+                         observed="Alice", desired="Bob")
+    # add-only drift: the retained graph stays coherent (owner has no
+    # writer; every retained contract target still matches desired)
+    k.recompose(_vars() + (owner,), reason="owner surface appeared")
     state = k.task_state()
-    assert state.variable("qa_deadline") is None
     assert state.variable("owner").desired == "Bob"
     assert k.epoch > old_epoch
     proj = k.projection().data.values
-    assert "qa_deadline" not in proj          # removed variable disappears
     assert proj["owner"]["diverged"] is True
+    # dropping a variable the retained graph still references → rejected
+    with pytest.raises(ValidationError, match="unknown task variables"):
+        k.recompose(_vars()[:2] + (owner,), reason="qa surface gone")
+    # with a matching new graph the same drop closes legitimately
+    k.recompose(_vars()[:2] + (owner,), reason="qa surface gone",
+                new_graph=WorkflowGraph(nodes=(
+                    WorkflowNode(node_id="a1", kind=NodeKind.ACTION,
+                                 label="改会议日期",
+                                 contract=_contract("c_a1", "release_date",
+                                                    "2026-08-18")),
+                    WorkflowNode(node_id="l1", kind=NodeKind.ACTION,
+                                 label="同步文案", depends_on=("a1",),
+                                 contract=_contract("c_l1", "copy_deadline",
+                                                    "2026-08-18")),
+                    WorkflowNode(node_id="t1", kind=NodeKind.TERMINAL,
+                                 label="完成", depends_on=("l1",)),
+                )))
+    assert k.task_state().variable("qa_deadline") is None
+    assert "qa_deadline" not in k.projection().data.values
     with pytest.raises(ValidationError):
-        k.recompose(new_vars, reason="")      # reason required
+        k.recompose(_vars(), reason="")      # reason required
 
 
 def test_recompose_requires_init_first():
@@ -424,17 +476,19 @@ def test_removed_workflow_nodes_disappear_from_projection():
     assert "l2" in k.projection().data.node_status
     _run_action(k, "a1", [_obs("release_date", "2026-08-18")])
     k.record_verification("v1", True)
-    carried = tuple(k.workflow().graph.node(nid) for nid in ("a1", "v1"))
-    new_graph = WorkflowGraph(nodes=carried + (
-        WorkflowNode(node_id="a2", kind=NodeKind.ACTION, label="改到 8/20",
-                     depends_on=("v1",),
-                     contract=_contract("c_a2", "release_date", "2026-08-20")),
-        WorkflowNode(node_id="t2", kind=NodeKind.TERMINAL, label="完成",
-                     depends_on=("a2",)),
-    ))
     k.apply_goal_patch(GoalPatch(patch_id="gp1",
-                                 new_intent=_intent("改到 8/20")),
-                       new_graph=new_graph)
+                                 new_intent=_intent("改到 8/20")))
+    carried = tuple(k.workflow().graph.node(nid) for nid in ("a1", "v1"))
+    k.recompose(_vars(desired="2026-08-20", release_observed="2026-08-18"),
+                reason="gp1 replan",
+                new_graph=WorkflowGraph(nodes=carried + (
+                    WorkflowNode(node_id="a2", kind=NodeKind.ACTION,
+                                 label="改到 8/20", depends_on=("v1",),
+                                 contract=_contract("c_a2", "release_date",
+                                                    "2026-08-20")),
+                    WorkflowNode(node_id="t2", kind=NodeKind.TERMINAL,
+                                 label="完成", depends_on=("a2",)),
+                )))
     ns = k.projection().data.node_status
     assert "l2" not in ns and "b1" not in ns and "t1" not in ns
     assert ns["a1"] == "committed" and ns["a2"] == "ready"

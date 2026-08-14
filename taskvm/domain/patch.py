@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from taskvm.domain.contract import ActionContract
+from taskvm.domain.contract import ActionContract, Reversibility
 from taskvm.domain.errors import ValidationError
 from taskvm.domain.intent import TaskIntent
 
@@ -38,20 +38,6 @@ class VariableUpdate:
     def __post_init__(self) -> None:
         if not self.semantic_key:
             raise ValidationError("VariableUpdate.semantic_key must be non-empty")
-
-
-@dataclass(frozen=True)
-class NodeContractOverride:
-    """A LocalPatch-level adjustment of one not-yet-committed action
-    node's contract (e.g. 'same node, but write 16:00 instead of 15:00').
-    Cannot add, remove, or re-wire nodes — that would be a GoalPatch."""
-
-    node_id: str
-    contract: ActionContract
-
-    def __post_init__(self) -> None:
-        if not self.node_id:
-            raise ValidationError("NodeContractOverride.node_id must be non-empty")
 
 
 @dataclass(frozen=True)
@@ -71,26 +57,28 @@ class Patch:
 
 @dataclass(frozen=True)
 class LocalPatch(Patch):
-    """Local adjustment: terminal goal and workflow topology unchanged."""
+    """Local adjustment: terminal goal and workflow topology unchanged.
+
+    ``variable_updates`` is the SINGLE source of truth: the kernel
+    deterministically retargets every not-yet-committed contract that
+    references an updated key (topology, evidence, reversibility and risk
+    class are structurally out of reach). There is deliberately NO
+    node-override channel — a free-form contract swap could smuggle a
+    GoalPatch into a LocalPatch (Wave-A.2 audit G4).
+    """
 
     variable_updates: tuple[VariableUpdate, ...] = ()
-    node_overrides: tuple[NodeContractOverride, ...] = ()
 
     def __post_init__(self) -> None:
         super().__post_init__()
         object.__setattr__(self, "variable_updates", tuple(self.variable_updates))
-        object.__setattr__(self, "node_overrides", tuple(self.node_overrides))
-        if not self.variable_updates and not self.node_overrides:
-            raise ValidationError("LocalPatch must change at least one thing")
+        if not self.variable_updates:
+            raise ValidationError("LocalPatch must update at least one variable")
         # determinism: the same target may not be updated twice in one patch
         keys = [u.semantic_key for u in self.variable_updates]
         if len(set(keys)) != len(keys):
             raise ValidationError(
                 f"LocalPatch duplicate variable update keys: {keys}")
-        ids = [o.node_id for o in self.node_overrides]
-        if len(set(ids)) != len(ids):
-            raise ValidationError(
-                f"LocalPatch duplicate node override ids: {ids}")
 
 
 @dataclass(frozen=True)
@@ -126,18 +114,40 @@ class CompensationPatch(Patch):
 
 @dataclass(frozen=True)
 class CompensationEntry:
-    """One variable reversion inside a compensation plan.
+    """One committed TaskVM action to undo (plan order = LIFO).
+
+    Compensation undoes WHAT TASKVM ACTUALLY DID — it is derived from the
+    kernel's own committed action history (before/after recorded at action
+    time), never from a snapshot-diff of the world (Wave-A.2 audit G5):
+    external drift is not TaskVM's to undo, and a variable that only
+    appeared later still has its true pre-action 'before' on record.
 
     ``to_observed`` is the reality the runtime must restore (verified by
     fresh observation before the kernel accepts the result);
-    ``to_desired`` is the task-layer value the kernel restores alongside,
-    so the task world returns to the checkpoint as a whole.
+    ``to_desired`` is the task-layer value restored alongside.
     """
 
+    node_id: str
     semantic_key: str
     from_observed: Any
     to_observed: Any
     to_desired: Any = None
+    reversibility: Reversibility = Reversibility.REVERSIBLE
+
+
+@dataclass(frozen=True)
+class UncompensatableAction:
+    """A committed post-checkpoint action that CANNOT be honestly undone
+    (e.g. IRREVERSIBLE work like a sent message). It is reported, never
+    disguised as a revertible value change (mental-model §3.5)."""
+
+    node_id: str
+    semantic_keys: tuple[str, ...] = ()
+    reversibility: Reversibility = Reversibility.IRREVERSIBLE
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "semantic_keys", tuple(self.semantic_keys))
 
 
 @dataclass(frozen=True)
@@ -151,15 +161,16 @@ class CompensationPlan:
     entries: tuple[CompensationEntry, ...] = ()
     epoch: int = 0
     created_at: float = 0.0
-    # True when the rollback crosses a GoalPatch boundary: the restored
-    # intent/structure differ from the current ones, so the remaining
-    # future topology is invalid and the Task Architect MUST recompose
-    # before execution continues. The kernel never silently keeps a
-    # wrong future.
+    # committed post-checkpoint actions that cannot be honestly undone
+    uncompensatable: tuple[UncompensatableAction, ...] = ()
+    # True when the rollback crosses a GoalPatch/structure boundary: the
+    # remaining future topology was planned for the abandoned goal, so the
+    # Task Architect MUST recompose before execution continues.
     requires_recompose: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "entries", tuple(self.entries))
+        object.__setattr__(self, "uncompensatable", tuple(self.uncompensatable))
 
 
 def requires_replan(patch: Patch) -> bool:

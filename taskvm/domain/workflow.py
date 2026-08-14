@@ -126,11 +126,84 @@ class WorkflowGraph:
             if n.kind is NodeKind.TERMINAL and n.contract is not None:
                 raise ValidationError("terminal node cannot carry a contract")
         self._check_acyclic()
+        self._check_primitive_shapes(kinds)
+
+    def _check_primitive_shapes(self, kinds: dict[str, "NodeKind"]) -> None:
+        """Lock the three primitives (Wave-A.2 audit G11) — the validator,
+        not the runtime, rejects a malformed topology.
+
+        - SEQUENCE children must form a single ordered chain;
+        - FAN_OUT lanes must be mutually independent (no lane→lane edge);
+        - BARRIER must fan in exactly one FAN_OUT (its lanes, or the
+          container itself);
+        - a plan has EXACTLY ONE TERMINAL, and it is a sink.
+        """
+        by_id = {n.node_id: n for n in self.nodes}
+        # ── SEQUENCE: children form a total order via depends_on ──
+        for sq in [n for n in self.nodes if n.kind is NodeKind.SEQUENCE]:
+            children = [n for n in self.nodes if n.parent_id == sq.node_id]
+            if len(children) <= 1:
+                continue
+            child_ids = {c.node_id for c in children}
+            indeg = {c.node_id: set(c.depends_on) & child_ids
+                     for c in children}
+            placed: list[str] = []
+            pool = [cid for cid, d in indeg.items() if not d]
+            while pool:
+                if len(pool) != 1:
+                    raise ValidationError(
+                        f"sequence {sq.node_id!r} children must form a "
+                        "single ordered chain (depends_on within the "
+                        "sequence); found a fork")
+                cur = pool.pop()
+                placed.append(cur)
+                for cid, d in indeg.items():
+                    if cur in d:
+                        d.discard(cur)
+                        if not d:
+                            pool.append(cid)
+            if len(placed) != len(children):
+                raise ValidationError(
+                    f"sequence {sq.node_id!r} children do not form a "
+                    "single ordered chain")
+        # ── FAN_OUT: lanes mutually independent ──
         fan_outs = [n for n in self.nodes if n.kind is NodeKind.FAN_OUT]
         for fo in fan_outs:
-            if not any(n.parent_id == fo.node_id for n in self.nodes):
+            lanes = [n for n in self.nodes if n.parent_id == fo.node_id]
+            if not lanes:
                 raise ValidationError(
                     f"fan-out {fo.node_id!r} must contain at least one lane")
+            lane_ids = {l.node_id for l in lanes}
+            for l in lanes:
+                bad = sorted(set(l.depends_on) & lane_ids)
+                if bad:
+                    raise ValidationError(
+                        f"fan-out {fo.node_id!r} lane {l.node_id!r} depends "
+                        f"on sibling lane(s) {bad}; lanes must be independent")
+        # ── BARRIER: fans in exactly one fan-out ──
+        for b in [n for n in self.nodes if n.kind is NodeKind.BARRIER]:
+            deps = set(b.depends_on)
+            ok = any(kinds[d] is NodeKind.FAN_OUT for d in deps)
+            if not ok:
+                parents = {by_id[d].parent_id for d in deps}
+                parent = parents.pop() if len(parents) == 1 else None
+                ok = parent is not None and kinds[parent] is NodeKind.FAN_OUT
+            if not ok:
+                raise ValidationError(
+                    f"barrier {b.node_id!r} must fan in the lanes of "
+                    "exactly one fan-out (or the fan-out container itself)")
+        # ── TERMINAL: exactly one, and a sink ──
+        terminals = [n for n in self.nodes if n.kind is NodeKind.TERMINAL]
+        if len(terminals) != 1:
+            raise ValidationError(
+                f"a plan needs exactly one TERMINAL node, got "
+                f"{len(terminals)}")
+        tid = terminals[0].node_id
+        dependents = [n.node_id for n in self.nodes if tid in n.depends_on]
+        if dependents:
+            raise ValidationError(
+                f"TERMINAL {tid!r} must be a sink; depended on by "
+                f"{dependents}")
         # bounded loops: executable body = direct ACTION/VERIFY children.
         # No nested loops, no containers inside a loop (handoff: 不实现
         # nested loop / general recursion / general DAG DSL).
@@ -183,6 +256,26 @@ class WorkflowGraph:
 
     def terminal_nodes(self) -> tuple[WorkflowNode, ...]:
         return tuple(n for n in self.nodes if n.kind is NodeKind.TERMINAL)
+
+    def downstream(self, node_id: str) -> frozenset[str]:
+        """All nodes that run AFTER ``node_id``: transitive dependents plus
+        the container chain (a child completes before its container). Used
+        by composition coherence checks (which writer is 'last')."""
+        succ: dict[str, set[str]] = {}
+        for n in self.nodes:
+            for d in n.depends_on:
+                succ.setdefault(d, set()).add(n.node_id)
+            if n.parent_id is not None:
+                succ.setdefault(n.node_id, set()).add(n.parent_id)
+        seen: set[str] = set()
+        stack = list(succ.get(node_id, ()))
+        while stack:
+            cur = stack.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            stack.extend(succ.get(cur, ()))
+        return frozenset(seen)
 
     def ready_nodes(self, statuses: dict[str, NodeStatus]) -> tuple[WorkflowNode, ...]:
         """Nodes whose dependencies are all committed and which are not yet

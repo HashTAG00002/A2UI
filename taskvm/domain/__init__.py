@@ -36,8 +36,8 @@ from taskvm.domain.patch import (
     CompensationPlan,
     GoalPatch,
     LocalPatch,
-    NodeContractOverride,
     Patch,
+    UncompensatableAction,
     VariableUpdate,
     requires_replan,
 )
@@ -80,8 +80,8 @@ __all__ = [
     "ActionContract", "Reversibility",
     # patches
     "Patch", "LocalPatch", "GoalPatch", "CompensationPatch",
-    "CompensationEntry", "CompensationPlan",
-    "VariableUpdate", "NodeContractOverride", "requires_replan",
+    "CompensationEntry", "CompensationPlan", "UncompensatableAction",
+    "VariableUpdate", "requires_replan",
     # events
     "Event", "EventKind",
     # errors
