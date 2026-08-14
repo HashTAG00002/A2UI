@@ -257,3 +257,43 @@ def test_identifier_scanner_covers_function_args():
     tree = ast.parse(src)
     names = {n.arg for n in ast.walk(tree) if isinstance(n, ast.arg)}
     assert "entity_id" in names   # ast.arg coverage is load-bearing
+
+
+# ── Wave-A.1: kernel facade encapsulation ─────────────────────────────────
+_KERNEL_INTERNALS = (
+    "taskvm.kernel.event_log",
+    "taskvm.kernel.session_store",
+    "taskvm.kernel.projection_store",
+    "taskvm.kernel.workflow_store",
+    "taskvm.kernel.checkpoint_store",
+)
+
+
+def test_upper_layers_cannot_import_kernel_store_implementation():
+    """The mutable Store classes are kernel-internal. No module outside
+    taskvm/kernel may import them — upper layers talk to the facade and
+    its snapshots only."""
+    problems: list[str] = []
+    kernel_prefix = str(REPO_ROOT / "taskvm" / "kernel") + "/"
+    for path in sorted((REPO_ROOT / "taskvm").rglob("*.py")):
+        if str(path).startswith(kernel_prefix):
+            continue  # the kernel may wire its own internals
+        mods = imports_of_source(path.read_text(encoding="utf-8"),
+                                 str(path.relative_to(REPO_ROOT)))
+        for mod in mods:
+            if any(mod == m or mod.startswith(m + ".")
+                   for m in _KERNEL_INTERNALS):
+                problems.append(f"{path.relative_to(REPO_ROOT)}: imports "
+                                f"kernel-internal {mod!r}")
+    assert not problems, "kernel encapsulation violations:\n" + \
+        "\n".join(problems)
+
+
+def test_kernel_facade_exports_no_mutable_stores():
+    """taskvm.kernel's public surface is the facade + immutable snapshots
+    only; store classes are not advertised."""
+    import taskvm.kernel as K
+    for name in ("EventLog", "TaskSessionStore", "ProjectionStore",
+                 "WorkflowStore", "CheckpointStore"):
+        assert not hasattr(K, name), f"taskvm.kernel must not export {name}"
+    assert K.TaskVMKernel is not None

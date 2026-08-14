@@ -1,6 +1,7 @@
 # TaskVM Kernel 公共合同（L3）
 
-> 状态：**冻结基线 v2**（Wave 1, Agent A；Wave-A 评审修订后）。后续 agent 只消费本页列出的公开接口；需要新跨层接口时先在本目录提交一页 RFC（master handoff §8.2）。
+> 状态：**冻结基线 v3**（Wave 1, Agent A；Wave-A 评审修订 + Wave-A.1 对抗硬化后）。后续 agent 只消费本页列出的公开接口；需要新跨层接口时先在本目录提交一页 RFC（master handoff §8.2）。
+> v3 相对 v2：action handle exactly-once 生命周期、compensation epoch 绑定 + 单次落地 + 独立 DISCARDED 事件、checkpoint 升级为 TaskVM logical checkpoint（intent + 语义结构可恢复）、bounded loop 可执行语义（iteration/termination/max guard）、组合边界交叉校验、ProjectionSchema 真树校验、LocalPatch 确定性 + mutability 守卫、kernel facade 封装（store 类不再公开）。
 > 本页是接口合同，不是实现文档。实现见 `taskvm/domain/`、`taskvm/kernel/`。
 
 ## 0. 一句话
@@ -17,6 +18,8 @@ taskvm.runtime  → domain/kernel + substrate PORT（taskvm.substrate 根），
 taskvm.substrate→ 仅 taskvm.domain（反向 gate：底层不得 import 任何上层）
 benchmark/evaluation 对所有上述层永远禁止
 相对 import 会被解析成绝对模块后判定（from ..benchmark import x 同样被抓）。
+上层只依赖 taskvm.kernel 公共 facade/snapshot；taskvm.kernel.*_store /
+event_log 等内部模块禁止被 kernel 包外 import（gate 强制执行）。
 ```
 
 ## 2. 领域类型（`taskvm.domain`）
@@ -31,14 +34,14 @@ benchmark/evaluation 对所有上述层永远禁止
 | 可见证据 | `SurfaceEvidence(surface, visible_label, visible_context, observed_value, confidence)` | 只装用户肉眼可见的内容 |
 | 投影结构 | `ProjectionSchema(root_id, components, revision)` | 稳定组件树；只在 (re)composition 时变 |
 | 投影数据 | `ProjectionData(values, node_status, progress, revision)` | `values[key] = {"observed", "desired", "diverged"}`；kernel 每次刷新**全量替换**（被删的节点/变量立即消失） |
-| 工作流 | `WorkflowGraph(nodes)`；`WorkflowNode(...)` | `NodeKind ∈ {SEQUENCE, FAN_OUT, BARRIER, BOUNDED_LOOP, ACTION, VERIFY, CHECKPOINT, TERMINAL}`；bounded loop 双强制（终止谓词 + max_iterations） |
-| 节点状态 | `NodeStatus ∈ {PENDING, READY, RUNNING, COMMITTED, FAILED, INVALIDATED, COMPENSATED}` | 状态住在 WorkflowStore；容器（sequence/fan_out/loop）在全部子节点 COMMITTED 后自动 COMMITTED |
+| 工作流 | `WorkflowGraph(nodes)`；`WorkflowNode(...)` | `NodeKind ∈ {SEQUENCE, FAN_OUT, BARRIER, BOUNDED_LOOP, ACTION, VERIFY, CHECKPOINT, TERMINAL}`；bounded loop 双强制（终止谓词 + max_iterations）且 body 必须是 ACTION/VERIFY 直接子节点（无嵌套 loop） |
+| 节点状态 | `NodeStatus ∈ {PENDING, READY, RUNNING, COMMITTED, FAILED, INVALIDATED, COMPENSATED}` | 状态住在 WorkflowStore；SEQUENCE/FAN_OUT 容器在全部子节点 COMMITTED 后自动 COMMITTED；**BOUNDED_LOOP 不自动提交**——只能被显式终止决定提交 |
 | 动作合同 | `ActionContract(contract_id, semantic_goal, desired_state, completion_condition, target_evidence, reversibility, risk_note)` | 跨层唯一工作单元；**禁止** app 内部动词 / 存储主键 / 平台 selector |
 | 可逆性 | `Reversibility ∈ {REVERSIBLE, PARTIALLY_REVERSIBLE, IRREVERSIBLE}` | 不可逆 ⇒ `requires_confirmation` |
 | 补丁 | `LocalPatch(variable_updates, node_overrides)` / `GoalPatch(new_intent)` / `CompensationPatch(target_checkpoint_id)` | 类型即语义；`requires_replan` 只有 GoalPatch 为 True；**CompensationPatch 只有 target 一个载荷字段**（调用者无法提供/伪造历史） |
-| 补偿计划 | `CompensationPlan(plan_id, target_checkpoint_id, entries, epoch)`；`CompensationEntry(semantic_key, from_observed, to_observed, to_desired)` | kernel 从自己的 CheckpointRecord 生成 |
-| 事件 | `Event(...)`；`EventKind` 18 类（含 `NODE_COMMITTED`） | 见 §3 的 mutation→event 表 |
-| 检查点记录 | `CheckpointRecord(checkpoint_id, label, state_revision, event_index, epoch, observed, desired, committed_nodes, created_at)` | 双平面快照 |
+| 补偿计划 | `CompensationPlan(plan_id, target_checkpoint_id, entries, epoch, requires_recompose)`；`CompensationEntry(semantic_key, from_observed, to_observed, to_desired)` | kernel 从自己的 CheckpointRecord 生成；`requires_recompose=True` 表示回滚跨 GoalPatch/结构边界，剩余未来拓扑必须重组 |
+| 事件 | `Event(...)`；`EventKind` 22 类（含 `NODE_COMMITTED` / `ACTION_REQUEUED` / `COMPENSATION_DISCARDED` / `LOOP_ITERATION_STARTED` / `LOOP_ITERATION_EVALUATED`） | 见 §3 的 mutation→event 表；EventLog 是 audit/history stream，不是 event-sourcing 框架 |
+| 检查点记录 | `CheckpointRecord(checkpoint_id, label, state_revision, event_index, epoch, intent, structure, observed, desired, committed_nodes, created_at)` | **TaskVM logical checkpoint（非 App DB 快照）**：intent + 语义结构（key→label/type/mutability）+ 双平面值 + 已提交节点；现实恢复只能由 runtime 经真实 CUA compensation 完成 |
 
 ## 3. Kernel 服务（`taskvm.kernel.TaskVMKernel`）
 
@@ -47,10 +50,11 @@ benchmark/evaluation 对所有上述层永远禁止
 **Event semantics（固定）**：每个公开变更调用追加**恰好一条**事件，kind 命名该语义操作；`finish_action` 折叠的观察是动作落地的一部分（keys 在 ACTION_FINISHED payload 里），不产生第二条事件。
 
 **节点推进协议（固定）**：
-- `ACTION`（executable）：`request_action → start_action → finish_action → record_verification`。只有 ACTION 节点产生 CUA 工作句柄。
+- `ACTION`（executable）：`request_action → start_action → finish_action → record_verification`。只有 ACTION 节点产生 CUA 工作句柄。Handle 生命周期 REQUESTED → STARTED → FINISHED/DISCARDED，**单次落地**；同一 (node, epoch) 最多一个 active handle；terminal handle 再落地抛 `ValidationError`；`finish_action` 只接受 STARTED + 当前 epoch；已提交节点不被旧结果改写。
 - `VERIFY`（control）：READY 状态下直接 `record_verification(node, passed)` —— runtime 独立观察后上报，没有动作句柄。
 - `BARRIER / CHECKPOINT / TERMINAL`（control）：READY 状态下 `advance_control(node)`；CHECKPOINT 额外写 CheckpointRecord（fan-in 点即已验证边界）；TERMINAL 提交 = 计划完成。
-- 容器（SEQUENCE/FAN_OUT/BOUNDED_LOOP）不需要显式推进：全部子节点 COMMITTED 后自动 COMMITTED。
+- 容器（SEQUENCE/FAN_OUT）不需要显式推进：全部子节点 COMMITTED 后自动 COMMITTED。
+- `BOUNDED_LOOP`：显式 loop 协议——`begin_loop_iteration(node) -> iteration`（READY→RUNNING，body 子节点重新武装为 READY）+ `evaluate_loop_termination(node, terminated)`（body 全部 COMMITTED 才可评估；True ⇒ loop COMMITTED；False 且未达 max ⇒ 回 READY 进下一 iteration；False 且已达 max_iterations ⇒ FAILED + payload `reason=max_iterations_exceeded` 升级信号）。body 只在 loop RUNNING 期间可调度。
 
 ### 组合（State Compiler / Task Architect 输出）
 
@@ -64,12 +68,12 @@ benchmark/evaluation 对所有上述层永远禁止
 
 ### 动作生命周期（epoch 盖戳）
 
-- `request_action(node_id) -> {action_id, node_id, epoch, contract}` — 仅 READY 的 ACTION 节点
-- `start_action(action_id)` — 节点 → RUNNING
-- `finish_action(action_id, *, observations=()) -> bool` — **stale epoch 一律丢弃**：不改状态、发 `ActionDiscarded`、返回 False、节点回 READY
+- `request_action(node_id) -> {action_id, node_id, epoch, status, contract}` — 仅 READY 的 ACTION 节点；同 (node, epoch) 已有 active handle 则拒绝
+- `start_action(action_id) -> bool` — REQUESTED→STARTED；stale epoch → DISCARDED + False
+- `finish_action(action_id, *, observations=()) -> bool` — 只接受 STARTED + 当前 epoch；stale epoch 或节点已进入历史状态（COMMITTED/COMPENSATED）⇒ DISCARDED + False
 - `record_verification(node_id, passed)` — ACTION 需 RUNNING；VERIFY 从 READY 直接确认
 - `advance_control(node_id) -> CheckpointRecord | None` — BARRIER/CHECKPOINT/TERMINAL
-- `requeue(node_id)` — FAILED → READY
+- `requeue(node_id)` — FAILED → READY，发 `ActionRequeued`（不再冒充 ActionRequested）
 
 ### Checkpoint
 
@@ -77,10 +81,10 @@ benchmark/evaluation 对所有上述层永远禁止
 
 ### 治理补丁（全部 atomic：先全量校验，后变更；被拒则 state/epoch/graph/events 完全不变）
 
-- `apply_local_patch(patch)` — 只改已声明变量的 **desired** + 未提交 ACTION 节点的合同；成功时 bump epoch
-- `apply_goal_patch(patch, new_graph=None, new_schema=None)` — 恒 bump epoch + `requires_replan=True`；`new_graph` 中已提交节点必须逐字段原样携带（否则 `CommittedNodeViolationError`，且 intent/epoch/graph 不受影响）
-- `request_compensation(patch) -> CompensationPlan` — 只从 kernel 自己的 CheckpointRecord 生成回退项（observed 平面差异）
-- `record_compensation_result(plan_id, applied, *, observed_values=None, detail="")` — `applied=True` **必须**附新鲜观察值且**每个 plan 条目的 to_observed 全匹配**（缺 key 或值不符 ⇒ `CompensationFailed`，状态不变）；全匹配才恢复双平面（observed 按条目、desired 按 checkpoint 全量）并把 checkpoint 后提交的节点标记 COMPENSATED
+- `apply_local_patch(patch)` — 只改已声明且 **mutability=editable** 变量的 **desired** + 未提交 ACTION 节点的合同；重复 variable key / 重复 override node id 在构造期即被拒；成功时 bump epoch
+- `apply_goal_patch(patch, new_graph=None, new_schema=None)` — 恒 bump epoch + `requires_replan=True`；`new_graph` 中已提交节点必须逐字段原样携带（否则 `CommittedNodeViolationError`，且 intent/epoch/graph 不受影响）；事件 payload 显式携带 `invalidated_node_ids`
+- `request_compensation(patch) -> CompensationPlan` — 只从 kernel 自己的 CheckpointRecord 生成回退项；跨 GoalPatch/结构边界时 `requires_recompose=True`
+- `record_compensation_result(plan_id, applied, *, observed_values=None, detail="") -> bool` — **epoch 绑定 + 单次落地**：plan.epoch ≠ 当前 epoch ⇒ `CompensationDiscarded` + False（与执行失败严格区分）；terminal plan 再落地抛错。`applied=True` **必须**附新鲜观察值且**每个 plan 条目的 to_observed 全匹配**（缺 key 或值不符 ⇒ `CompensationFailed`）；全匹配才恢复 checkpoint 的**逻辑状态**（intent + 语义结构 + 双平面值），把 checkpoint 后提交的节点标记 COMPENSATED；`requires_recompose` 时剩余未来节点全部 INVALIDATED（不静默保留错误未来）
 
 ### 治理事件与冲突
 
@@ -98,11 +102,13 @@ benchmark/evaluation 对所有上述层永远禁止
 | set_plan | `PlanCreated` |
 | apply_observation | `ObservationReceived`（单条） |
 | request/start/finish/discard | `ActionRequested/Started/Finished/Discarded` |
+| requeue | `ActionRequeued` |
 | record_verification | `VerificationPassed/Failed` |
 | advance_control（BARRIER/TERMINAL） | `NodeCommitted` |
 | advance_control（CHECKPOINT）/ commit_checkpoint | `CheckpointCommitted` |
-| apply_local/goal_patch | `PlanPatched`（payload.patch_class 区分） |
-| request/record compensation | `CompensationRequested/Applied/Failed` |
+| apply_local/goal_patch | `PlanPatched`（payload.patch_class + invalidated_node_ids） |
+| request/record compensation | `CompensationRequested/Applied/Failed/Discarded` |
+| begin/evaluate loop | `LoopIterationStarted/LoopIterationEvaluated` |
 | governance/conflict | `GovernanceRequested/ConflictDetected/ConflictResolved` |
 
 ## 4. Kernel 保证的不变量（测试锁定）
@@ -116,6 +122,10 @@ benchmark/evaluation 对所有上述层永远禁止
 7. store 对外只给不可变快照/防御性拷贝。
 8. patch atomic：先全量校验后变更；被拒的 patch 零副作用（含 event log）。
 9. observed/desired 双平面：观察只写 observed，补丁只写 desired；projection 可见 pending divergence。
+10. action handle 单次落地：REQUESTED→STARTED→FINISHED/DISCARDED；同 (node, epoch) 最多一个 active handle；terminal handle 永远不能再落地；已提交节点不被旧结果改写。
+11. compensation plan epoch 绑定 + 单次落地；stale/重复落地走独立的 `CompensationDiscarded`，不与执行失败混淆。
+12. bounded loop 只能被显式终止决定提交：iteration 计数、termination 评估、max_iterations 强制（超限 ⇒ FAILED + escalation）。
+13. 组合边界（set_plan/recompose/apply_goal_patch）拒绝引用未知 task variable 的 ProjectionSchema.binding_key 或 ActionContract.desired_state key。
 
 ## 5. 迁移表（旧类型 → 新类型）
 

@@ -82,6 +82,15 @@ class LocalPatch(Patch):
         object.__setattr__(self, "node_overrides", tuple(self.node_overrides))
         if not self.variable_updates and not self.node_overrides:
             raise ValidationError("LocalPatch must change at least one thing")
+        # determinism: the same target may not be updated twice in one patch
+        keys = [u.semantic_key for u in self.variable_updates]
+        if len(set(keys)) != len(keys):
+            raise ValidationError(
+                f"LocalPatch duplicate variable update keys: {keys}")
+        ids = [o.node_id for o in self.node_overrides]
+        if len(set(ids)) != len(ids):
+            raise ValidationError(
+                f"LocalPatch duplicate node override ids: {ids}")
 
 
 @dataclass(frozen=True)
@@ -142,6 +151,12 @@ class CompensationPlan:
     entries: tuple[CompensationEntry, ...] = ()
     epoch: int = 0
     created_at: float = 0.0
+    # True when the rollback crosses a GoalPatch boundary: the restored
+    # intent/structure differ from the current ones, so the remaining
+    # future topology is invalid and the Task Architect MUST recompose
+    # before execution continues. The kernel never silently keeps a
+    # wrong future.
+    requires_recompose: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "entries", tuple(self.entries))

@@ -131,6 +131,21 @@ class WorkflowGraph:
             if not any(n.parent_id == fo.node_id for n in self.nodes):
                 raise ValidationError(
                     f"fan-out {fo.node_id!r} must contain at least one lane")
+        # bounded loops: executable body = direct ACTION/VERIFY children.
+        # No nested loops, no containers inside a loop (handoff: 不实现
+        # nested loop / general recursion / general DAG DSL).
+        loops = [n for n in self.nodes if n.kind is NodeKind.BOUNDED_LOOP]
+        for lp in loops:
+            children = [n for n in self.nodes if n.parent_id == lp.node_id]
+            if not children:
+                raise ValidationError(
+                    f"bounded loop {lp.node_id!r} must contain a body "
+                    "(at least one ACTION/VERIFY child)")
+            for ch in children:
+                if ch.kind not in (NodeKind.ACTION, NodeKind.VERIFY):
+                    raise ValidationError(
+                        f"bounded loop {lp.node_id!r} body node {ch.node_id!r} "
+                        f"must be ACTION/VERIFY, got {ch.kind.value}")
 
     def _check_acyclic(self) -> None:
         deps = {n.node_id: set(n.depends_on) for n in self.nodes}
@@ -171,16 +186,26 @@ class WorkflowGraph:
 
     def ready_nodes(self, statuses: dict[str, NodeStatus]) -> tuple[WorkflowNode, ...]:
         """Nodes whose dependencies are all committed and which are not yet
-        started. ``statuses`` maps node_id → NodeStatus (kernel store data)."""
+        started. ``statuses`` maps node_id → NodeStatus (kernel store data).
+
+        Loop bodies are schedulable ONLY while their loop is RUNNING (an
+        iteration is in flight) — a bounded loop is not a sequence/fan-out
+        whose children commit once; the kernel's loop protocol drives
+        iterations explicitly."""
+        kinds = {n.node_id: n.kind for n in self.nodes}
         out = []
         for n in self.nodes:
             st = statuses.get(n.node_id, NodeStatus.PENDING)
             if st not in (NodeStatus.PENDING, NodeStatus.READY):
                 continue
-            if n.parent_id is not None and statuses.get(
-                    n.parent_id, NodeStatus.PENDING) not in (
-                    NodeStatus.READY, NodeStatus.RUNNING, NodeStatus.COMMITTED):
-                continue
+            if n.parent_id is not None:
+                pst = statuses.get(n.parent_id, NodeStatus.PENDING)
+                if kinds[n.parent_id] is NodeKind.BOUNDED_LOOP:
+                    if pst is not NodeStatus.RUNNING:
+                        continue
+                elif pst not in (NodeStatus.READY, NodeStatus.RUNNING,
+                                 NodeStatus.COMMITTED):
+                    continue
             if all(statuses.get(d, NodeStatus.PENDING) is NodeStatus.COMMITTED
                    for d in n.depends_on):
                 out.append(n)

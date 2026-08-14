@@ -25,7 +25,8 @@ class EventKind(str, Enum):
     ACTION_REQUESTED = "action_requested"
     ACTION_STARTED = "action_started"
     ACTION_FINISHED = "action_finished"
-    ACTION_DISCARDED = "action_discarded"  # stale epoch result
+    ACTION_DISCARDED = "action_discarded"  # stale epoch / superseded result
+    ACTION_REQUEUED = "action_requeued"    # failed node returned to READY
     # verification
     VERIFICATION_PASSED = "verification_passed"
     VERIFICATION_FAILED = "verification_failed"
@@ -40,7 +41,11 @@ class EventKind(str, Enum):
     # compensation
     COMPENSATION_REQUESTED = "compensation_requested"
     COMPENSATION_APPLIED = "compensation_applied"
-    COMPENSATION_FAILED = "compensation_failed"
+    COMPENSATION_FAILED = "compensation_failed"      # execution honestly failed
+    COMPENSATION_DISCARDED = "compensation_discarded"  # stale epoch — NOT a failure
+    # bounded loop protocol
+    LOOP_ITERATION_STARTED = "loop_iteration_started"
+    LOOP_ITERATION_EVALUATED = "loop_iteration_evaluated"
 
 
 @dataclass(frozen=True)

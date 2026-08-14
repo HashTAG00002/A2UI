@@ -57,15 +57,44 @@ class ProjectionSchema:
         ids = [c.component_id for c in self.components]
         if len(set(ids)) != len(ids):
             raise ValidationError("duplicate component_id in ProjectionSchema")
-        if self.components and self.root_id not in set(ids):
+        if not self.components:
+            return  # empty schema (pre-composition) is allowed
+        if self.root_id not in set(ids):
             raise ValidationError(
                 f"ProjectionSchema.root_id {self.root_id!r} not among components")
+        # ── the schema is a TREE, not an arbitrary graph ─────────────
         known = set(ids)
+        parents: dict[str, str] = {}
         for c in self.components:
-            missing = [ch for ch in c.children if ch not in known]
-            if missing:
+            for ch in c.children:
+                if ch not in known:
+                    raise ValidationError(
+                        f"component {c.component_id!r} references unknown "
+                        f"children {[ch]}")
+                if ch in parents:
+                    raise ValidationError(
+                        f"component {ch!r} has multiple parents "
+                        f"({parents[ch]!r} and {c.component_id!r})")
+                parents[ch] = c.component_id
+        if self.root_id in parents:
+            raise ValidationError(
+                f"root {self.root_id!r} must not have a parent")
+        for c in self.components:
+            if c.component_id != self.root_id and c.component_id not in parents:
                 raise ValidationError(
-                    f"component {c.component_id!r} references unknown children {missing}")
+                    f"component {c.component_id!r} is unreachable from root "
+                    f"{self.root_id!r} (every non-root needs exactly one parent)")
+        # cycle check: walking parents upward from any node must terminate
+        # (single-parent above ⇒ termination implies reaching the root)
+        for c in self.components:
+            seen: set[str] = set()
+            cur = c.component_id
+            while cur in parents:
+                if cur in seen:
+                    raise ValidationError(
+                        f"projection tree cycle involving {cur!r}")
+                seen.add(cur)
+                cur = parents[cur]
 
 
 @dataclass(frozen=True)

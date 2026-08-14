@@ -92,21 +92,26 @@ class WorkflowStore:
                     raise CommittedNodeViolationError(
                         f"GoalPatch silently rewrites committed node {nid!r}")
 
-    def replace_future(self, new_graph: WorkflowGraph, *, epoch: int) -> WorkflowGraph:
-        """Apply the plan half of a GoalPatch: keep committed history,
-        replace the uncommitted future (invariant 3). Assumes
+    def replace_future(self, new_graph: WorkflowGraph, *,
+                       epoch: int) -> tuple[WorkflowGraph, list[str]]:
+        """Apply the plan half of a GoalPatch/recompose: keep committed
+        history, replace the uncommitted future (invariant 3). Assumes
         ``validate_replace_future`` has already passed (re-checks it).
 
         Carried-over nodes keep their status; all other new nodes start
         PENDING/READY. Uncommitted nodes absent from the new graph are
-        dropped (they were INVALIDATED by the patch — visible in the event
-        payload emitted by the kernel).
+        dropped.
+
+        Returns ``(installed_graph, invalidated_node_ids)`` — the kernel
+        puts the invalidated ids into the PlanPatched event payload so the
+        replaced future is explicit, never silent.
         """
         with self._lock:
             self.validate_replace_future(new_graph)
             historical = {nid: st for nid, st in self._statuses.items()
                           if st in HISTORICAL_STATUSES}
             stamped = replace(new_graph, revision=self._graph_rev + 1, epoch=epoch)
+            old_ids = set(self._statuses)
             self._graph = stamped
             self._graph_rev += 1
             new_statuses: dict[str, NodeStatus] = {}
@@ -117,7 +122,8 @@ class WorkflowStore:
                     new_statuses[n.node_id] = NodeStatus.PENDING
             self._statuses = new_statuses
             self._recompute_ready_locked()
-            return copy.deepcopy(stamped)
+            invalidated = sorted(old_ids - set(new_statuses))
+            return copy.deepcopy(stamped), invalidated
 
     def override_contract(self, node_id: str, contract) -> None:
         """LocalPatch path: swap the contract of a NOT-yet-committed action
@@ -166,9 +172,14 @@ class WorkflowStore:
 
     def _recompute_ready_locked(self) -> None:
         """Propagate READY to a fixpoint (a container becoming READY can in
-        turn unblock its child lanes), then auto-commit containers whose
-        children have ALL committed (a finished fan-out/sequence is itself
-        complete — this keeps the topology view honest)."""
+        turn unblock its child lanes), then auto-commit SEQUENCE/FAN_OUT
+        containers whose children have ALL committed (a finished
+        fan-out/sequence is itself complete).
+
+        BOUNDED_LOOP is deliberately EXCLUDED from auto-commit: a loop
+        commits only when its termination predicate evaluates true via the
+        kernel's loop protocol — one fully-committed body pass says
+        nothing about termination."""
         if self._graph is None:
             return
         while True:
@@ -178,8 +189,7 @@ class WorkflowStore:
                     self._statuses[n.node_id] = NodeStatus.READY
                     changed = True
             for n in self._graph.nodes:
-                if n.kind not in (NodeKind.SEQUENCE, NodeKind.FAN_OUT,
-                                  NodeKind.BOUNDED_LOOP):
+                if n.kind not in (NodeKind.SEQUENCE, NodeKind.FAN_OUT):
                     continue
                 if self._statuses.get(n.node_id) not in (
                         NodeStatus.PENDING, NodeStatus.READY):
@@ -192,6 +202,34 @@ class WorkflowStore:
                     changed = True
             if not changed:
                 return
+
+    def invalidate_future(self) -> list[str]:
+        """Mark every non-historical node INVALIDATED (used when an applied
+        compensation restores a pre-GoalPatch intent: the remaining future
+        was planned for the abandoned goal and must not silently keep
+        running). Returns the invalidated ids."""
+        with self._lock:
+            out = sorted(nid for nid, st in self._statuses.items()
+                         if st not in HISTORICAL_STATUSES)
+            for nid in out:
+                self._statuses[nid] = NodeStatus.INVALIDATED
+            return out
+
+    def reset_loop_children(self, loop_id: str) -> None:
+        """Bounded-loop protocol: reset the loop's body children for a new
+        iteration (their per-iteration COMMITTED/FAILED is ephemeral).
+        Internal to the kernel's loop driver — bypasses the normal
+        transition table on purpose."""
+        with self._lock:
+            if self._graph is None or self._graph.node(loop_id) is None:
+                raise ValidationError(f"unknown loop node {loop_id!r}")
+            for child in self._graph.children_of(loop_id):
+                st = self._statuses.get(child.node_id, NodeStatus.PENDING)
+                if st is NodeStatus.RUNNING:
+                    raise ValidationError(
+                        f"loop body node {child.node_id!r} still RUNNING")
+                if st is not NodeStatus.INVALIDATED:
+                    self._statuses[child.node_id] = NodeStatus.READY
 
     def committed_node_ids(self) -> tuple[str, ...]:
         with self._lock:

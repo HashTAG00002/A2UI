@@ -1,8 +1,13 @@
-"""EventLog — the append-only, single source of truth for history.
+"""EventLog — the append-only audit/history stream of one session.
 
-Only the kernel appends. Readers get defensive copies. The index of an
-event in the log is a durable boundary marker: CheckpointStore references
-it to pin down exactly which facts a checkpoint covers (invariant 5).
+This is deliberately NOT an event-sourcing framework: the log is the
+audit trail (what happened, in what order, at which revision/epoch), not
+the state-recovery mechanism — stores hold the live state; nobody
+rebuilds state by replaying events. Only the kernel appends, exactly one
+event per accepted mutation. Readers get defensive copies. The index of
+an event in the log is a durable boundary marker: CheckpointStore
+references it to pin down exactly which facts a checkpoint covers
+(invariant 5).
 """
 from __future__ import annotations
 

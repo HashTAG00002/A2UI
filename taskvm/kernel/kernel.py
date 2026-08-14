@@ -33,7 +33,20 @@ Enforced invariants (handoff 02 §Kernel 服务 + Wave-A review):
   8. patches are atomic: full validation before ANY mutation — a
      rejected patch leaves state, epoch, graph, and events untouched;
   9. observed vs desired are separate planes: observations write only
-     ``observed``, patches write only ``desired``.
+     ``observed``, patches write only ``desired``;
+ 10. action handles are single-use: REQUESTED → STARTED → FINISHED /
+     DISCARDED; at most one ACTIVE handle per (node, epoch); a terminal
+     handle can never land again; a result can never rewrite a committed
+     node;
+ 11. compensation plans are epoch-bound and single-use: a stale or
+     repeated landing is DISCARDED (its own event kind — never confused
+     with an honest execution failure);
+ 12. a bounded loop commits ONLY via an explicit termination decision
+     (begin_loop_iteration / evaluate_loop_termination) — never by
+     children-pass auto-commit;
+ 13. composition boundaries (set_plan / recompose / apply_goal_patch)
+     reject architect output whose projection bindings or contract keys
+     reference unknown task variables.
 """
 from __future__ import annotations
 
@@ -58,7 +71,12 @@ from taskvm.domain.patch import (
     LocalPatch,
 )
 from taskvm.domain.projection import ProjectionSchema
-from taskvm.domain.state import ObservedValue, TaskState, TaskVariable
+from taskvm.domain.state import (
+    MUTABILITY_EDITABLE,
+    ObservedValue,
+    TaskState,
+    TaskVariable,
+)
 from taskvm.domain.workflow import NodeKind, NodeStatus, WorkflowGraph
 from taskvm.kernel.checkpoint_store import CheckpointRecord, CheckpointStore
 from taskvm.kernel.event_log import EventLog
@@ -86,6 +104,8 @@ class TaskVMKernel:
         self._actions: dict[str, dict[str, Any]] = {}
         self._comp_seq = 0
         self._comp_plans: dict[str, CompensationPlan] = {}
+        self._comp_status: dict[str, str] = {}   # pending/applied/failed/discarded
+        self._loop_iters: dict[str, int] = {}    # loop node → current iteration
 
     # ══ introspection (snapshots — invariant 7) ═════════════════════════
     @property
@@ -170,17 +190,25 @@ class TaskVMKernel:
                 raise ValidationError(
                     "recompose requires an initialised state; use "
                     "init_task_state first")
+            new_variables = tuple(variables)
             if new_graph is not None:
                 self._workflows.validate_replace_future(new_graph)
+            # composition boundary: the architect's graph/schema must only
+            # reference the variables being installed (invariant 13)
+            self._validate_composition_locked(
+                graph=new_graph, schema=new_schema,
+                variable_keys={v.semantic_key for v in new_variables})
             # ── all validation passed; mutate ──
             old = self._sessions.task_state()
             epoch = self._bump_epoch_locked()
             state = self._sessions.set_task_state(
-                TaskState(intent=old.intent, variables=tuple(variables)))
+                TaskState(intent=old.intent, variables=new_variables))
             graph_revision = None
+            invalidated: list[str] = []
             if new_graph is not None:
-                graph_revision = self._workflows.replace_future(
-                    new_graph, epoch=epoch).revision
+                installed, invalidated = self._workflows.replace_future(
+                    new_graph, epoch=epoch)
+                graph_revision = installed.revision
             if new_schema is not None:
                 self._projections.set_schema(new_schema)
             old_keys = {v.semantic_key for v in old.variables}
@@ -190,7 +218,8 @@ class TaskVMKernel:
                         "added": sorted(new_keys - old_keys),
                         "removed": sorted(old_keys - new_keys),
                         "kept": sorted(old_keys & new_keys),
-                        "graph_revision": graph_revision, "epoch": epoch},
+                        "graph_revision": graph_revision, "epoch": epoch,
+                        "invalidated_node_ids": invalidated},
                        correlation_id)
             self._refresh_projection_data()
             return state
@@ -199,8 +228,11 @@ class TaskVMKernel:
                  schema: ProjectionSchema | None = None,
                  *, correlation_id: str = "") -> WorkflowGraph:
         """Install the initial workflow plan (+ optionally the projection
-        schema) produced by the Task Architect. Emits PlanCreated."""
+        schema) produced by the Task Architect. Emits PlanCreated.
+        Composition-validated (invariant 13): a plan/schema referencing
+        unknown task variables is rejected before anything is installed."""
         with self._lock:
+            self._validate_composition_locked(graph=graph, schema=schema)
             installed = self._workflows.install_graph(graph, epoch=self.epoch)
             if schema is not None:
                 self._projections.set_schema(schema)
@@ -248,10 +280,17 @@ class TaskVMKernel:
             if st is not NodeStatus.READY:
                 raise ValidationError(
                     f"action node {node_id!r} not READY (status={st})")
+            # exactly-once: at most one ACTIVE handle per (node, epoch)
+            for h in self._actions.values():
+                if (h["node_id"] == node_id and h["epoch"] == self.epoch
+                        and h["status"] in ("requested", "started")):
+                    raise ValidationError(
+                        f"node {node_id!r} already has active action "
+                        f"{h['action_id']} in epoch {self.epoch}")
             self._action_seq += 1
             action_id = f"act_{self._action_seq:05d}"
             handle = {"action_id": action_id, "node_id": node_id,
-                      "epoch": self.epoch,
+                      "epoch": self.epoch, "status": "requested",
                       "contract": copy.deepcopy(node.contract)}
             self._actions[action_id] = handle
             self._emit(EventKind.ACTION_REQUESTED,
@@ -259,24 +298,46 @@ class TaskVMKernel:
                        correlation_id or action_id)
             return dict(handle)
 
-    def start_action(self, action_id: str) -> None:
+    def start_action(self, action_id: str) -> bool:
+        """REQUESTED → STARTED. A stale-epoch start is DISCARDED (False);
+        a terminal or already-started handle is a contract error."""
         with self._lock:
             handle = self._require_action(action_id)
+            self._reject_terminal_handle(handle)
+            if handle["epoch"] != self.epoch:
+                handle["status"] = "discarded"
+                self._emit(EventKind.ACTION_DISCARDED,
+                           {"action_id": action_id,
+                            "node_id": handle["node_id"], "phase": "start",
+                            "action_epoch": handle["epoch"],
+                            "current_epoch": self.epoch}, action_id)
+                return False
+            if handle["status"] != "requested":
+                raise ValidationError(
+                    f"action {action_id} already started")
             self._workflows.set_status(handle["node_id"], NodeStatus.RUNNING)
+            handle["status"] = "started"
             self._emit(EventKind.ACTION_STARTED,
                        {"action_id": action_id, "node_id": handle["node_id"]},
                        action_id)
             self._refresh_projection_data()
+            return True
 
     def finish_action(self, action_id: str, *,
                       observations: Iterable[ObservedValue] = ()) -> bool:
-        """Land an action result. A result carrying a stale epoch is
-        DISCARDED: no state change, ActionDiscarded emitted, False
-        returned (invariant 4). Observations fold into the OBSERVED
-        plane as part of the landing (single ACTION_FINISHED event)."""
+        """Land an action result — exactly once, only from STARTED, only
+        in the action's own epoch (invariants 4 + 10).
+
+        A stale-epoch result is DISCARDED (no state change, False). A
+        result arriving for a node that is already committed/historical
+        is DISCARDED too — committed history is never rewritten by a late
+        landing. Observations fold into the OBSERVED plane as part of the
+        landing (single ACTION_FINISHED event)."""
         with self._lock:
             handle = self._require_action(action_id)
+            self._reject_terminal_handle(handle)
             if handle["epoch"] != self.epoch:
+                handle["status"] = "discarded"
                 self._reset_running_node(handle["node_id"])
                 self._emit(EventKind.ACTION_DISCARDED,
                            {"action_id": action_id, "node_id": handle["node_id"],
@@ -284,8 +345,24 @@ class TaskVMKernel:
                             "current_epoch": self.epoch}, action_id)
                 self._refresh_projection_data()
                 return False
+            if handle["status"] != "started":
+                raise ValidationError(
+                    f"finish_action requires a STARTED handle "
+                    f"(action {action_id} is {handle['status']!r})")
+            node_status = self._workflows.snapshot().statuses.get(
+                handle["node_id"])
+            if node_status in (NodeStatus.COMMITTED, NodeStatus.COMPENSATED):
+                handle["status"] = "discarded"
+                self._emit(EventKind.ACTION_DISCARDED,
+                           {"action_id": action_id,
+                            "node_id": handle["node_id"],
+                            "reason": "node_already_historical",
+                            "node_status": node_status.value}, action_id)
+                self._refresh_projection_data()
+                return False
             updated, with_evidence = self._fold_observations_locked(
                 observations)
+            handle["status"] = "finished"
             self._emit(EventKind.ACTION_FINISHED,
                        {"action_id": action_id, "node_id": handle["node_id"],
                         "keys": updated, "keys_with_evidence": with_evidence},
@@ -354,12 +431,91 @@ class TaskVMKernel:
             return rec
 
     def requeue(self, node_id: str, *, correlation_id: str = "") -> None:
-        """Retry path: FAILED → READY."""
+        """Retry path: FAILED → READY. Emits ACTION_REQUEUED — a requeue
+        is not a fresh action request (no handle exists yet)."""
         with self._lock:
             self._workflows.set_status(node_id, NodeStatus.READY)
-            self._emit(EventKind.ACTION_REQUESTED,
-                       {"node_id": node_id, "requeue": True}, correlation_id)
+            self._emit(EventKind.ACTION_REQUEUED,
+                       {"node_id": node_id}, correlation_id or node_id)
             self._refresh_projection_data()
+
+    # ══ bounded loop protocol (invariant 12) ═══════════════════════════
+    def begin_loop_iteration(self, node_id: str, *,
+                             correlation_id: str = "") -> int:
+        """Start the next iteration of a READY bounded loop; returns the
+        1-based iteration index. The loop goes RUNNING and its body
+        children are (re)armed to READY — their per-iteration commits are
+        ephemeral until the termination decision lands."""
+        with self._lock:
+            node = self._workflows.node(node_id)
+            if node is None or node.kind is not NodeKind.BOUNDED_LOOP:
+                raise ValidationError(
+                    f"node {node_id!r} is not a BOUNDED_LOOP")
+            st = self._workflows.snapshot().statuses.get(node_id)
+            if st is not NodeStatus.READY:
+                raise ValidationError(
+                    f"loop {node_id!r} not READY (status={st})")
+            iteration = self._loop_iters.get(node_id, 0) + 1
+            if iteration > (node.max_iterations or 0):
+                raise ValidationError(
+                    f"loop {node_id!r} already reached "
+                    f"max_iterations={node.max_iterations}")
+            self._workflows.set_status(node_id, NodeStatus.RUNNING)
+            self._loop_iters[node_id] = iteration
+            self._workflows.reset_loop_children(node_id)
+            self._emit(EventKind.LOOP_ITERATION_STARTED,
+                       {"node_id": node_id, "iteration": iteration,
+                        "max_iterations": node.max_iterations},
+                       correlation_id or node_id)
+            self._refresh_projection_data()
+            return iteration
+
+    def evaluate_loop_termination(self, node_id: str, terminated: bool, *,
+                                  detail: str = "",
+                                  correlation_id: str = "") -> dict[str, Any]:
+        """Report the termination decision for the iteration whose body
+        has FULLY committed. Only ``terminated=True`` commits the loop;
+        False re-arms it (loop → READY for the next iteration) or, at the
+        max-iteration guard, FAILS it with an explicit escalation payload."""
+        with self._lock:
+            node = self._workflows.node(node_id)
+            if node is None or node.kind is not NodeKind.BOUNDED_LOOP:
+                raise ValidationError(
+                    f"node {node_id!r} is not a BOUNDED_LOOP")
+            snap = self._workflows.snapshot()
+            if snap.statuses.get(node_id) is not NodeStatus.RUNNING:
+                raise ValidationError(
+                    f"loop {node_id!r} not RUNNING "
+                    f"(status={snap.statuses.get(node_id)})")
+            incomplete = [
+                c.node_id
+                for c in (snap.graph.children_of(node_id)
+                          if snap.graph is not None else ())
+                if snap.statuses.get(c.node_id) is not NodeStatus.COMMITTED]
+            if incomplete:
+                raise ValidationError(
+                    f"loop {node_id!r} body not fully committed this "
+                    f"iteration: {incomplete}")
+            iteration = self._loop_iters.get(node_id, 0)
+            if terminated:
+                self._workflows.set_status(node_id, NodeStatus.COMMITTED)
+                outcome = {"outcome": "committed", "iteration": iteration}
+            elif iteration >= (node.max_iterations or 0):
+                self._workflows.set_status(node_id, NodeStatus.FAILED)
+                outcome = {"outcome": "failed",
+                           "reason": "max_iterations_exceeded",
+                           "iteration": iteration}
+            else:
+                self._workflows.set_status(node_id, NodeStatus.READY)
+                outcome = {"outcome": "continue",
+                           "iteration": iteration,
+                           "next_iteration": iteration + 1}
+            self._emit(EventKind.LOOP_ITERATION_EVALUATED,
+                       {"node_id": node_id, "terminated": terminated,
+                        "detail": detail, **outcome},
+                       correlation_id or node_id)
+            self._refresh_projection_data()
+            return outcome
 
     # ══ checkpoints (invariant 5) ════════════════════════════════════════
     def commit_checkpoint(self, checkpoint_id: str, label: str, *,
@@ -381,6 +537,11 @@ class TaskVMKernel:
             state_revision=state.revision,
             event_index=len(self._events),  # exclusive boundary
             epoch=self.epoch,
+            intent=state.intent,
+            structure={v.semantic_key: {"label": v.label,
+                                        "value_type": v.value_type,
+                                        "mutability": v.mutability}
+                       for v in state.variables},
             observed=state.observed_values(),
             desired=state.desired_values(),
             committed_nodes=self._workflows.committed_node_ids(),
@@ -418,6 +579,15 @@ class TaskVMKernel:
                 raise PatchSemanticsError(
                     f"LocalPatch introduces unknown variables {unknown}; "
                     "adding variables is a scope change — use GoalPatch")
+            frozen_vars = [
+                u.semantic_key for u in patch.variable_updates
+                if (v := state.variable(u.semantic_key)) is not None
+                and v.mutability != MUTABILITY_EDITABLE]
+            if frozen_vars:
+                raise PatchSemanticsError(
+                    f"LocalPatch cannot retarget {frozen_vars}: mutability "
+                    "is readonly/locked — structural or locked variables "
+                    "change only via recompose / GoalPatch")
             wf = self._workflows.snapshot()
             for ov in patch.node_overrides:
                 node = self._workflows.node(ov.node_id)
@@ -480,6 +650,8 @@ class TaskVMKernel:
             # ── validate everything first ──
             if new_graph is not None:
                 self._workflows.validate_replace_future(new_graph)
+            self._validate_composition_locked(graph=new_graph,
+                                              schema=new_schema)
             # ── all validation passed; mutate ──
             epoch = self._bump_epoch_locked()
             intent_changed = False
@@ -488,8 +660,10 @@ class TaskVMKernel:
                 intent_changed = not patch.new_intent.describes_same_terminal(old)
                 self._sessions.set_intent(patch.new_intent)
             graph_revision = None
+            invalidated: list[str] = []
             if new_graph is not None:
-                installed = self._workflows.replace_future(new_graph, epoch=epoch)
+                installed, invalidated = self._workflows.replace_future(
+                    new_graph, epoch=epoch)
                 graph_revision = installed.revision
             if new_schema is not None:
                 self._projections.set_schema(new_schema)
@@ -497,6 +671,7 @@ class TaskVMKernel:
                        {"patch_id": patch.patch_id, "patch_class": "goal",
                         "intent_changed": intent_changed,
                         "graph_revision": graph_revision,
+                        "invalidated_node_ids": invalidated,
                         "requires_replan": True, "epoch": epoch,
                         "rationale": patch.rationale},
                        patch.correlation_id or patch.patch_id)
@@ -525,13 +700,26 @@ class TaskVMKernel:
                                   to_desired=rec.desired.get(k))
                 for k, target in rec.observed.items()
                 if current_observed.get(k) != target)
+            # cross-GoalPatch / cross-structure rollback signal: if the
+            # checkpoint's intent or semantic structure differs from the
+            # current one, the remaining future topology was planned for
+            # an abandoned goal — the architect MUST recompose (never
+            # silently keep the wrong future).
+            intent_differs = (rec.intent is not None
+                              and not rec.intent.describes_same_terminal(
+                                  state.intent))
+            checkpoint_keys = set(rec.structure) or set(rec.observed)
+            structure_differs = checkpoint_keys != set(current_observed)
+            requires_recompose = bool(intent_differs or structure_differs)
             epoch = self._bump_epoch_locked()
             self._comp_seq += 1
             plan = CompensationPlan(
                 plan_id=f"comp_{self._comp_seq:05d}",
                 target_checkpoint_id=rec.checkpoint_id,
-                entries=entries, epoch=epoch, created_at=time.time())
+                entries=entries, epoch=epoch, created_at=time.time(),
+                requires_recompose=requires_recompose)
             self._comp_plans[plan.plan_id] = plan
+            self._comp_status[plan.plan_id] = "pending"
             self._emit(EventKind.COMPENSATION_REQUESTED,
                        {"patch_id": patch.patch_id, "plan_id": plan.plan_id,
                         "target_checkpoint_id": rec.checkpoint_id,
@@ -539,6 +727,7 @@ class TaskVMKernel:
                                      "from": e.from_observed,
                                      "to": e.to_observed}
                                     for e in entries],
+                        "requires_recompose": requires_recompose,
                         "epoch": epoch},
                        patch.correlation_id or patch.patch_id)
             return plan
@@ -546,25 +735,48 @@ class TaskVMKernel:
     def record_compensation_result(
             self, plan_id: str, applied: bool, *,
             observed_values: dict[str, Any] | None = None,
-            detail: str = "") -> None:
-        """Land the outcome of a compensation execution.
+            detail: str = "") -> bool:
+        """Land the outcome of a compensation execution — exactly once,
+        only inside the plan's own epoch (invariant 11).
+
+        A STALE plan (an epoch boundary was crossed after the plan was
+        issued) is DISCARDED: COMPENSATION_DISCARDED is emitted, nothing
+        changes, False returns — this is never confused with an honest
+        execution failure. A terminal plan (applied/failed/discarded)
+        can never land again.
 
         ``applied=True`` is NEVER taken on faith (invariant 6): the
-        caller must supply freshly observed values, and EVERY plan entry's
-        target must match — a single mismatch (or a missing key) turns
-        the outcome into CompensationFailed. Only on full match does the
-        kernel restore both planes (observed + desired) of the affected
-        variables and mark post-checkpoint commits COMPENSATED.
+        caller must supply freshly observed values, and EVERY plan
+        entry's target must match — a single mismatch (or a missing key)
+        turns the outcome into CompensationFailed. Only on full match
+        does the kernel restore the checkpoint's logical state — intent,
+        semantic structure, and both value planes — and mark
+        post-checkpoint commits COMPENSATED. If the rollback crossed a
+        GoalPatch boundary (plan.requires_recompose), the remaining
+        future topology is INVALIDATED: it was planned for the abandoned
+        goal and must not silently keep running.
         """
         with self._lock:
             plan = self._comp_plans.get(plan_id)
             if plan is None:
                 raise ValidationError(f"unknown compensation plan {plan_id!r}")
+            status = self._comp_status.get(plan_id, "pending")
+            if status != "pending":
+                raise ValidationError(
+                    f"compensation plan {plan_id} is terminal ({status}); "
+                    "a plan lands exactly once")
+            if plan.epoch != self.epoch:
+                self._comp_status[plan_id] = "discarded"
+                self._emit(EventKind.COMPENSATION_DISCARDED,
+                           {"plan_id": plan_id, "plan_epoch": plan.epoch,
+                            "current_epoch": self.epoch}, plan_id)
+                self._refresh_projection_data()
+                return False
             if applied and observed_values is None:
                 raise ValidationError(
                     "applied compensation requires freshly observed values")
             mismatches: dict[str, dict[str, Any]] = {}
-            if applied:
+            if applied and observed_values is not None:
                 for e in plan.entries:
                     got = observed_values.get(e.semantic_key, _MISSING)
                     if got is _MISSING or got != e.to_observed:
@@ -572,40 +784,68 @@ class TaskVMKernel:
                             "expected": e.to_observed,
                             "observed": None if got is _MISSING else got}
             if not applied or mismatches:
+                self._comp_status[plan_id] = "failed"
                 self._emit(EventKind.COMPENSATION_FAILED,
                            {"plan_id": plan_id, "detail": detail,
                             "mismatches": mismatches,
                             "caller_claimed_applied": applied}, plan_id)
                 self._refresh_projection_data()
-                return
-            # ── full match confirmed; restore both planes ──
-            # observed: only the executed+verified entries. desired: EVERY
-            # variable recorded at the checkpoint — rollback returns the
-            # task world to that boundary wholesale, including intent.
+                return False
+            # ── full match confirmed: restore the logical checkpoint ──
             rec = self._checkpoints.get(plan.target_checkpoint_id)
             by_key = {e.semantic_key: e for e in plan.entries}
             state = self._sessions.task_state()
-            new_vars = tuple(
-                replace(v,
-                        observed=(by_key[v.semantic_key].to_observed
-                                  if v.semantic_key in by_key else v.observed),
-                        desired=(rec.desired[v.semantic_key]
-                                 if v.semantic_key in rec.desired
-                                 else v.desired))
-                for v in state.variables)
-            self._sessions.set_task_state(replace(state, variables=new_vars))
+            current = {v.semantic_key: v for v in state.variables}
+            structure = rec.structure or {k: {} for k in rec.observed}
+            restored_vars: list[TaskVariable] = []
+            for key, meta in structure.items():
+                observed_v = (by_key[key].to_observed if key in by_key
+                              else rec.observed.get(key))
+                desired_v = rec.desired.get(key)
+                base = current.get(key)
+                if base is not None:
+                    restored_vars.append(replace(base, observed=observed_v,
+                                                 desired=desired_v))
+                else:
+                    # the variable existed at the checkpoint but was
+                    # structurally removed since — restore it whole
+                    restored_vars.append(TaskVariable(
+                        semantic_key=key,
+                        label=meta.get("label") or key,
+                        value_type=meta.get("value_type") or "string",
+                        mutability=meta.get("mutability")
+                        or MUTABILITY_EDITABLE,
+                        observed=observed_v, desired=desired_v))
+            dropped = sorted(set(current) - set(structure))
+            intent_restored = (rec.intent is not None
+                               and not rec.intent.describes_same_terminal(
+                                   state.intent))
+            self._sessions.set_task_state(TaskState(
+                intent=rec.intent or state.intent,
+                variables=tuple(restored_vars)))
             kept = set(rec.committed_nodes)
             compensated_nodes = []
             for nid in self._workflows.committed_node_ids():
                 if nid not in kept:
                     self._workflows.set_status(nid, NodeStatus.COMPENSATED)
                     compensated_nodes.append(nid)
+            invalidated: list[str] = []
+            if plan.requires_recompose:
+                invalidated = self._workflows.invalidate_future()
+            self._comp_status[plan_id] = "applied"
             self._emit(EventKind.COMPENSATION_APPLIED,
                        {"plan_id": plan_id, "detail": detail,
                         "restored": {k: e.to_observed
                                      for k, e in by_key.items()},
-                        "compensated_nodes": compensated_nodes}, plan_id)
+                        "compensated_nodes": compensated_nodes,
+                        "intent_restored": intent_restored,
+                        "restored_structure_keys": sorted(
+                            set(structure) - set(current)),
+                        "dropped_semantic_keys": dropped,
+                        "requires_recompose": plan.requires_recompose,
+                        "invalidated_node_ids": invalidated}, plan_id)
             self._refresh_projection_data()
+            return True
 
     # ══ governance events & conflicts ════════════════════════════════════
     def request_governance(self, action: str, detail: str = "", *,
@@ -640,6 +880,14 @@ class TaskVMKernel:
             raise ValidationError(f"unknown action {action_id!r}")
         return handle
 
+    @staticmethod
+    def _reject_terminal_handle(handle: dict[str, Any]) -> None:
+        """A FINISHED/DISCARDED handle can never land again (invariant 10)."""
+        if handle["status"] in ("finished", "discarded"):
+            raise ValidationError(
+                f"action handle {handle['action_id']} is terminal "
+                f"({handle['status']}); an action result lands exactly once")
+
     def _fold_observations_locked(
             self, observations: Iterable[ObservedValue]
     ) -> tuple[list[str], list[str]]:
@@ -667,6 +915,37 @@ class TaskVMKernel:
         self._sessions.set_task_state(replace(state, variables=new_vars))
         return (sorted(by_key),
                 sorted(k for k, o in by_key.items() if o.evidence))
+
+    def _validate_composition_locked(
+            self, graph: WorkflowGraph | None = None,
+            schema: ProjectionSchema | None = None, *,
+            variable_keys: set[str] | None = None) -> None:
+        """Composition boundary check (invariant 13): architect output may
+        only reference task variables that exist (or are being installed).
+        Rejects illegal output BEFORE it enters the kernel."""
+        keys = (variable_keys if variable_keys is not None else
+                {v.semantic_key
+                 for v in self._sessions.task_state().variables})
+        if schema is not None:
+            missing = sorted({c.binding_key for c in schema.components
+                              if c.binding_key is not None} - keys)
+            if missing:
+                raise ValidationError(
+                    f"ProjectionSchema binds unknown task variables "
+                    f"{missing}; architect output rejected at the kernel "
+                    "boundary")
+        if graph is not None:
+            bad: dict[str, list[str]] = {}
+            for n in graph.nodes:
+                if n.contract is not None:
+                    miss = sorted(set(n.contract.desired_state) - keys)
+                    if miss:
+                        bad[n.node_id] = miss
+            if bad:
+                raise ValidationError(
+                    "ActionContract desired_state references unknown task "
+                    f"variables: {bad}; architect output rejected at the "
+                    "kernel boundary")
 
     def _bump_epoch_locked(self) -> int:
         epoch = self._sessions.bump_epoch()

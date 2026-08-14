@@ -123,11 +123,31 @@ def test_bounded_loop_requires_guards():
         WorkflowGraph(nodes=(WorkflowNode(node_id="L", kind=NodeKind.BOUNDED_LOOP,
                                           label="loop",
                                           termination_predicate="all synced"),))
-    ok = WorkflowGraph(nodes=(WorkflowNode(node_id="L", kind=NodeKind.BOUNDED_LOOP,
-                                           label="loop",
-                                           termination_predicate="all synced",
-                                           max_iterations=5),))
+    # a valid loop also needs an executable body (Wave-A.1: ACTION/VERIFY
+    # children; no nested loops)
+    ok = WorkflowGraph(nodes=(
+        WorkflowNode(node_id="L", kind=NodeKind.BOUNDED_LOOP, label="loop",
+                     termination_predicate="all synced", max_iterations=5),
+        _action("body", parent_id="L"),
+    ))
     assert ok.node("L").max_iterations == 5
+    # body-less loop rejected even with both guards
+    with pytest.raises(ValidationError):
+        WorkflowGraph(nodes=(
+            WorkflowNode(node_id="L2", kind=NodeKind.BOUNDED_LOOP,
+                         label="loop", termination_predicate="p",
+                         max_iterations=3),))
+    # nested loops rejected
+    with pytest.raises(ValidationError):
+        WorkflowGraph(nodes=(
+            WorkflowNode(node_id="outer", kind=NodeKind.BOUNDED_LOOP,
+                         label="o", termination_predicate="p",
+                         max_iterations=3),
+            WorkflowNode(node_id="inner", kind=NodeKind.BOUNDED_LOOP,
+                         label="i", termination_predicate="p",
+                         max_iterations=3, parent_id="outer"),
+            _action("x", parent_id="inner"),
+        ))
 
 
 def test_action_node_requires_contract():
