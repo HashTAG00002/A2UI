@@ -35,11 +35,14 @@ from taskvm.execution.action_dispatcher import dispatch
 from taskvm.execution.patch_compiler import compile_patch
 from taskvm.harness import replay_engine as replay
 from taskvm.harness.observations import TraceFixture
-from taskvm.harness.state_adapter import make_adapters
 from taskvm.task_state.entity_binding import TaskBinding
 from taskvm.task_state.compiler import compile_binding
 from taskvm.evaluation.render_check import (parse_compiler_output,
                                             validate_binding, validate_a2ui_surface)
+from taskvm.execution.gui_driver import make_task_adapters
+from taskvm.substrate.builtin_web.evaluation import (
+    make_evaluation_environments,
+)
 from taskvm.verifier import canonical_state as cs
 from taskvm.verifier.round_trip_checks import (check_round_trip, binding_accuracy,
                                                 map_gt_var_id_to_compiler)
@@ -68,7 +71,7 @@ def _which_link_broke(compiled: dict, valid: bool, dispatch_report) -> str | Non
     return None
 
 
-def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
+def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, envs: dict, *,
                    model: str | None, temperature: float, sample_i: int,
                    mock: bool = False, with_screenshot: bool = False,
                    cost_model: CostModel | None = None,
@@ -81,15 +84,15 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
     (``complete_vision_json``) instead of text-only. Requires ``with_screenshot``
     machinery (Playwright); forces ``with_screenshot=True``."""
     sid = f"{fixture.task_id}_s{sample_i}_{int(time.time()*1000) % 100000}"
-    # reset (idempotent) + seed
-    for ad in adapters.values():
-        ad.reset(sid)
-    replay.seed_apps(fixture, adapters, sid)
+    # reset (idempotent) + seed — evaluation plane
+    for env in envs.values():
+        env.reset(sid)
+    replay.seed_apps(fixture, envs, sid)
 
     # capture observations (read-path-GUI) + assert they match real state
     # EE.10: vision forces screenshot capture (the compiler's image input)
-    obs = replay.capture_obs(adapters, sid, with_screenshot=(with_screenshot or vision))
-    replay.assert_obs_matches_state(adapters, sid, obs)
+    obs = replay.capture_obs(envs, sid, with_screenshot=(with_screenshot or vision))
+    replay.assert_obs_matches_state(envs, sid, obs)
     trace = TraceFixture(task_id=fixture.task_id, goal=fixture.goal, final_obs=obs)
     # GG: build the locator_index {app: {visible_title: entity_id}} from canonical
     # state (title IS screen-visible → not a GT leak). The model emits locator
@@ -97,8 +100,8 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
     # observed_ids (legacy {app: {eid}}) kept for the GT/mock entity_id path.
     observed_ids: dict[str, set[str]] = {}
     locator_index: dict[str, dict[str, str]] = {}
-    for app, ad in adapters.items():
-        canon = ad.read_canonical(sid)["entities"]
+    for app, env in envs.items():
+        canon = env.oracle_state(sid)["entities"]
         locator_index[app] = build_locator_index(canon, app)
         observed_ids[app] = set(canon.keys())
 
@@ -173,8 +176,8 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
     # render the surface (structured text)
     rendered = render(tb) if tb else "(binding invalid — no surface)"
 
-    # pre-snapshot (BEFORE dispatch)
-    pre = cs.snapshot(adapters, sid)
+    # pre-snapshot (BEFORE dispatch) — evaluation plane
+    pre = cs.snapshot(envs, sid)
 
     # patch + dispatch (write-path-API)
     # E11/E12 fix (direction a): in REAL compiler mode the compiler may name the
@@ -207,8 +210,8 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
         ops = compile_patch(edit, tb)
         dispatch_report = dispatch(ops, adapters, sid, broken=None)
 
-    # verify (canonical state)
-    res = check_round_trip(sid, fixture, adapters, pre)
+    # verify (canonical state) — evaluation plane
+    res = check_round_trip(sid, fixture, envs, pre)
 
     # binding-accuracy diagnostic (compiler binding vs GT)
     bacc = binding_accuracy(binding, fixture) if binding else binding_accuracy(None, fixture)
@@ -216,8 +219,8 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
     which_broke = _which_link_broke(compiled, valid, dispatch_report)
 
     # cleanup
-    for ad in adapters.values():
-        ad.reset(sid)
+    for env in envs.values():
+        env.reset(sid)
 
     return {
         "task_id": fixture.task_id,
@@ -252,26 +255,26 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
     }
 
 
-def run_neg_control(fixture: CanonicalTaskGraph, adapters: dict, *,
+def run_neg_control(fixture: CanonicalTaskGraph, adapters: dict, envs: dict, *,
                     model: str | None, mock: bool = False,
                     cost_model: CostModel | None = None) -> dict:
     """Negative control: use the GT binding (so binding is perfect) but break
     the dispatcher. MUST score ≤0.3. If it doesn't, the verifier is broken."""
     sid = f"{fixture.task_id}_neg_{int(time.time()*1000) % 100000}"
-    for ad in adapters.values():
-        ad.reset(sid)
-    replay.seed_apps(fixture, adapters, sid)
-    obs = replay.capture_obs(adapters, sid)
-    replay.assert_obs_matches_state(adapters, sid, obs)
+    for env in envs.values():
+        env.reset(sid)
+    replay.seed_apps(fixture, envs, sid)
+    obs = replay.capture_obs(envs, sid)
+    replay.assert_obs_matches_state(envs, sid, obs)
     # use GT binding (bypass the compiler) so the ONLY thing tested is the verifier
     tb = _gt_task_binding(fixture)
-    pre = cs.snapshot(adapters, sid)
+    pre = cs.snapshot(envs, sid)
     ops = compile_patch(fixture.user_edit, tb)
     # broken dispatcher: noop (changed-happened fails, non-interference passes)
     dispatch_report = dispatch(ops, adapters, sid, broken="noop")
-    res = check_round_trip(sid, fixture, adapters, pre)
-    for ad in adapters.values():
-        ad.reset(sid)
+    res = check_round_trip(sid, fixture, envs, pre)
+    for env in envs.values():
+        env.reset(sid)
     return {
         "task_id": fixture.task_id,
         "neg_control": True,
@@ -454,24 +457,22 @@ def main(argv=None):
                              "compiler so it uses complete_vision_json (screenshot+a11y) "
                              "instead of text-only complete_json. Produces eval_results/"
                              "w1_vision_<ts>.json for A/B vs the text path. Needs Playwright.")
-    parser.add_argument("--execution-mode", choices=["api", "gui_agent"],
-                        default="api",
-                        help="E10 rework (P5): 'api' (legacy requests.post to the app's "
-                             "Flask route) or 'gui_agent' (drive a real browser via the "
-                             "GUI executor — non-invasive write/rollback, .mrules E7/E10). "
-                             "Default 'api' preserves the W1 baseline for comparison.")
+    # Agent B (substrate isolation): the legacy ``--execution-mode api`` backdoor
+    # (requests.post writes straight into the app's Flask API — the §12.16
+    # class) is DELETED. The runtime is GUI-only; the GUI executor is wired
+    # unconditionally below.
     parser.add_argument("--gui-screenshot-dir", default=None,
-                        help="dir for per-step GUI executor screenshots (gui_agent mode; "
-                             "default: eval_results/p5_gui_visual_<ts>/<app>_<op>)")
+                        help="dir for per-step GUI executor screenshots "
+                             "(default: eval_results/p5_gui_visual_<ts>/<app>_<op>)")
     parser.add_argument("--out", default=None)
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s")
 
-    # GUI-executor screenshot dir (auto per-ts if gui_agent + not specified)
+    # GUI-executor screenshot dir (auto per-ts if not specified)
     gui_shot_dir = args.gui_screenshot_dir
-    if args.execution_mode == "gui_agent" and gui_shot_dir is None:
+    if gui_shot_dir is None:
         gui_shot_dir = str(EVAL_DIR / f"p5_gui_visual_{time.strftime('%Y%m%d_%H%M%S')}")
     # EE.2: build the adapter set from the UNION of apps across all tasks being
     # run (seed_state keys + binding apps). Without this, launch_full (which
@@ -487,31 +488,30 @@ def main(argv=None):
     _APP_ORDER = ("calendar", "taskboard", "drive", "mail",
                   "outlook_cal", "wechat", "alipay")
     app_list = [a for a in _APP_ORDER if a in needed_apps]
-    adapters = make_adapters(apps=app_list, host=args.host,
-                             executor=args.execution_mode,
-                             gui_screenshot_dir=gui_shot_dir)
-    # health check
-    for app, ad in adapters.items():
-        h = ad.health()
+    adapters = make_task_adapters(apps=app_list, host=args.host,
+                                  screenshot_dir=gui_shot_dir)
+    envs = make_evaluation_environments(app_list, host=args.host)
+    # health check (evaluation plane)
+    for app, env in envs.items():
+        h = env.health()
         if h.get("status") != "ok":
             logger.error(f"{app} not healthy: {h}")
             sys.exit(2)
-        logger.info(f"{app} healthy @ {ad.base_url}")
+        logger.info(f"{app} healthy @ {env.base_url}")
 
     cost_model = CostModel()
-    # E10 rework (P5): wire the GUI executor's cost_model to the W1 cost_model
-    # so GUI-grounding calls are attributed in the report's cost (honesty: the
-    # report must reflect the FULL token cost, not just compile_binding).
-    if args.execution_mode == "gui_agent":
-        from taskvm.execution.gui_executor import get_executor
-        get_executor().cost_model = cost_model
+    # wire the GUI executor's cost_model to the W1 cost_model so GUI-grounding
+    # calls are attributed in the report's cost (honesty: the report must
+    # reflect the FULL token cost, not just compile_binding).
+    from taskvm.execution.gui_executor import get_executor
+    get_executor().cost_model = cost_model
     ts = time.strftime("%Y%m%d_%H%M%S")
 
     if args.neg_control:
         results = []
         for fx in tasks:
-            neg = run_neg_control(fx, adapters, model=args.model, mock=args.mock,
-                                  cost_model=cost_model)
+            neg = run_neg_control(fx, adapters, envs, model=args.model,
+                                  mock=args.mock, cost_model=cost_model)
             logger.info(f"[neg-control] {fx.task_id}: score={neg['score']} "
                         f"(must be ≤{NEG_CONTROL_MAX}) → {'PASS' if neg['passed'] else 'FAIL'}")
             results.append(neg)
@@ -531,7 +531,7 @@ def main(argv=None):
         samples = []
         for i in range(args.samples):
             logger.info(f"--- sample {i+1}/{args.samples} ---")
-            s = run_one_sample(fx, adapters, model=args.model,
+            s = run_one_sample(fx, adapters, envs, model=args.model,
                                temperature=args.temperature, sample_i=i,
                                mock=args.mock, with_screenshot=args.with_screenshot,
                                cost_model=cost_model, full_a2ui=args.full_a2ui,
@@ -540,14 +540,14 @@ def main(argv=None):
                         f"binding_f1={s['binding_accuracy']['f1']} "
                         f"broke={s['which_link_broke']}")
             samples.append(s)
-            # E10 rework (P5): GUI-executor writes hit gpt-5.6-sol's QPM ~10/min.
-            # Between samples, let the quota refill so the next sample's GUI
-            # writes don't 429-loop (the executor retries, but it's slower +
-            # burns the step budget). Skip after the last sample.
-            if args.execution_mode == "gui_agent" and i < args.samples - 1:
-                logger.info(f"[gui_agent] QPM refill: sleeping 60s before next sample")
+            # GUI-executor writes hit gpt-5.6-sol's QPM ~10/min. Between
+            # samples, let the quota refill so the next sample's GUI writes
+            # don't 429-loop (the executor retries, but it's slower + burns
+            # the step budget). Skip after the last sample.
+            if i < args.samples - 1:
+                logger.info("[gui] QPM refill: sleeping 60s before next sample")
                 time.sleep(60)
-        neg = run_neg_control(fx, adapters, model=args.model, mock=args.mock,
+        neg = run_neg_control(fx, adapters, envs, model=args.model, mock=args.mock,
                               cost_model=cost_model)
         logger.info(f"[neg-control] {fx.task_id}: score={neg['score']} → "
                     f"{'PASS' if neg['passed'] else 'FAIL'}")
@@ -559,28 +559,26 @@ def main(argv=None):
                     f"binding_f1_mean={sm['binding_f1_mean']} neg={neg['score']}")
 
     sk = evaluate_sub_kills(summaries, all_samples)
-    # E10 rework (P5): tag the execution mode so GUI-agent results are never
-    # confused with legacy API-direct results (handoff §6.2 / §12.19). Also
-    # record the executor config for traceability.
+    # Agent B (substrate isolation): the execution mode is now ALWAYS the GUI
+    # path (the API executor is deleted); the tag stays for report continuity
+    # so old/new JSONs remain comparable.
     report = {
         "ts": ts, "model": args.model or model_client.TASKVM_DEFAULT_MODEL,
         "mock": args.mock, "n_samples_per_task": args.samples,
-        "execution_mode": args.execution_mode,   # 'api' (legacy) | 'gui_agent' (E10 rework)
+        "execution_mode": "gui_only",
         "cost": cost_model.summary(),
         "summaries": summaries,
         "samples": all_samples,
         "sub_kills": sk,
     }
-    if args.execution_mode == "gui_agent":
-        report["executor"] = {
-            "driver": "playwright",
-            "grounding_model": args.model or model_client.TASKVM_DEFAULT_MODEL,
-            "coordinate_format": "normalized_0_1000",
-            "gui_screenshot_dir": gui_shot_dir,
-        }
+    report["executor"] = {
+        "driver": "playwright",
+        "grounding_model": args.model or model_client.TASKVM_DEFAULT_MODEL,
+        "coordinate_format": "normalized_0_1000",
+        "gui_screenshot_dir": gui_shot_dir,
+    }
     out_path = Path(args.out) if args.out else (
-        EVAL_DIR / f"p5_full_killtest_{ts}.json" if args.execution_mode == "gui_agent"
-        else EVAL_DIR / f"w1_{ts}.json")
+        EVAL_DIR / f"p5_full_killtest_{ts}.json")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2))
     print(f"\nWrote {out_path}")

@@ -51,7 +51,10 @@ from taskvm.execution.action_dispatcher import dispatch
 from taskvm.execution.patch_compiler import compile_patch
 from taskvm.execution.rollback import RollbackLog
 from taskvm.harness import replay_engine as replay
-from taskvm.harness.state_adapter import make_adapters
+from taskvm.execution.gui_driver import make_task_adapters
+from taskvm.substrate.builtin_web.evaluation import (
+    make_evaluation_environments,
+)
 from taskvm.task_state.entity_binding import TaskBinding
 from taskvm.verifier import canonical_state as cs
 from taskvm.workspace_ui.editable_components import (
@@ -124,7 +127,7 @@ def run_gate1(sess: WorkspaceSession, fixture: CanonicalTaskGraph,
     rw = html_initial.split("可读可写区")[1]
     editable_present = edit_var in rw
     # the read-only zone shows the variable's current (pre-edit) value
-    projected = project_readonly(sess.binding, canonical_snapshot(sess.adapters, sess.sid))
+    projected = project_readonly(sess.binding, canonical_snapshot(sess.oracle, sess.sid))
     old_value = str(projected[edit_var]["value"])
 
     # apply the edit (single-app single-step for doc_handoff; multi-app for W1 tasks)
@@ -148,14 +151,14 @@ def run_gate2(sess: WorkspaceSession, fixture: CanonicalTaskGraph,
     """Assert undo_last(app) reverts the app's touched entity byte-identical +
     non-interference-on-rollback. The edit was already applied in gate-1; this
     snapshots pre-undo, undoes, snapshots post-undo. Returns (result, html_after_undo)."""
-    pre = cs.snapshot(sess.adapters, sess.sid)   # AFTER the gate-1 edit (so app is changed)
+    pre = cs.snapshot(sess.oracle, sess.sid)   # AFTER the gate-1 edit (so app is changed)
     # the entity gate-2 expects to revert = the binding's entity in undo_app
     undone = next((b.entity_id for b in fixture.bindings if b.app == undo_app), None)
     # records for undo_app should exist (gate-1 dispatched at least one op to it)
     recs_before = sess.rollback_log.for_app(undo_app)
 
     sess.rollback_log.undo_last(undo_app, sess.sid, sess.adapters)
-    post = cs.snapshot(sess.adapters, sess.sid)
+    post = cs.snapshot(sess.oracle, sess.sid)
     html_after_undo = _render_html(sess)
 
     # entity reverted byte-identical? compare the undone entity's FULL record
@@ -180,20 +183,20 @@ def run_gate2(sess: WorkspaceSession, fixture: CanonicalTaskGraph,
                        passed), html_after_undo
 
 
-def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
+def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, envs: dict, *,
                    sample_i: int, host: str = "localhost") -> dict:
     """Run one W2 sample end-to-end (mock binding). Returns the result record."""
     sid = f"{fixture.task_id}_w2_s{sample_i}_{int(time.time()*1000) % 100000}"
-    for ad in adapters.values():
-        ad.reset(sid)
-    replay.seed_apps(fixture, adapters, sid)
+    for env in envs.values():
+        env.reset(sid)
+    replay.seed_apps(fixture, envs, sid)
     # read-path-GUI + live-state anchor (must still hold with the 3rd app)
-    obs = replay.capture_obs(adapters, sid)
-    replay.assert_obs_matches_state(adapters, sid, obs)
+    obs = replay.capture_obs(envs, sid)
+    replay.assert_obs_matches_state(envs, sid, obs)
 
     tb = _gt_task_binding(fixture)   # mock binding (W2 tests UI+rollback, not compiler)
     sess = WorkspaceSession(sid=sid, task_id=fixture.task_id, goal=fixture.goal,
-                            binding=tb, adapters=adapters)
+                            binding=tb, adapters=adapters, oracle=envs)
 
     edit_var = fixture.user_edit["var_id"]
     new_value = fixture.user_edit["new"]
@@ -202,8 +205,8 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
     g1, html_init, html_after_edit = run_gate1(sess, fixture, edit_var, new_value)
     g2, html_after_undo = run_gate2(sess, fixture, undo_app)
 
-    for ad in adapters.values():
-        ad.reset(sid)
+    for env in envs.values():
+        env.reset(sid)
     return {
         "task_id": fixture.task_id,
         "sample": sample_i,
@@ -239,16 +242,18 @@ def _dump_visual(samples: list[dict], ts: str, host: str) -> Path:
         # the real app pages directly.
         try:
             fx = get_task(s["task_id"])
-            adapters = make_adapters(host=host)
+            adapters = make_task_adapters(host=host)
+            envs = make_evaluation_environments(
+                list({"calendar", "taskboard", "drive"}), host=host)
             import time as _t
             vsid = f"{fx.task_id}_vis_{int(_t.time()*1000) % 100000}"
-            for ad in adapters.values():
-                ad.reset(vsid)
-            replay.seed_apps(fx, adapters, vsid)
+            for env in envs.values():
+                env.reset(vsid)
+            replay.seed_apps(fx, envs, vsid)
             tb = _gt_task_binding(fx)
             from taskvm.workspace_ui.server import WorkspaceSession
             vsess = WorkspaceSession(sid=vsid, task_id=fx.task_id, goal=fx.goal,
-                                     binding=tb, adapters=adapters)
+                                     binding=tb, adapters=adapters, oracle=envs)
             native_initial = requests.get(
                 f"http://{host}:{port}/{vsid}", timeout=10).text
             ops = compile_patch({"var_id": s["edit"]["var_id"],
@@ -262,8 +267,8 @@ def _dump_visual(samples: list[dict], ts: str, host: str) -> Path:
             (d / "0_native_initial.html").write_text(native_initial, encoding="utf-8")
             (d / "2_native_after_edit.html").write_text(native_after_edit, encoding="utf-8")
             (d / "3_native_after_undo.html").write_text(native_after_undo, encoding="utf-8")
-            for ad in adapters.values():
-                ad.reset(vsid)
+            for env in envs.values():
+                env.reset(vsid)
         except Exception as e:
             logger.warning(f"[visual] native cross-check failed for {s['task_id']}: {e}")
             (d / "0_native_initial.html").write_text(
@@ -338,15 +343,17 @@ def main(argv=None):
                        "compiler — W1 already passed binding discovery). --no-mock is accepted "
                        "but the gate verdict does not depend on the compiler.")
 
-    adapters = make_adapters(host=args.host)
-    for app, ad in adapters.items():
+    adapters = make_task_adapters(host=args.host)
+    envs = make_evaluation_environments(
+        sorted(set(adapters)), host=args.host)
+    for app, env in envs.items():
         try:
-            h = ad.health()
+            h = env.health()
             if h.get("status") != "ok":
                 logger.error(f"{app} not healthy: {h}"); sys.exit(2)
-            logger.info(f"{app} healthy @ {ad.base_url}")
+            logger.info(f"{app} healthy @ {env.base_url}")
         except Exception as e:
-            logger.error(f"{app} not reachable @ {ad.base_url}: {e} "
+            logger.error(f"{app} not reachable @ {env.base_url}: {e} "
                          f"(start the apps: python -m taskvm.apps.{app}.app)"); sys.exit(2)
 
     tasks = [get_task(args.task)] if args.task else all_tasks()
@@ -356,7 +363,7 @@ def main(argv=None):
     if args.neg_control:
         results = []
         for fx in tasks:
-            neg = run_neg_control(fx, adapters, model=args.model, mock=True,
+            neg = run_neg_control(fx, adapters, envs, model=args.model, mock=True,
                                   cost_model=cost_model)
             logger.info(f"[neg-control] {fx.task_id}: score={neg['score']} "
                         f"(must be ≤{NEG_CONTROL_MAX}) → {'PASS' if neg['passed'] else 'FAIL'}")
@@ -374,11 +381,11 @@ def main(argv=None):
         logger.info(f"\n=== TASK {fx.task_id} ===")
         samples = []
         for i in range(args.samples):
-            s = run_one_sample(fx, adapters, sample_i=i, host=args.host)
+            s = run_one_sample(fx, adapters, envs, sample_i=i, host=args.host)
             logger.info(f"sample {i+1}: gate1={s['gate1']['passed']} "
                         f"gate2={s['gate2']['passed']} → {'PASS' if s['passed'] else 'FAIL'}")
             samples.append(s)
-        neg = run_neg_control(fx, adapters, model=args.model, mock=True, cost_model=cost_model)
+        neg = run_neg_control(fx, adapters, envs, model=args.model, mock=True, cost_model=cost_model)
         logger.info(f"[neg-control] {fx.task_id}: score={neg['score']} → "
                     f"{'PASS' if neg['passed'] else 'FAIL'}")
         sm = summarize(fx.task_id, samples, neg)

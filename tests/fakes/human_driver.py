@@ -28,7 +28,7 @@ import queue
 import threading
 from typing import Any
 
-from taskvm.governance.user_behavior_driver import UserBehaviorDriver, UserBehaviorEvent
+from tests.fakes.user_behavior_driver import UserBehaviorDriver, UserBehaviorEvent
 from taskvm.governance.vm_state import VMStateSnapshot
 
 logger = logging.getLogger(__name__)

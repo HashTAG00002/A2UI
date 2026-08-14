@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from taskvm.benchmark.fixtures import CanonicalTaskGraph
-from taskvm.harness.state_adapter import StateAdapter
+from taskvm.substrate import EvaluationEnvironment   # port type only (Agent B)
 from taskvm.verifier.canonical_state import (entity_value, field_matches,
                                               entity_record)
 from taskvm.verifier.non_interference import check_non_interference
@@ -123,14 +123,14 @@ class _DummyBinding:
 
 
 def check_round_trip(sid: str, fixture: CanonicalTaskGraph,
-                     adapters: dict[str, StateAdapter],
+                     adapters: dict[str, EvaluationEnvironment],
                      pre_snapshot: dict) -> RoundTripResult:
     """Run all three checks. Returns RoundTripResult with score + per-check info.
 
     ``pre_snapshot`` = ``canonical_state.snapshot(adapters, sid)`` taken BEFORE
     dispatch (the orchestrator captures it).
     """
-    post = {name: ad.read_canonical(sid) for name, ad in adapters.items()}
+    post = {name: ad.oracle_state(sid) for name, ad in adapters.items()}
 
     changed = check_changed_happened(post, fixture)
     untouched = check_non_interference(pre_snapshot, post, fixture.non_interference_set)

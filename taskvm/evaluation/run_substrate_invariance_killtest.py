@@ -40,7 +40,10 @@ from taskvm.benchmark.cost_model import CostModel
 from taskvm.benchmark.fixtures import get_task
 from taskvm.benchmark.ood_fixtures import get_ood_task
 from taskvm.evaluation.run_w1_killtest import run_one_sample
-from taskvm.harness.state_adapter import make_adapters
+from taskvm.execution.gui_driver import make_task_adapters
+from taskvm.substrate.builtin_web.evaluation import (
+    make_evaluation_environments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,21 +66,26 @@ def _apps_for(fixture) -> list[str]:
 
 
 def run_stack(task_id: str, *, samples: int, model: str | None, mock: bool,
-              host: str, executor: str, cost_model: CostModel) -> dict:
-    """Run N samples of one task on its substrate; return aggregate metrics."""
+              host: str, cost_model: CostModel) -> dict:
+    """Run N samples of one task on its substrate; return aggregate metrics.
+
+    Agent B (substrate isolation): writes go through the GUI-only task
+    adapters; reset/seed/health go through the evaluation environments."""
     fixture = (get_ood_task(task_id) if task_id.startswith(("outlook_", "send_",
               "set_mail")) else get_task(task_id))
     apps = _apps_for(fixture)
-    adapters = make_adapters(apps=apps, host=host, executor=executor)
-    for app, ad in adapters.items():
-        h = ad.health()
+    adapters = make_task_adapters(apps=apps, host=host)
+    envs = make_evaluation_environments(apps=apps, host=host)
+    for app, env in envs.items():
+        h = env.health()
         if h.get("status") != "ok":
             logger.error(f"{app} not healthy: {h}")
             sys.exit(2)
     sample_records = []
     for i in range(samples):
-        s = run_one_sample(fixture, adapters, model=model, temperature=None,
-                           sample_i=i, mock=mock, cost_model=cost_model)
+        s = run_one_sample(fixture, adapters, envs=envs, model=model,
+                           temperature=None, sample_i=i, mock=mock,
+                           cost_model=cost_model)
         sample_records.append(s)
         logger.info(f"[{task_id}] sample {i+1}: score={s['round_trip']['score']} "
                     f"binding_f1={s['binding_accuracy']['f1']} "
@@ -129,8 +137,6 @@ def main(argv=None):
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--mock", action="store_true",
                         help="GT-shaped binding (no API model) — structure validation")
-    parser.add_argument("--execution-mode", choices=["api", "gui_agent"],
-                        default="api", help="api (default, structure) or gui_agent (§12.16)")
     parser.add_argument("--genui", action="store_true",
                         help="compute GenUI surface semantic sim (optional)")
     parser.add_argument("--out", default=None)
@@ -143,20 +149,21 @@ def main(argv=None):
         logger.error("--task-pair must be 'StackA,StackB'")
         sys.exit(2)
     cost_model = CostModel()
-    if args.execution_mode == "gui_agent":
-        from taskvm.execution.gui_executor import get_executor
-        get_executor().cost_model = cost_model
+    # Agent B (substrate isolation): API write executor deleted — GUI-only runtime.
+    # The GUI executor is wired unconditionally (cost attributed honestly).
+    from taskvm.execution.gui_executor import get_executor
+    get_executor().cost_model = cost_model
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     logger.info(f"\n=== Stack A: {pair[0]} ===")
     a = run_stack(pair[0], samples=args.samples, model=args.model, mock=args.mock,
-                  host=args.host, executor=args.execution_mode, cost_model=cost_model)
+                  host=args.host, cost_model=cost_model)
     logger.info(f"[Stack A] binding_f1={a['binding_f1_mean']} round_trip={a['round_trip_mean']} "
                 f"apps={a['apps_written']} ops={a['operators']}")
 
     logger.info(f"\n=== Stack B: {pair[1]} ===")
     b = run_stack(pair[1], samples=args.samples, model=args.model, mock=args.mock,
-                  host=args.host, executor=args.execution_mode, cost_model=cost_model)
+                  host=args.host, cost_model=cost_model)
     logger.info(f"[Stack B] binding_f1={b['binding_f1_mean']} round_trip={b['round_trip_mean']} "
                 f"apps={b['apps_written']} ops={b['operators']}")
 
@@ -185,7 +192,7 @@ def main(argv=None):
     report = {
         "ts": ts, "test": "substrate_invariance_killtest",
         "model": args.model or "gpt-5.6-sol", "mock": args.mock,
-        "execution_mode": args.execution_mode,
+        "execution_mode": "gui_only",
         "task_pair": {"stack_a": pair[0], "stack_b": pair[1]},
         "stack_a": a, "stack_b": b,
         "genui_surface_semantic_sim": genui,
@@ -197,7 +204,7 @@ def main(argv=None):
         "SUBSTRATE_INVARIANCE_PASS": substrate_pass,
         "honest_framing": (
             "mock mode: binding_f1=1.0 + round_trip=1.0 on both stacks (GT binding, "
-            "api path) → diff 0 → PASS. This validates the killtest STRUCTURE + the "
+            "GUI path) → diff 0 → PASS. This validates the killtest STRUCTURE + the "
             "trajectory_differs check (calendar vs outlook_cal apps_written). It does "
             "NOT validate model substrate-independence (that needs --mock off + real "
             "compiler). For the paper's Table 1 row, run WITHOUT --mock, --samples 3."

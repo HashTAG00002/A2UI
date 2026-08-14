@@ -61,11 +61,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import copy
+import hashlib
 import json
 import logging
 import os
 import threading
-from typing import Any
+import time
+from typing import Any, Awaitable, Callable
 
 from aiohttp import web
 
@@ -83,11 +85,21 @@ class MobileGymBridge:
     """Holds one MobileGymEnv + per-sid live-state cache, served by aiohttp."""
 
     def __init__(self, sim_url: str, headless: bool = True,
-                 screenshot_dir: str | None = None):
+                 screenshot_dir: str | None = None,
+                 cua: "CuaLoopModule | None" = None):
         self.sim_url = sim_url
         self.headless = headless
         self.screenshot_dir = screenshot_dir    # E9.4/task-3: auto step shots
         self._shot_counter = 0                  # monotonic (Date.now banned)
+        # ── Agent B (substrate isolation): the CUA loops are INJECTED, never
+        # imported. The old ``from taskvm.execution.gui_executor_async import
+        # gui_write_async`` was a substrate→upper-layer reverse dependency
+        # (architecture-gate KNOWN DEBT, now repaid). ``cua`` is any object
+        # exposing ``gui_write_async`` / ``gui_act_async`` — e.g. the
+        # ``taskvm.execution.gui_executor_async`` module, passed at PROCESS
+        # ASSEMBLY time via ``--cua-loop``. Without it the mutate routes
+        # below answer 501 (honest unavailability — no fallback).
+        self.cua = cua
         self.env = None                      # MobileGymEnv, built in start()
         self._loop: asyncio.AbstractEventLoop | None = None
         # per-sid "live" snapshot = the full {os, apps} state currently
@@ -96,6 +108,7 @@ class MobileGymBridge:
         self._sid_live: dict[str, dict] = {}
         self._active_sid: str | None = None
         self._lock = asyncio.Lock()
+        self._revision = 0                    # port Observation revision counter
 
     # ── env lifecycle ────────────────────────────────────────────────────────
     async def start_env(self) -> None:
@@ -154,6 +167,76 @@ class MobileGymBridge:
     async def aclose(self) -> None:
         if self.env is not None:
             await self.env.close()
+
+    # ── L1 primitive routes (Agent B): observe / act over REAL gestures ────
+    # These back the ``MobileGymSubstrateSession`` port implementation
+    # (substrate/mobilegym/session.py). They carry no operator semantics,
+    # no entity ids, no store contents — the runtime's CUA loop composes
+    # them exactly like it composes WebSubstrateSession gestures.
+    async def observe(self, sid: str) -> dict:
+        """Screenshot + scrubbed visible text + visible-structure
+        fingerprint of the live sim page (zero-exposure: only what a real
+        user can see on the rendered screen)."""
+        await self._activate(sid)
+        page = self.env.page
+        png = await page.screenshot(type="png")
+        import base64
+        data_url = "data:image/png;base64," + base64.b64encode(png).decode()
+        visible_text = await page.evaluate(
+            "() => (document.body && document.body.innerText || '')"
+            ".slice(0, 8000)")
+        digest = await page.evaluate(
+            "() => { const walk = (n, d) => { if (!n || d > 18) return ''; "
+            "let s = ''; for (const c of n.children || []) { "
+            "s += c.tagName + '(' + ((c.innerText || '').trim()"
+            ".slice(0, 24)) + ')' + walk(c, d + 1); } return s; }; "
+            "return walk(document.body, 0).slice(0, 4000); }")
+        fingerprint = hashlib.sha1(digest.encode("utf-8")).hexdigest()[:16]
+        self._revision += 1
+        return {"sid": sid, "revision": self._revision,
+                "screenshot": data_url, "visible_text": visible_text,
+                "fingerprint": fingerprint, "timestamp": time.time()}
+
+    async def act_primitive(self, sid: str, action: dict) -> dict:
+        """One REAL gesture on the live sim (tap/type/swipe/key/open). Uses
+        MobileGym's own ``env.step(Action...)`` norm_0_1000 calibration —
+        identical pipeline to the grounding loop's gestures."""
+        from bench_env.env.base import Action, ActionType
+        await self._activate(sid)
+        kind = action.get("kind")
+        coord = action.get("coordinate") or [500, 500]
+        if kind in ("click", "tap"):
+            await self.env.step(Action.click([float(coord[0]), float(coord[1])]))
+            return {"status": "ok", "detail": f"tap({coord[0]:.0f},{coord[1]:.0f})"}
+        if kind == "type":
+            await self.env.step(Action.type_text(str(action.get("text") or "")))
+            return {"status": "ok", "detail": "type"}
+        if kind == "key":
+            key = str(action.get("key") or "Enter").lower()
+            amap = {"enter": ActionType.ENTER, "back": ActionType.BACK,
+                    "home": ActionType.HOME}
+            if key not in amap:
+                return {"status": "failed", "detail": f"unsupported key {key!r}"}
+            await self.env.step(Action(amap[key], {}))
+            return {"status": "ok", "detail": f"key({key})"}
+        if kind == "scroll":
+            d = str(action.get("direction") or "down")
+            mag = int(action.get("magnitude") or 400)
+            dy = -mag if d == "up" else mag
+            await self.env.step(Action.swipe([500, 500], [500, 500 + dy]))
+            return {"status": "ok", "detail": f"scroll({d})"}
+        if kind == "wait":
+            await asyncio.sleep((action.get("duration_ms") or 1000) / 1000.0)
+            return {"status": "ok", "detail": "wait"}
+        if kind == "open":
+            target = str(action.get("target") or "")
+            known = [a for a in APPS if a == target]
+            if not known:
+                return {"status": "failed",
+                        "detail": f"unknown app {target!r}"}
+            await self.env.open_app(target, wait_stable=True)
+            return {"status": "ok", "detail": f"open({target})"}
+        return {"status": "failed", "detail": f"unsupported kind {kind!r}"}
 
     # ── sid switching (session context, NOT write/rollback) ─────────────────
     async def _activate(self, sid: str) -> None:
@@ -417,6 +500,18 @@ class MobileGymBridge:
             if operator != "send_message":
                 raise web.HTTPBadRequest(
                     text=f"wechat operator must be send_message, got {operator}")
+            if self.cua is None:
+                # Agent B: honest unavailability — the L2 CUA loop is not
+                # installed in this bridge process. NO fallback (neither a
+                # hardcoded gesture sequence NOR a set_state backdoor).
+                raise web.HTTPNotImplemented(text=(
+                    "wechat send_message requires a CUA loop; this bridge was "
+                    "started without --cua-loop. Start it with e.g. "
+                    "--cua-loop taskvm.execution.gui_executor_async, or drive "
+                    "the L1 observe/act port (substrate/mobilegym/session.py) "
+                    "from the runtime."))
+            gui_write_async = self.cua.gui_write_async
+            GuiExecutorFailure = self.cua.GuiExecutorFailure
             # ── rollback path: value is "msg:<id>" from a prior send_message ──
             # Task3 (E10 rework): the rollback NO LONGER hardcodes "wechat has
             # no delete UI → 409". It calls gui_write_async(undo=True) — a REAL
@@ -428,8 +523,6 @@ class MobileGymBridge:
             # pre-judgment. The old hardcoded 409 is replaced by model-driven
             # discovery of the same conclusion.
             if isinstance(value, str) and value.startswith("msg:"):
-                from taskvm.execution.gui_executor_async import (gui_write_async,
-                                                                 GuiExecutorFailure)
                 await self._screenshot("undo_attempt_gui_executor")
                 try:
                     trace = await gui_write_async(
@@ -471,8 +564,8 @@ class MobileGymBridge:
             # chat page + decides how to send the message using the page's UI
             # (tap composer → type → tap send / press enter). NOT a hardcoded
             # click sequence. ──
-            from taskvm.execution.gui_executor_async import (gui_write_async,
-                                                             GuiExecutorFailure)
+            # (task3 — real grounding loop; the model observes the chat page
+            # and decides how to send using the page's UI.)
             trace = await gui_write_async(
                 env=self.env, page=self.env.page, sid=sid,
                 chat_id=eid, text=str(value), undo=False,
@@ -621,8 +714,12 @@ class MobileGymBridge:
                         "post_id": post_id, "operator": operator}
             instruction = instruction_override
 
-            from taskvm.execution.gui_executor_async import (
-                gui_act_async, GuiExecutorFailure)
+            if self.cua is None:
+                raise web.HTTPNotImplemented(text=(
+                    "x mutate requires a CUA loop; this bridge was started "
+                    "without --cua-loop (no fallback, no set_state backdoor)."))
+            gui_act_async = self.cua.gui_act_async
+            GuiExecutorFailure = self.cua.GuiExecutorFailure
             # X app is already open + the timeline readiness poll above
             # passed, so navigate=None / wait_ready=None — the grounding loop
             # starts immediately on the current timeline view (screenshot →
@@ -837,6 +934,16 @@ def build_app(bridge: MobileGymBridge) -> web.Application:
         resource = request.match_info["resource"]
         return web.json_response(await bridge.read_resource(sid, resource))
 
+    # ── L1 primitive routes (Agent B): back the SubstrateSession port ─────
+    async def api_observe(request):
+        sid = request.match_info["sid"]
+        return web.json_response(await bridge.observe(sid))
+
+    async def api_act(request):
+        sid = request.match_info["sid"]
+        action = await request.json()
+        return web.json_response(await bridge.act_primitive(sid, action))
+
     async def api_wechat_mutate(request):
         sid = request.match_info["sid"]
         eid = request.match_info["eid"]
@@ -863,6 +970,8 @@ def build_app(bridge: MobileGymBridge) -> web.Application:
     app.router.add_get("/api/session_state/{sid}", api_session_state)
     app.router.add_get("/api/x_state/{sid}", api_x_state)
     app.router.add_get("/api/{resource}/{sid}", api_resource)
+    app.router.add_get("/api/observe/{sid}", api_observe)
+    app.router.add_post("/api/act/{sid}", api_act)
     app.router.add_post("/api/wechat/{sid}/{eid}", api_wechat_mutate)
     app.router.add_post("/api/x/{sid}/{eid}", api_x_mutate)
     return app
@@ -883,18 +992,48 @@ def main(argv=None):
                              "(default eval_results/mobilegym_visual_<ts>/). "
                              "Pass '' to disable. The '我现在啥也看不见，你要录下来' "
                              "deliverable — works headless.")
+    parser.add_argument("--cua-loop", default=None,
+                        help="dotted module path of the L2 CUA loop module to "
+                             "INJECT (e.g. taskvm.execution.gui_executor_async; "
+                             "must expose gui_write_async / gui_act_async / "
+                             "GuiExecutorFailure). Without it the legacy "
+                             "mutate routes answer 501 — the bridge never "
+                             "imports upper layers itself (substrate "
+                             "isolation, Agent B).")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s")
-    # chromium launch recipe (see memory: taskvm-chromium-launch-recipe)
-    sp = os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__)))))
-    # senseact chromium + .chromelibs lib bucket
-    os.environ.setdefault(
-        "PLAYWRIGHT_BROWSERS_PATH",
-        "/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/conda/envs/senseact/opt/ms-playwright")
-    cl = "/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui/.chromelibs/lib"
-    os.environ["LD_LIBRARY_PATH"] = cl + ":" + os.environ.get("LD_LIBRARY_PATH", "")
+    # chromium env via portable discovery (env vars > CONDA_PREFIX > repo
+    # .chromelibs) — Agent B replaced the hardcoded /mnt/dolphinfs/... path.
+    bp = (os.environ.get("TASKVM_PLAYWRIGHT_BROWSERS_PATH")
+          or (os.path.join(os.environ.get("CONDA_PREFIX", ""), "opt",
+                           "ms-playwright")
+              if os.environ.get("CONDA_PREFIX") else None))
+    if bp and os.path.isdir(bp):
+        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", bp)
+    here = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+    cl = os.environ.get("TASKVM_CHROMELIBS_PATH") or os.path.join(
+        here, ".chromelibs", "lib")
+    if os.path.isdir(cl):
+        os.environ["LD_LIBRARY_PATH"] = cl + ":" + os.environ.get("LD_LIBRARY_PATH", "")
+
+    # CUA loop injection (process ASSEMBLY — the only legitimate way an
+    # upper-layer loop reaches into this bridge process).
+    cua = None
+    if args.cua_loop:
+        import importlib
+        try:
+            cua = importlib.import_module(args.cua_loop)
+            for attr in ("gui_write_async", "gui_act_async",
+                         "GuiExecutorFailure"):
+                if not hasattr(cua, attr):
+                    raise AttributeError(attr)
+        except (ImportError, AttributeError) as e:
+            raise SystemExit(
+                f"--cua-loop {args.cua_loop!r} is not a valid CUA loop "
+                f"module (needs gui_write_async/gui_act_async/"
+                f"GuiExecutorFailure): {e}")
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     shot_dir = args.screenshot_dir
@@ -904,7 +1043,7 @@ def main(argv=None):
         shot_dir = None
 
     bridge = MobileGymBridge(sim_url=args.sim_url, headless=not args.headed,
-                             screenshot_dir=shot_dir)
+                             screenshot_dir=shot_dir, cua=cua)
 
     async def on_startup(app):
         await bridge.start_env()

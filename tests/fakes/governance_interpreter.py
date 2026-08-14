@@ -36,13 +36,13 @@ from typing import Any, TYPE_CHECKING
 from taskvm.execution.patch_compiler import PatchOp, compile_patch
 from taskvm.governance.subgoal import (SubgoalInstruction, WorkflowNode,
                                        WorkflowNodeType, WorkflowPlan)
-from taskvm.governance.user_behavior_driver import UserBehaviorEvent
+from tests.fakes.user_behavior_driver import UserBehaviorEvent
 from taskvm.governance.vm_state import VMStateSnapshot
 from taskvm.governance.checkpoint_graph import CheckpointGraph, CheckpointDirection
 # GG.3: SubgoalGenerator replaces the hardcoded _build_edit_nl if/elif templates.
 # It emits a zero-internal-id, zero-operator-jargon NL from the visible locator
 # (translated control-plane from canonical state).
-from taskvm.governance.subgoal_generator import instruction_for_op
+from tests.fakes.subgoal_generator import instruction_for_op
 from taskvm.governance.translate import entity_id_to_locator
 
 if TYPE_CHECKING:

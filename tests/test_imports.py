@@ -1,50 +1,81 @@
-"""L0 CI test — import & interface integrity (E17 §5.1).
+"""L0 CI test — import & interface integrity (E17 §5.1; migrated E29).
 
-Verifies all old import paths (incl. E17-C re-export shims) still work + the
-new E17-B governance interfaces have correct signatures. No external services
-required (<30s). Run: ``python -m pytest tests/test_imports.py -x -q``.
+Wave-B/C contract version. The legacy E17-C re-export shims
+(harness/state_adapter, harness/mobilegym_bridge, substrate/base) are GONE by
+design (Agent B substrate isolation): the write plane is
+``taskvm.execution.gui_driver.make_task_adapters`` (GUI-only, no executor
+knob); the read/seed/oracle plane is the physically separate
+``WebEvaluationEnvironment`` / ``MobileGymEvaluationEnvironment``. The legacy
+governance event-source stack (ScriptedUserDriver / UISimDriver /
+UserBehaviorDriver / GovernanceInterpreter / SubgoalGenerator) is a TEST
+FIXTURE now and lives in ``tests/fakes/`` — nothing under ``taskvm/`` may
+import it (Agent-C role collapse; docs/contracts/architect.md).
 
-This is the L0 layer of the CI matrix (handoff §5.1): it catches any import
-breakage from the E17-C refactor + any governance interface drift.
+Run: ``python -m pytest tests/test_imports.py -x -q``.
 """
 import pytest
 
 
-# ── E17-C: old import paths must still work (re-export shims) ──────────────
-def test_harness_state_adapter_reexport():
-    """Old path (13 callers) — StateAdapter + make_adapters via the shim."""
-    from taskvm.harness.state_adapter import StateAdapter, make_adapters
-    assert StateAdapter is not None
-    assert callable(make_adapters)
+# ── E29: deleted legacy paths stay deleted (no zombie shims) ───────────────
+def test_harness_state_adapter_deleted():
+    """harness/state_adapter.py is deleted BY DESIGN (Agent B). Importing it
+    must fail — a re-export shim here would resurrect the API-write backdoor."""
+    with pytest.raises(ModuleNotFoundError):
+        import taskvm.harness.state_adapter  # noqa: F401
 
 
-def test_substrate_base_new_path():
-    """New path — the real home for StateAdapter."""
-    from taskvm.substrate.base import StateAdapter, make_adapters, make_adapter
-    assert StateAdapter is not None
-    assert callable(make_adapters)
-    assert callable(make_adapter)
+def test_substrate_base_deleted():
+    """substrate/base.py is deleted BY DESIGN (Agent B)."""
+    with pytest.raises(ModuleNotFoundError):
+        import taskvm.substrate.base  # noqa: F401
 
 
-def test_substrate_base_adapter_classes():
-    """All 7 adapter subclasses moved to substrate.base."""
-    from taskvm.substrate.base import (
-        CalendarAdapter, TaskBoardAdapter, DriveAdapter,
-        MailAdapter, OutlookCalAdapter, WechatAdapter, AlipayAdapter,
-        _ADAPTER_CLASSES, DEFAULT_PORTS,
-    )
-    assert set(_ADAPTER_CLASSES) == {
-        "calendar", "taskboard", "drive", "mail",
-        "outlook_cal", "wechat", "alipay"}
+def test_harness_mobilegym_bridge_deleted():
+    """harness/mobilegym_bridge.py is deleted; the real home is
+    substrate/mobilegym/bridge.py (covered by its own test below)."""
+    with pytest.raises(ModuleNotFoundError):
+        import taskvm.harness.mobilegym_bridge  # noqa: F401
+
+
+# ── Agent B: the two successor planes ───────────────────────────────────────
+def test_gui_driver_write_plane():
+    """make_task_adapters is the GUI-only successor of make_adapters: web apps
+    get GUITaskAdapter, mobilegym apps get MobileGymTaskAdapter, and there is
+    NO executor parameter (the API write path is deleted from the runtime)."""
+    import inspect
+    from taskvm.execution.gui_driver import (make_task_adapters, GUITaskAdapter,
+                                             MobileGymTaskAdapter)
+    assert callable(make_task_adapters)
+    assert "executor" not in inspect.signature(make_task_adapters).parameters, (
+        "the executor knob (API-write backdoor selector) must not exist")
+    a = make_task_adapters(apps=["calendar"], host="localhost")
+    assert isinstance(a["calendar"], GUITaskAdapter)
+    m = make_task_adapters(apps=["wechat"], host="localhost")
+    assert isinstance(m["wechat"], MobileGymTaskAdapter)
+
+
+def test_gui_driver_operator_tables():
+    """The per-app operator tables migrated from legacy substrate/base.py."""
+    from taskvm.execution.gui_driver import _OP_FIELD, _ENTITY_KIND, DEFAULT_PORTS
+    assert set(_OP_FIELD) == {"calendar", "taskboard", "drive", "mail",
+                              "outlook_cal"}
+    assert _OP_FIELD["taskboard"]["set_assignee"] == "assignee"
     assert DEFAULT_PORTS["wechat"] == 3019
+    assert _ENTITY_KIND["calendar"] == "event"
 
 
-def test_harness_mobilegym_bridge_reexport():
-    """Old path — MobileGymBridge + main via the shim."""
-    from taskvm.harness.mobilegym_bridge import MobileGymBridge, main, build_app
-    assert MobileGymBridge is not None
-    assert callable(main)
-    assert callable(build_app)
+def test_evaluation_environments_read_plane():
+    """builtin_web.evaluation owns the 5 exam-room environments (reset/seed/
+    oracle_state); the runtime session grants none of these powers."""
+    from taskvm.substrate.builtin_web.evaluation import (
+        _EVAL_CLASSES, make_evaluation_environment, make_evaluation_environments)
+    assert set(_EVAL_CLASSES) == {"calendar", "taskboard", "drive", "mail",
+                                  "outlook_cal"}
+    env = make_evaluation_environment("calendar", host="localhost")
+    for power in ("reset", "seed", "oracle_state", "session_state", "health"):
+        assert hasattr(env, power), f"evaluation env must expose {power}"
+    assert not hasattr(env, "mutate"), "evaluation env must NOT write"
+    assert make_evaluation_environments([]) == {}
 
 
 def test_substrate_mobilegym_bridge_new_path():
@@ -55,6 +86,22 @@ def test_substrate_mobilegym_bridge_new_path():
     assert callable(main)
 
 
+def test_mobilegym_evaluation_environment():
+    """mobilegym.evaluation: set_state powers are setup-only (exam room), the
+    runtime MobileGymTaskAdapter has no canonical read."""
+    from taskvm.substrate.mobilegym.evaluation import (
+        make_mobilegym_environments, MobileGymEvaluationEnvironment)
+    envs = make_mobilegym_environments(["wechat", "alipay"], sid="t_eval",
+                                       host="localhost")
+    assert set(envs) == {"wechat", "alipay"}
+    assert all(isinstance(e, MobileGymEvaluationEnvironment)
+               for e in envs.values())
+    from taskvm.execution.gui_driver import MobileGymTaskAdapter
+    with pytest.raises(RuntimeError):
+        MobileGymTaskAdapter(app="wechat", bridge_url="http://x").read_canonical("s")
+
+
+# ── stable old paths (unmoved real homes) ───────────────────────────────────
 def test_vm_state_reexport():
     """New vm_state path aliases the old task_state path."""
     from taskvm.vm_state import TaskBinding, EntityBinding, compile_binding
@@ -103,19 +150,47 @@ def test_mobilegym_tasks_registered():
             "expense_and_notify"} <= ids
 
 
-# ── E17-B: governance interfaces ───────────────────────────────────────────
+# ── governance: production surface (Agent C) + fakes (tests/fakes) ─────────
 def test_governance_public_surface():
+    """Production surface = GovernanceService + the six governance events +
+    the staged legacy survivors. The event-source stack is NOT here anymore."""
     from taskvm.governance import (
-        UserBehaviorDriver, UserBehaviorEvent, EVENT_TYPES, VMStateSnapshot,
-        SubgoalInstruction, CheckpointGraph, CheckpointDirection,
-        ScriptedUserDriver, make_scripted_driver, GovernanceInterpreter,
+        GovernanceService, GovernanceOutcome, BootstrapResult,
+        GoalRecomposeFailed, GovernanceEvent,
+        PauseRequested, ResumeRequested, LocalPatchRequested,
+        GoalPatchRequested, RollbackRequested, ConflictResolutionRequested,
+        VMStateSnapshot, SubgoalInstruction, CheckpointGraph,
+        CheckpointDirection,
     )
+    assert GovernanceService is not None
+    # the fake stack must NOT be re-exported from production
+    import taskvm.governance as g
+    for gone in ("UserBehaviorDriver", "UserBehaviorEvent", "EVENT_TYPES",
+                 "ScriptedUserDriver", "make_scripted_driver",
+                 "GovernanceInterpreter", "UISimDriver"):
+        assert not hasattr(g, gone), (
+            f"{gone} must live in tests/fakes, not the production surface")
+
+
+def test_fakes_importable_and_honest():
+    """The whole legacy event-source stack is importable from tests/fakes —
+    as TEST fixtures (nothing under taskvm/ may import them)."""
+    from tests.fakes.user_behavior_driver import (
+        UserBehaviorDriver, UserBehaviorEvent, EVENT_TYPES)
+    from tests.fakes.scripted_driver import (
+        ScriptedUserDriver, make_scripted_driver, _build_minimal_binding)
+    from tests.fakes.governance_interpreter import GovernanceInterpreter
+    from tests.fakes.ui_sim_driver import UISimDriver
+    from tests.fakes.subgoal_generator import generate_subgoal, instruction_for_op
+    assert callable(generate_subgoal) and callable(instruction_for_op)
+    assert issubclass(UISimDriver, UserBehaviorDriver)
     assert "edit_field" in EVENT_TYPES
     assert "rollback_to" in EVENT_TYPES
+    assert "loop_field" in EVENT_TYPES
 
 
 def test_user_behavior_event_validates_type():
-    from taskvm.governance import UserBehaviorEvent
+    from tests.fakes.user_behavior_driver import UserBehaviorEvent
     with pytest.raises(ValueError):
         UserBehaviorEvent("bogus_type", {})
     ev = UserBehaviorEvent("edit_field", {"var_id": "x", "new_value": "y"})
@@ -133,7 +208,7 @@ def test_subgoal_instruction_fields():
 
 def test_governance_interpreter_signature():
     import inspect
-    from taskvm.governance import GovernanceInterpreter
+    from tests.fakes.governance_interpreter import GovernanceInterpreter
     sig = inspect.signature(GovernanceInterpreter.interpret)
     params = set(sig.parameters)
     assert {"event", "vm_state"} <= params
@@ -153,14 +228,14 @@ def test_bridge_mutate_x_signature():
 
 # ── E17-B: scripted driver dry-run (mock pipeline, no model) ───────────────
 def test_scripted_driver_dry_run_release_reschedule():
-    """L1 mock pipeline: ScriptedUserDriver + GovernanceInterpreter produce
-    subgoals for a builtin task (no model, no MobileGym)."""
-    from taskvm.governance import ScriptedUserDriver, GovernanceInterpreter, VMStateSnapshot
-    from taskvm.governance.scripted_driver import make_scripted_driver
+    """L1 mock pipeline (fakes): ScriptedUserDriver + GovernanceInterpreter
+    produce subgoals for a builtin task (no model, no MobileGym)."""
+    from tests.fakes.scripted_driver import (
+        make_scripted_driver, _build_minimal_binding)
+    from tests.fakes.governance_interpreter import GovernanceInterpreter
+    from taskvm.governance.vm_state import VMStateSnapshot
     from taskvm.execution.rollback import RollbackLog
     driver = make_scripted_driver("release_reschedule")
-    # minimal binding from the fixture (no compiler call)
-    from taskvm.governance.scripted_driver import _build_minimal_binding
     binding = _build_minimal_binding(driver.task)
     vm_state = VMStateSnapshot(
         sid="t", binding=binding, adapters={}, rollback_log=RollbackLog(),
@@ -229,7 +304,7 @@ def test_four_step_arc_apps_for_launch_full():
     from taskvm.benchmark.fixtures import get_task
     apps = _apps_for(get_task("launch_full"))
     assert apps == ["calendar", "taskboard", "drive", "mail"], (
-        f"launch_full should need 4 apps in order; got {apps}")
+        f"launch_full should need 4 apps in order; got: {apps}")
 
 
 # ── EE.4: substrate_invariance killtest ─────────────────────────────────────
@@ -255,7 +330,7 @@ def test_reconciliation_killtest_importable():
     assert len(SCENARIOS) == 3
     opts = {s["option"] for s in SCENARIOS}
     assert opts == {"accept_underlying", "keep_projected", "merge"}, (
-        f"3 merge strategies must be covered; got {opts}")
+        f"3 merge strategies must be covered; got: {opts}")
     assert callable(run_scenario) and callable(main)
 
 
@@ -363,15 +438,16 @@ def test_compiler_vision_signature():
         os.remove(p)
 
 
-# ── FF.2: UISimDriver + full-loop killtest ───────────────────────────────────
+# ── FF.2: UISimDriver + full-loop killtest (fakes + GUI-only writes) ────────
 def test_ui_sim_driver_importable():
-    """UISimDriver is importable from the governance package + is a
-    UserBehaviorDriver + parses rw-field forms (FF.2 §3.1)."""
-    from taskvm.governance import UISimDriver, UserBehaviorDriver
+    """UISimDriver is a FAKE now (tests/fakes) + is a UserBehaviorDriver +
+    parses rw-field forms (FF.2 §3.1)."""
+    from tests.fakes.ui_sim_driver import UISimDriver
+    from tests.fakes.user_behavior_driver import UserBehaviorDriver
     assert issubclass(UISimDriver, UserBehaviorDriver)
-    # form parser: both the f-string rw-field form + the GenUI genui-field form
+    # form parser: both the f-string rw-field form & the GenUI genui-field form
     # carry name="var_id" + name="new_value" → both parse to the same {var_id}.
-    from taskvm.governance.ui_sim_driver import _parse_edit_forms
+    from tests.fakes.ui_sim_driver import _parse_edit_forms
     html = ('<form class="rw-field" method="post" action="edit">'
             '<input type="hidden" name="var_id" value="release_date">'
             '<input type="text" name="new_value" value="2026-08-14">'
@@ -385,34 +461,24 @@ def test_ui_sim_driver_importable():
 
 
 def test_full_loop_killtest_importable():
-    """run_full_loop_killtest importable + run_one_sample + main callable +
-    a 1-sample api-mode run on release_reschedule passes the full loop
-    (ui_parse_ok + form_submit_ok + round_trip≥0.85 + neg≤0.3). FF.2 §11."""
+    """run_full_loop_killtest importable + run_one_sample + main callable.
+
+    E29 honest note: the FF.2 api-mode 1-sample acceptance run is GONE — the
+    API write executor is deleted from the runtime (Agent B). The full loop
+    now only runs in GUI mode (real gestures; needs model + browser + apps
+    online), which is an operator-invoked evaluation, not an L0 CI assert."""
     from taskvm.evaluation.run_full_loop_killtest import (
         run_one_sample, run_neg_control, summarize, main)
     for fn in (run_one_sample, run_neg_control, summarize, main):
         assert callable(fn)
-    # 1-sample api-mode acceptance (FF.2 §11): the apps must be online.
-    from taskvm.benchmark.fixtures import get_task
-    fixture = get_task("release_reschedule")
-    s = run_one_sample(fixture, execution_mode="api", sample_i=0)
-    assert s["ui_parse_ok"], f"ui_parse failed: {s}"
-    assert s["form_submit_ok"], f"form_submit failed: {s}"
-    assert s["round_trip_score"] >= 0.85, f"round_trip too low: {s['round_trip_score']}"
-    assert s["non_interference_passed"]
-    neg = run_neg_control(fixture, execution_mode="api")
-    assert neg["passed"], f"neg-control failed (verifier dishonest?): {neg}"
-    assert neg["round_trip_score"] <= 0.3
-    sm = summarize(fixture, [s], neg)
-    assert sm["full_loop_pass"], f"full_loop_pass False: {sm}"
 
 
-# ── FF.3: milestone suggestion (LLM at seed time + adopt_milestone route) ────
+# ── FF.3: milestone suggestion (Agent-C role collapse contract) ─────────────
 def test_suggest_milestones_wiring_and_degrade():
-    """FF.3 §4: _suggest_milestones is callable, normalizes the LLM output to
-    {id,name,description}, AND graceful-degrades to [] on any failure (429/
-    timeout/parse). milestone_suggest_html renders the 采纳 button + adopted
-    ✓ state. The adopt_milestone route is registered."""
+    """FF.3 → Agent-C contract: the seed-time Milestone Suggester LLM call is
+    DELETED (milestones come from the one Task Architect call, wired by Agent
+    D/E). What remains real: the session fields, the adopt_milestone route,
+    and the milestone_suggest_html renderer (采纳 button + adopted ✓ state)."""
     import taskvm.workspace_ui.server as s
     from taskvm.workspace_ui.editable_components import milestone_suggest_html
     # 1. fields on WorkspaceSession
@@ -421,25 +487,11 @@ def test_suggest_milestones_wiring_and_degrade():
     # 2. route registered
     assert any(r.rule.endswith("/<sid>/adopt_milestone")
                for r in s.app.url_map.iter_rules())
-    # 3. graceful degrade: monkeypatch complete_json to raise → []
-    from taskvm.benchmark import model_client
-    orig = model_client.complete_json
-    model_client.complete_json = lambda *a, **k: (_ for _ in ()).throw(
-        RuntimeError("simulated 429"))
-    try:
-        out = s._suggest_milestones("some goal")
-        assert out == [], f"graceful degrade must return [] on failure; got {out}"
-    finally:
-        model_client.complete_json = orig
-    # 4. normal path: LLM returns a list → normalized
-    model_client.complete_json = lambda *a, **k: (
-        [{"id": "C1", "name": "会议定", "description": "会议+任务同步"}], "", None)
-    try:
-        out = s._suggest_milestones("发布准备")
-        assert out and out[0]["id"] == "C1" and out[0]["name"] == "会议定"
-    finally:
-        model_client.complete_json = orig
-    # 5. HTML: 采纳 button + adopted ✓ state
+    # 3. the seed-time LLM suggester is GONE (no silent model call at seed)
+    assert not hasattr(s, "_suggest_milestones"), (
+        "the seed-time milestone LLM call is deleted (Agent-C role collapse); "
+        "milestones come from the one Task Architect call")
+    # 4. HTML: 采纳 button + adopted ✓ state (the renderer stays real)
     html = milestone_suggest_html(
         [{"id": "C1", "name": "会议定", "description": "同步"}], adopted_ids=[])
     assert 'action="adopt_milestone"' in html
@@ -450,10 +502,11 @@ def test_suggest_milestones_wiring_and_degrade():
     assert milestone_suggest_html([], []) == ""   # graceful: no render
 
 
-# ── FF.4: workflow planner (Sequential / Parallel / Loop) ─────────────────────
+# ── FF.4: workflow planner (Sequential / Parallel / Loop) ────────────────────
 def test_workflow_types_importable():
     """FF.4 §5.2: WorkflowNodeType/WorkflowNode/WorkflowPlan importable + the
-    enum has the 3 shapes + to_dict round-trips."""
+    enum has the 3 shapes + to_dict round-trips. EVENT_TYPES lives in the
+    fakes now (rule-based classifier = test fixture)."""
     from taskvm.governance import (WorkflowNodeType, WorkflowNode, WorkflowPlan,
                                     SubgoalInstruction)
     assert {t.value for t in WorkflowNodeType} == {"sequential", "parallel", "loop"}
@@ -463,8 +516,8 @@ def test_workflow_types_importable():
     assert n.to_dict()["node_type"] == "loop" and n.to_dict()["loop_count"] == 3
     p = WorkflowPlan(task_id="t", nodes=[n], workflow_type="loop")
     assert p.to_dict()["workflow_type"] == "loop" and len(p.to_dict()["nodes"]) == 1
-    # EVENT_TYPES has loop_field
-    from taskvm.governance import EVENT_TYPES
+    # EVENT_TYPES (fixture) has loop_field
+    from tests.fakes.user_behavior_driver import EVENT_TYPES
     assert "loop_field" in EVENT_TYPES
     # WorkflowExecutor importable + the loop instantiator substitutes entity_id
     from taskvm.execution.workflow_executor import (WorkflowExecutor,
@@ -479,13 +532,13 @@ def test_workflow_types_importable():
 
 
 def test_classify_workflow_parallel_loop_sequential():
-    """FF.4 §5.3 _classify_workflow rules: loop_field → LOOP; 1 edit_field +
-    bindings ≥2 apps → PARALLEL; else (single-app) → SEQUENTIAL. Build events
-    via ScriptedUserDriver + classify (no live dispatch)."""
-    from taskvm.governance import GovernanceInterpreter, make_scripted_driver, VMStateSnapshot
-    from taskvm.governance.scripted_driver import _build_minimal_binding
+    """FF.4 §5.3 _classify_workflow rules (fixture interpreter now): loop_field
+    → LOOP; 1 edit_field + bindings ≥2 apps → PARALLEL; else → SEQUENTIAL."""
+    from tests.fakes.governance_interpreter import GovernanceInterpreter
+    from tests.fakes.scripted_driver import (make_scripted_driver,
+                                             _build_minimal_binding)
+    from taskvm.governance.vm_state import VMStateSnapshot
     from taskvm.execution.rollback import RollbackLog
-    from taskvm.benchmark.fixtures import get_task
     interp = GovernanceInterpreter(enable_llm_rollback_nl=False)
 
     def classify(task_id):
@@ -552,22 +605,26 @@ def test_workflow_progress_pubsub_and_event():
     s.push_workflow_progress("no-such-sid", ev)
 
 
-# ── FF.6: checkpoint celebration trigger (confetti + milestone_reached) ──────
+# ── FF.6: checkpoint celebration trigger (confetti + milestone_reached) ─────
 def test_checkpoint_celebration_trigger():
-    """FF.6 §7.2: the celebration fires when the /<sid>/checkpoint + /<sid>/
-    adopt_milestone routes return ``milestone_reached: {id, name}`` (the JSON
-    caller path) OR redirect with ``?celebrate=<name>`` (the browser form flow,
-    which timeline.js reads + fires confetti + the badge). This test asserts
-    BOTH response shapes + that the celebrate assets are served (confetti.min.js
-    local, timeline.js defines celebrateCheckpoint)."""
+    """FF.6 §7.2 (Agent B API): seeding goes through the evaluation plane
+    (``oracle`` envs); the write drivers are GUI-only. The celebration fires
+    when the /<sid>/checkpoint + /<sid>/adopt_milestone routes return
+    ``milestone_reached: {id, name}`` (JSON) OR redirect with
+    ``?celebrate=<name>`` (browser form flow). Requires the builtin apps
+    online (same requirement as before — the reads were always HTTP)."""
     import taskvm.workspace_ui.server as s
     from taskvm.benchmark.fixtures import get_task
-    from taskvm.harness.state_adapter import make_adapters
+    from taskvm.execution.gui_driver import make_task_adapters
+    from taskvm.substrate.builtin_web.evaluation import (
+        make_evaluation_environments,
+    )
     JSON_HDR = {"Accept": "application/json"}
     fixture = get_task("release_reschedule")
-    adapters = make_adapters(apps=["calendar", "taskboard"], host="localhost",
-                             executor="api")
-    sess = s.seed_session(fixture, adapters, host="localhost")
+    adapters = make_task_adapters(apps=["calendar", "taskboard"], host="localhost")
+    envs = make_evaluation_environments(["calendar", "taskboard"],
+                                        host="localhost")
+    sess = s.seed_session(fixture, adapters, oracle=envs, host="localhost")
     sid = sess.sid
     client = s.app.test_client()
     # 1. checkpoint JSON → checkpoint_reached + milestone_reached
@@ -597,8 +654,8 @@ def test_checkpoint_celebration_trigger():
     assert "window.confetti" in cj and "particleCount" in cj
     tj = client.get("/static/timeline.js").get_data(as_text=True)
     assert "celebrateCheckpoint" in tj and "confetti(" in tj
-    for ad in adapters.values():
-        ad.reset(sid)
+    for env in envs.values():
+        env.reset(sid)
 
 
 if __name__ == "__main__":

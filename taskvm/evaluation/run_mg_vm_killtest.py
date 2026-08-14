@@ -385,9 +385,15 @@ def run_one_sample(task_id: str, host: str, sample_i: int,
     Returns a record with per-subgoal results + VM-property coverage assessment.
     """
     from taskvm.benchmark.mobilegym_fixtures import get_mobilegym_task
-    from taskvm.governance.scripted_driver import (
+    # Agent-C role collapse: the scripted driver + governance interpreter
+    # were REMOVED from production (taskvm.governance now routes six events
+    # through GovernanceService + taskvm.architect). This killtest preserves
+    # the E17/E18 historical evaluation (dry-run governance pipeline), so it
+    # imports the frozen fakes — an honest dependency on test infrastructure,
+    # not a production path.
+    from tests.fakes.scripted_driver import (
         ScriptedUserDriver, get_task_event_sequence)
-    from taskvm.governance.governance_interpreter import GovernanceInterpreter
+    from tests.fakes.governance_interpreter import GovernanceInterpreter
     from taskvm.governance.vm_state import VMStateSnapshot
     from taskvm.execution.rollback import RollbackLog
     from taskvm.task_state.entity_binding import TaskBinding

@@ -22,7 +22,12 @@ from dataclasses import dataclass, field
 
 from taskvm.execution.patch_compiler import PatchOp
 from taskvm.execution.rollback import RollbackLog, record_from_response
-from taskvm.harness.state_adapter import StateAdapter
+# Agent B (substrate isolation): the dispatch surface is the execution
+# layer's GUI-only task drivers (mutate via REAL gestures). The deleted
+# StateAdapter's API write path no longer exists anywhere in the runtime.
+from taskvm.execution.gui_driver import GUITaskAdapter, MobileGymTaskAdapter
+
+TaskAdapter = GUITaskAdapter | MobileGymTaskAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +62,19 @@ class DispatchReport:
                         for r in self.ops]}
 
 
-def dispatch(ops: list[PatchOp], adapters: dict[str, StateAdapter], sid: str,
+def dispatch(ops: list[PatchOp], adapters: dict[str, TaskAdapter], sid: str,
              *, broken: str | None = None,
              rollback_log: RollbackLog | None = None,
-             saga_id: str | None = None) -> DispatchReport:
-    """Apply each PatchOp to its app via the adapter's ``mutate``.
+             saga_id: str | None = None,
+             oracle: dict | None = None) -> DispatchReport:
+    """Apply each PatchOp to its app via the adapter's ``mutate`` (GUI-only;
+     there is no API executor anymore — Agent B deleted it).
+
+    ``oracle`` (neg-control ONLY): an optional ``{app: EvaluationEnvironment}``
+    dict used exclusively by the ``broken="wrong_target"`` kill-test branch
+    to enumerate alternative entity ids. It is evaluation-plane power,
+    deliberately explicit at the call site, and NEVER consulted on the
+    normal write path.
 
     ``broken``:
       - None: normal dispatch (real state change).
@@ -102,8 +115,16 @@ def dispatch(ops: list[PatchOp], adapters: dict[str, StateAdapter], sid: str,
             logger.info(f"[dispatch] neg-control noop: skipped {op.app}.{op.entity_id}")
             continue
         if broken == "wrong_target":
-            # pick a different entity in the same app to mutate instead
-            canon = ad.read_canonical(sid)
+            # pick a different entity in the same app to mutate instead.
+            # Requires the explicit evaluation-plane oracle (Agent B:
+            # runtime adapters no longer expose canonical reads).
+            if oracle is None or oracle.get(op.app) is None:
+                report.ops.append(DispatchResult(
+                    op, applied=False,
+                    error=("neg-control wrong_target requires the explicit "
+                           "evaluation oracle (dispatch(..., oracle=...))")))
+                continue
+            canon = oracle[op.app].oracle_state(sid)
             ids = [i for i in canon["entities"] if i != op.entity_id]
             if not ids:
                 report.ops.append(DispatchResult(op, applied=False,

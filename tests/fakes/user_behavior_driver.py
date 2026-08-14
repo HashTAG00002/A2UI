@@ -74,9 +74,9 @@ class UserBehaviorDriver(ABC):
     """Abstract source of user-behavior events (L4).
 
     Two implementations:
-      - ``ScriptedUserDriver`` (taskvm.governance.scripted_driver): programmatic,
+      - ``ScriptedUserDriver`` (tests.fakes.scripted_driver): programmatic,
         for killtests/evaluation. Generates events from a CanonicalTaskGraph.
-      - ``HumanWebSocketDriver`` (taskvm.governance.human_driver): real human,
+      - ``HumanWebSocketDriver`` (tests.fakes.human_driver): real human,
         via the workspace_ui WebSocket endpoint.
 
     Both implement the same interface — L3 and below cannot tell them apart.

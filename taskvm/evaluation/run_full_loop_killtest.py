@@ -8,7 +8,8 @@ through the REAL rendered surface (not the scripted shortcut):
         finds the target var_id form, POSTs /<sid>/edit {var_id,new_value,
         format=json}   ← exactly what a human filling the form would do
       → the server's /edit route compiles the patch + dispatches (via
-        sess.adapters — executor=api OR gui_agent) → real app write
+        sess.adapters — GUI-only; Agent B deleted the API executor) → real
+        app write
       → verifier reads canonical (check_round_trip + non_interference)
       → neg-control: a bogus-var_id POST must score ≤0.3
 
@@ -17,10 +18,10 @@ gui_exec_success_rate, round_trip_score, binding_f1, full_loop_pass.
 
 Usage:
     python -m taskvm.evaluation.run_full_loop_killtest \
-        --task release_reschedule --samples 1 --execution-mode api
-    # gui_agent (real browser + model; FF.7 statistical run):
+        --task release_reschedule --samples 1
+    # GUI-only (real browser + model; FF.7 statistical run):
     python -m taskvm.evaluation.run_full_loop_killtest \
-        --task release_reschedule --samples 3 --execution-mode gui_agent
+        --task release_reschedule --samples 3
 
 Honesty: the binding is the GT (mock) binding here (seed_session uses
 _gt_binding) — this killtest tests the UI→edit→dispatch→verify chain, NOT
@@ -40,10 +41,10 @@ from pathlib import Path
 from taskvm.benchmark import model_client
 from taskvm.benchmark.cost_model import CostModel
 from taskvm.benchmark.fixtures import CanonicalTaskGraph, get_task
-from taskvm.governance.governance_interpreter import GovernanceInterpreter
-from taskvm.governance.ui_sim_driver import UISimDriver
-from taskvm.governance.vm_state import VMStateSnapshot
-from taskvm.harness.state_adapter import make_adapters
+from taskvm.execution.gui_driver import make_task_adapters
+from taskvm.substrate.builtin_web.evaluation import (
+    make_evaluation_environments,
+)
 from taskvm.verifier import canonical_state as cs
 from taskvm.verifier.round_trip_checks import check_round_trip
 from taskvm.workspace_ui import server as wserver
@@ -55,33 +56,42 @@ PASS_SCORE = 0.85
 NEG_CONTROL_MAX = 0.3
 
 
-def _build_adapters(fixture: CanonicalTaskGraph, *, host: str,
-                    execution_mode: str) -> dict:
+def _build_planes(fixture: CanonicalTaskGraph, *,
+                  host: str) -> tuple[dict, dict]:
     """FF.1 union pattern: build the adapter set from the task's seed_state ∪
-    binding apps so multi-app tasks (launch_full needs mail) are wired."""
+    binding apps so multi-app tasks (launch_full needs mail) are wired.
+
+    Agent B (substrate isolation): returns TWO planes — the GUI-only write
+    adapters + the evaluation environments (reset/seed/oracle). API write
+    executor deleted — GUI-only runtime."""
     apps = sorted(set(fixture.seed_state.keys())
                   | {b.app for b in fixture.bindings})
     _APP_ORDER = ("calendar", "taskboard", "drive", "mail",
                   "outlook_cal", "wechat", "alipay")
     app_list = [a for a in _APP_ORDER if a in apps]
-    gui_dir = (str(EVAL_DIR / f"full_loop_gui_{time.strftime('%Y%m%d_%H%M%S')}")
-               if execution_mode == "gui_agent" else None)
-    return make_adapters(apps=app_list, host=host, executor=execution_mode,
-                         gui_screenshot_dir=gui_dir)
+    gui_dir = str(EVAL_DIR / f"full_loop_gui_{time.strftime('%Y%m%d_%H%M%S')}")
+    adapters = make_task_adapters(apps=app_list, host=host,
+                                  screenshot_dir=gui_dir)
+    envs = make_evaluation_environments(apps=app_list, host=host)
+    return adapters, envs
 
 
-def _seed(fixture: CanonicalTaskGraph, adapters: dict, *, host: str,
-          use_genui: bool):
+def _seed(fixture: CanonicalTaskGraph, adapters: dict, envs: dict, *,
+          host: str, use_genui: bool):
     """Seed a workspace session in-process (registers in wserver.user_sessions
-    so the Flask test_client can GET/POST it). Returns the session."""
-    sess = wserver.seed_session(fixture, adapters, host=host)
+    so the Flask test_client can GET/POST it). Returns the session.
+
+    Agent B: ``adapters`` = GUI-only write plane; ``envs`` = evaluation
+    plane (seed_session resets+seeds the apps through it via ``oracle=``)."""
+    sess = wserver.seed_session(fixture, adapters, oracle=envs, host=host)
     sess.use_genui = use_genui
     return sess
 
 
-def _round_trip(sid: str, fixture: CanonicalTaskGraph, adapters: dict,
+def _round_trip(sid: str, fixture: CanonicalTaskGraph, envs: dict,
                 pre: dict) -> dict:
-    res = check_round_trip(sid, fixture, adapters, pre)
+    """Agent B: canonical reads go through the evaluation environments."""
+    res = check_round_trip(sid, fixture, envs, pre)
     return {
         "score": res.score,
         "changed_fraction": res.changed.fraction,
@@ -93,41 +103,105 @@ def _round_trip(sid: str, fixture: CanonicalTaskGraph, adapters: dict,
     }
 
 
-def run_one_sample(fixture: CanonicalTaskGraph, *, execution_mode: str = "api",
-                   sample_i: int = 0, host: str = "localhost",
+def _parse_edit_forms(html: str) -> dict[str, dict]:
+    """Parse every ``<form>`` posting to ``/<sid>/edit``: its ``var_id``
+    (hidden input) + whether it carries a ``new_value`` input. The old
+    UISimDriver role is deleted (Agent C role collapse); this
+    deterministic HTML scrape is kept INLINE — no model, no driver loop —
+    so the killtest still measures what a user's browser round-trips
+    through the SAME form contract (``name="var_id"`` +
+    ``name="new_value"``, FF.2 §3.1)."""
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError as e:   # pragma: no cover — bs4 is a hard dep
+        raise RuntimeError("full-loop killtest needs beautifulsoup4") from e
+    soup = BeautifulSoup(html or "", "html.parser")
+    forms: dict[str, dict] = {}
+    for form in soup.find_all("form"):
+        action = form.get("action", "") or ""
+        if "edit" not in action:
+            continue
+        vid_in = form.find("input", {"name": "var_id"})
+        if vid_in is None:
+            continue
+        vid = vid_in.get("value", "") or ""
+        val_in = form.find("input", {"name": "new_value"})
+        forms[vid] = {"var_id": vid,
+                      "has_value_input": val_in is not None,
+                      "action": action}
+    return forms
+
+
+def _edit_round(client, sid: str, fixture: CanonicalTaskGraph) -> dict:
+    """One user edit round: GET page → parse rw-zone forms → POST /edit
+    (format=json). The POST dispatches through the session's GUI write
+    plane (real gestures); the returned metrics mirror FF.2 §3.2."""
+    target_vid = fixture.user_edit.get("var_id", "")
+    new_value = str(fixture.user_edit.get("new", ""))
+    r_get = client.get(f"/{sid}")
+    html = r_get.get_data(as_text=True)
+    forms = _parse_edit_forms(html)
+    ui_parse_ok = target_vid in forms
+    r_post = client.post(f"/{sid}/edit", data={
+        "var_id": target_vid, "new_value": new_value, "format": "json"})
+    data: dict = {}
+    try:
+        data = r_post.get_json() or {}
+    except Exception:
+        data = {}
+    changed_vars = data.get("changed_vars", []) or []
+    n_ops = int(data.get("n_ops", 0))
+    n_applied = int(data.get("n_applied", 0))
+    return {
+        "ui_parse_ok": ui_parse_ok,
+        "form_submit_ok": bool(data.get("ok")) and bool(changed_vars),
+        "found_var_ids": sorted(forms),
+        "changed_vars": changed_vars,
+        "n_ops": n_ops,
+        "n_applied": n_applied,
+        "http_status_edit": getattr(r_post, "status_code", None),
+        "error": None,
+    }
+
+
+def run_one_sample(fixture: CanonicalTaskGraph, *, sample_i: int = 0,
+                   host: str = "localhost",
                    use_genui: bool = False,
                    cost_model: CostModel | None = None) -> dict:
-    """One full-loop sample: seed → UISimDriver GET/parse/POST → verify.
-    Returns the metrics record (§3.2)."""
-    if execution_mode == "gui_agent" and cost_model is not None:
+    """One full-loop sample: seed → render+parse the rw-zone form → POST
+    /edit (dispatch through the GUI write plane) → verify on the evaluation
+    plane. Returns the metrics record (§3.2)."""
+    # Agent B (substrate isolation): GUI-only — wire the executor's cost so
+    # GUI-grounding calls are attributed in the report's cost (honesty: the
+    # FULL token cost, not just compile).
+    if cost_model is not None:
         from taskvm.execution.gui_executor import get_executor
         get_executor().cost_model = cost_model
-    adapters = _build_adapters(fixture, host=host, execution_mode=execution_mode)
-    # health-check (warn, don't crash — caller decides)
-    for app, ad in adapters.items():
-        h = ad.health()
+    adapters, envs = _build_planes(fixture, host=host)
+    # health-check (warn, don't crash — caller decides) — evaluation plane
+    for app, env in envs.items():
+        h = env.health()
         if h.get("status") != "ok":
-            logger.warning(f"{app} not healthy @ {ad.base_url}: {h}")
+            logger.warning(f"{app} not healthy @ {env.base_url}: {h}")
     # seed_session mints a sid + resets + seeds the apps under that sid; the
-    # UISimDriver + verifier + cleanup all use THAT sid (single source of truth).
-    sess = _seed(fixture, adapters, host=host, use_genui=use_genui)
+    # verifier + cleanup all use THAT sid (single source of truth).
+    sess = _seed(fixture, adapters, envs, host=host, use_genui=use_genui)
     sid = sess.sid
     client = wserver.app.test_client()
-    # interpreter (for verification-criterion construction — NOT re-dispatch;
-    # the UISimDriver's POST already dispatched through the server)
-    interp = GovernanceInterpreter(enable_llm_rollback_nl=False)
-    vm_state = VMStateSnapshot(
-        sid=sid, binding=sess.binding, adapters=adapters,
-        rollback_log=sess.rollback_log, checkpoints=fixture.checkpoints)
-    # capture the pre-snapshot BEFORE the UISimDriver POSTs (the POST dispatches)
-    pre = cs.snapshot(adapters, sid)
-    driver = UISimDriver(fixture, client, sid)
-    ev = driver.next_event()
-    subgoals = []
-    if ev is not None:
-        subgoals = interp.interpret(ev, vm_state, task=fixture)
-    rt = _round_trip(sid, fixture, adapters, pre)
-    lr = driver.last_response
+    # capture the pre-snapshot BEFORE the edit POST dispatches (the POST
+    # dispatches through the GUI write plane) — evaluation plane
+    pre = cs.snapshot(envs, sid)
+    # the edit round (GET → parse → POST); a transport error must not
+    # crash the sample — it lands in driver_error and the metrics show it
+    try:
+        lr = _edit_round(client, sid, fixture)
+    except Exception as e:   # noqa: BLE001
+        lr = {"ui_parse_ok": False, "form_submit_ok": False,
+              "found_var_ids": [], "changed_vars": [], "n_ops": 0,
+              "n_applied": 0, "http_status_edit": None,
+              "error": f"{type(e).__name__}: {e}"}
+        logger.warning("[full-loop] edit round failed: %s", e)
+    rt = _round_trip(sid, fixture, envs, pre)
     expected_var_ids = {fixture.user_edit.get("var_id", "")}
     found_var_ids = set(lr.get("found_var_ids", []))
     binding_f1 = (len(expected_var_ids & found_var_ids) / len(expected_var_ids)
@@ -139,15 +213,15 @@ def run_one_sample(fixture: CanonicalTaskGraph, *, execution_mode: str = "api",
     form_submit_ok = bool(lr.get("form_submit_ok"))
     round_trip_score = rt["score"]
     non_interf = bool(rt["non_interference_passed"])
-    # cleanup
-    for ad in adapters.values():
-        ad.reset(sid)
+    # cleanup — evaluation plane (the GUI adapters have no reset)
+    for env in envs.values():
+        env.reset(sid)
     wserver.user_sessions.pop(sid, None)
     return {
         "task_id": fixture.task_id,
         "sample": sample_i,
         "sid": sid,
-        "execution_mode": execution_mode,
+        "execution_mode": "gui_only",
         "use_genui": use_genui,
         "ui_parse_ok": ui_parse_ok,
         "form_submit_ok": form_submit_ok,
@@ -161,24 +235,23 @@ def run_one_sample(fixture: CanonicalTaskGraph, *, execution_mode: str = "api",
         "round_trip_score": round(round_trip_score, 4),
         "non_interference_passed": non_interf,
         "round_trip": rt,
-        "n_subgoals": len(subgoals),
-        "subgoals": [s.to_dict() for s in subgoals],
         "driver_error": lr.get("error"),
         "model": model_client.TASKVM_DEFAULT_MODEL,
     }
 
 
-def run_neg_control(fixture: CanonicalTaskGraph, *, execution_mode: str = "api",
+def run_neg_control(fixture: CanonicalTaskGraph, *,
                     host: str = "localhost", use_genui: bool = False) -> dict:
     """Neg-control: POST /edit with a bogus var_id → compile_patch returns []
     → 0 ops → no state change → round_trip score MUST be ≤0.3 (the verifier
     correctly reports nothing changed). Mirrors run_w1_killtest's
     broken="noop" neg-control but through the REAL server /edit route."""
-    adapters = _build_adapters(fixture, host=host, execution_mode=execution_mode)
-    sess = _seed(fixture, adapters, host=host, use_genui=use_genui)
+    # Agent B (substrate isolation): API write executor deleted — GUI-only runtime.
+    adapters, envs = _build_planes(fixture, host=host)
+    sess = _seed(fixture, adapters, envs, host=host, use_genui=use_genui)
     sid = sess.sid
     client = wserver.app.test_client()
-    pre = cs.snapshot(adapters, sid)
+    pre = cs.snapshot(envs, sid)
     # bogus var_id — NOT in the binding → compile_patch returns [] → 0 ops
     r = client.post(f"/{sid}/edit", data={
         "var_id": "__neg_control_bogus__", "new_value": "x", "format": "json"})
@@ -186,9 +259,9 @@ def run_neg_control(fixture: CanonicalTaskGraph, *, execution_mode: str = "api",
         data = r.get_json() or {}
     except Exception:
         data = {}
-    rt = _round_trip(sid, fixture, adapters, pre)
-    for ad in adapters.values():
-        ad.reset(sid)
+    rt = _round_trip(sid, fixture, envs, pre)
+    for env in envs.values():
+        env.reset(sid)
     wserver.user_sessions.pop(sid, None)
     return {
         "task_id": fixture.task_id,
@@ -235,10 +308,9 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="FF.2 full-loop killtest")
     parser.add_argument("--task", default="release_reschedule")
     parser.add_argument("--samples", type=int, default=1)
-    parser.add_argument("--execution-mode", choices=["api", "gui_agent"],
-                        default="api",
-                        help="'api' (fast, requests.post) or 'gui_agent' "
-                             "(real browser + model — FF.7 statistical run)")
+    # Agent B (substrate isolation): the legacy --execution-mode 'api' option
+    # (fast requests.post writes — the §12.16 backdoor) is DELETED; the
+    # runtime is GUI-only (make_task_adapters has no executor knob).
     parser.add_argument("--genui", action="store_true",
                         help="render the rw-zone via the GenUI decoder (model "
                              "call). Default off (f-string rw-field forms, "
@@ -253,27 +325,27 @@ def main(argv=None) -> int:
     cost_model = CostModel()
     samples = []
     for i in range(args.samples):
-        logger.info(f"--- {args.task} sample {i+1}/{args.samples} ({args.execution_mode}) ---")
-        s = run_one_sample(fixture, execution_mode=args.execution_mode,
-                           sample_i=i, host=args.host, use_genui=args.genui,
-                           cost_model=cost_model)
+        logger.info(f"--- {args.task} sample {i+1}/{args.samples} (gui_only) ---")
+        s = run_one_sample(fixture, sample_i=i, host=args.host,
+                           use_genui=args.genui, cost_model=cost_model)
         logger.info(f"sample {i+1}: ui_parse={s['ui_parse_ok']} "
                     f"form_submit={s['form_submit_ok']} "
                     f"round_trip={s['round_trip_score']} "
                     f"binding_f1={s['binding_f1']} "
                     f"n_ops={s['dispatch_n_ops']} n_applied={s['dispatch_n_applied']}")
         samples.append(s)
-        if args.execution_mode == "gui_agent" and i < args.samples - 1:
-            logger.info("[gui_agent] QPM refill: sleeping 60s before next sample")
+        # GUI executor writes hit the grounding model's QPM limit — between
+        # samples let the quota refill (runtime is GUI-only; applies always).
+        if i < args.samples - 1:
+            logger.info("[gui] QPM refill: sleeping 60s before next sample")
             time.sleep(60)
-    neg = run_neg_control(fixture, execution_mode=args.execution_mode,
-                          host=args.host, use_genui=args.genui)
+    neg = run_neg_control(fixture, host=args.host, use_genui=args.genui)
     logger.info(f"[neg-control] {args.task}: score={neg['round_trip_score']} "
                 f"(≤{NEG_CONTROL_MAX}) → {'PASS' if neg['passed'] else 'FAIL'}")
     sm = summarize(fixture, samples, neg)
     report = {
         "ts": time.strftime("%Y%m%d_%H%M%S"),
-        "task": args.task, "execution_mode": args.execution_mode,
+        "task": args.task, "execution_mode": "gui_only",
         "use_genui": args.genui, "n_samples": args.samples,
         "model": model_client.TASKVM_DEFAULT_MODEL,
         "cost": cost_model.summary(),

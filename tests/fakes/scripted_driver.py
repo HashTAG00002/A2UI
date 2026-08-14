@@ -27,7 +27,7 @@ from typing import Any
 from taskvm.benchmark.fixtures import CanonicalTaskGraph
 from taskvm.benchmark.mobilegym_fixtures import get_mobilegym_task, all_mobilegym_tasks
 from taskvm.benchmark.fixtures import get_task, all_tasks
-from taskvm.governance.user_behavior_driver import UserBehaviorDriver, UserBehaviorEvent
+from tests.fakes.user_behavior_driver import UserBehaviorDriver, UserBehaviorEvent
 from taskvm.governance.vm_state import VMStateSnapshot
 
 
@@ -153,7 +153,7 @@ def make_scripted_driver(task_id: str) -> ScriptedUserDriver:
 
 # ── CLI: --dry-run for mock-mode pipeline verification (handoff §5.3 step 3) ─
 def _dry_run(task_id: str) -> int:
-    from taskvm.governance.governance_interpreter import GovernanceInterpreter
+    from tests.fakes.governance_interpreter import GovernanceInterpreter
     driver = make_scripted_driver(task_id)
     interp = GovernanceInterpreter()
     print(f"=== ScriptedUserDriver dry-run: {task_id} ===")

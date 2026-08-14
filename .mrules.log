@@ -2594,3 +2594,40 @@ Oracle 按 layered_ownership_protocol §4 严审 v5：§4.1-§4.10/§4.13-§4.15
 
 证明：COMPLETE 的判定、desired 恢复、合同 retarget、loop counter、跨结构 observed 五条 rollback 语义现被 187 绿测试锁定；PARTIAL 的 uncompensatable 路径与 pending_recompose 等待语义有直接断言。
 没证明：真实 GUI 补偿执行（Agent E runtime 不存在）；verifier 新鲜观察闭环（observed=None 后的填充只在单测层验证）；recompose 后 Agent C 的真实 planner 行为。Kernel contract frozen 的前提是 Oracle 对本轮 diff 的确认。
+
+
+---
+
+## E29 · Wave-B/C 落地：底座隔离 + 角色合并（Agent B + Agent C）
+
+时间：2026-08-14 ~ 2026-08-15。范围：taskvm/substrate、taskvm/architect（新）、taskvm/governance（重写）、taskvm/evaluation、tests/。全量收敛：**210 passed / 2 skipped**（起点 28 failed / 161 passed；2 个 skip 为 taskvm/projection、taskvm/runtime 未来波次占位，非掩盖）。
+
+### 一、交付物（全部在位，tests 锁定）
+
+1. **docs/contracts/architect.md（94 行）+ substrate.md（100 行）**：Architect 合同（§1 一次调用产出完整 TaskArchitecture / §5 各事件类的模型调用计量）与底座读写权责分离合同。
+2. **taskvm/architect/**（7 模块）：observation.py（CompilerObservationView DTO）、compiler.py（State Compiler fast/slow path）、architect.py（TaskArchitect，一次 compose 调用联合产出拓扑+schema+动作合同+desired plane；recompose_future 为 GoalPatch 闭环）、serializer.py（确定性 CUA goal 序列化，替代 SubgoalGenerator）、port.py + http_port.py（ModelPort + ModelCallLedger 计量）、noleak.py（prompt/输出泄漏扫描）。
+3. **taskvm/governance/**：events.py（六类冻结事件）+ service.py（GovernanceService 统一路由：LocalPatch 0 调用 / GoalPatch 恰 1 次 architect 调用 / Rollback 0 调用纯历史驱动 / Pause/Resume/Conflict 0 调用）。旧 governance_interpreter、scripted_driver、ui_sim_driver、user_behavior_driver、human_driver、subgoal_generator 全部迁入 tests/fakes/（生产路径删除，测试引用改指 fakes）。
+4. **tests/architect/test_scenarios.py + tests/governance/test_service.py**：覆盖 bootstrap 双调用、LocalPatch 0 调用确定性 retarget、GoalPatch 1 调用历史逐字携带、GoalPatch 失败诚实 BLOCKED、Rollback LIFO 历史驱动、事件词法规则、Ledger 计量、prompt no-leak。
+
+### 二、本轮关键纠错（先红后绿）
+
+1. **`_closure` 携带未提交 lane 的语义错误（最重要）**：GoalPatch recompose 的历史闭包规则原为"fan-out/loop 容器带全部 children"，把已被 invalidate 的旧 future lane（l2，READY 未提交）强带进新图，其旧目标 qa_deadline=2026-08-18 与新 future writer 的 2026-08-20 冲突，触发 split-brain guard 误报（"multiple final writers with different targets"）。修复：children 只带 committed 成员（领域规则 fan-out ≥1 lane，单 committed lane 仍是合法形状）。教训：**闭包的语义边界必须与状态语义（committed vs invalidated future）对齐，"结构完整性"不能成为携带已作废节点的理由**。
+2. **`_assemble` 缺 exempt_node_ids**：domain.TaskArchitecture 早已提供 frozen-history 豁免（kernel.recompose 安装时用 workflow_store.historical_node_ids() 复验），但 architect 首道组装校验没传——committed 节点的冻结 contract 被错误地卷入 split-brain 检查。修复：exempt_ids=frozenset(historical)，与 kernel 侧同一豁免源。
+3. **测试自身疏漏**：test_scenario_5 漏 land v1 verification 就断言 l1 已提交并被补偿——执行前置条件（v1 未 COMMITTED ⇒ lane 未 READY）没满足。修复：补 v1 验证步骤。教训：写状态机测试时每个断言都要回查前置链。
+4. **级联崩溃修复**：vm_state.py dataclass 字段顺序（默认值字段后跟无默认值字段 → TypeError）、builtin_web/browser.py 括号闭合、architect/observation.py 列表推导 NameError。
+5. **4 个 evaluation killtest 的旧 import 迁移**：run_full_loop_killtest（GovernanceInterpreter/UISimDriver/StateAdapter 残留 + 引用未定义变量 sid/client/execution_mode → 重写为内联编辑轮 GET→parse→POST，确定性 HTML 解析，无模型；neg-control 对齐双 plane）；run_substrate_invariance / run_interaction_compression / run_mg_vm_killtest（make_adapters → make_task_adapters + make_evaluation_environments 双 plane；executor/--execution-mode 参数删除——API 写路径已不存在）。run_mg_vm_killtest 保留 E17/E18 历史评估能力，显式 import tests.fakes 并注明这是对测试设施的诚实依赖、非生产路径。
+
+### 三、验证数字（可复核）
+
+- `pytest tests/`：**210 passed, 2 skipped**（taskvm conda env）。
+- `pytest tests/architect tests/governance tests/architecture`：32 passed, 2 skipped。
+- 2 个 skip 均为 tests/architecture/test_import_boundaries.py:172 的未来波次模块占位（taskvm/projection、taskvm/runtime 不存在），pytest -rs 可见原因。
+
+### 四、证明了什么 / 没证明什么
+
+证明：Agent B/C 的**合同与代码结构**在位且被 210 绿测试锁定——读写双 plane 分离、六事件路由的模型调用计量（LocalPatch 0 / GoalPatch 1 / Rollback 0）、GoalPatch 两阶段封闭 + 历史 verbatim 携带 + 未提交 future 的确定性丢弃、历史豁免与 split-brain 的边界。
+没证明：(1) 真实模型端到端（所有场景测试用 scripted FakeArchitectPort；http_port 未在 CI 打真模型）；(2) GUI 执行器的真实手势闭环（Agent E runtime 未接线，workspace_ui /start 仍诚实失败）；(3) State Compiler 的 slow-path 结构漂移重编译只在单测层验证；(4) run_full_loop_killtest 重写后的 operator 实跑（需模型+浏览器+apps 在线）。
+
+### 五、下一里程碑
+
+Agent D/E：projection/runtime 接线（taskvm/projection、taskvm/runtime 两模块解封），把 GovernanceService.bootstrap 接到 workspace_ui 真实入口；Oracle 评审本轮 diff 后 Kernel contract frozen（E28 前提条件已满足）。

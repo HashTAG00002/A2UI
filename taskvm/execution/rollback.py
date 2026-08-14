@@ -33,7 +33,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from taskvm.harness.state_adapter import StateAdapter
+from taskvm.execution.patch_compiler import PatchOp
+# Agent B (substrate isolation): compensation re-dispatches through the
+# execution layer's GUI-only task drivers (mutate = real gestures). The
+# deleted StateAdapter had an API write path; these drivers do not.
+from taskvm.execution.gui_driver import GUITaskAdapter, MobileGymTaskAdapter
+
+TaskAdapter = GUITaskAdapter | MobileGymTaskAdapter
 
 logger = logging.getLogger(__name__)
 

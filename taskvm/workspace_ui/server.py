@@ -46,7 +46,13 @@ from taskvm.execution.action_dispatcher import dispatch
 from taskvm.execution.patch_compiler import compile_patch
 from taskvm.execution.rollback import RollbackLog, SagaResult
 from taskvm.harness import replay_engine as replay
-from taskvm.harness.state_adapter import StateAdapter, make_adapters
+from taskvm.execution.gui_driver import make_task_adapters
+from taskvm.substrate.builtin_web.evaluation import (
+    make_evaluation_environments,
+)
+from taskvm.substrate.mobilegym.evaluation import (
+    make_mobilegym_environments,
+)
 from taskvm.task_state.entity_binding import TaskBinding
 from taskvm.workspace_ui.editable_components import (
     checkpoint_button_html, conflict_row_html, editable_field_html,
@@ -179,7 +185,14 @@ class WorkspaceSession:
     task_id: str
     goal: str
     binding: TaskBinding
-    adapters: dict[str, StateAdapter]
+    # Agent B (substrate isolation): the WRITE surface — execution-layer
+    # GUI-only task drivers (GUITaskAdapter / MobileGymTaskAdapter). The
+    # API write executor no longer exists anywhere in the runtime.
+    adapters: dict
+    # Agent B: the READ/seed surface — EvaluationEnvironments (reset / seed /
+    # oracle_state). Physically separate objects; the runtime decision chain
+    # only ever sees them through the injected anchor_lookup below.
+    oracle: dict = field(default_factory=dict)
     rollback_log: RollbackLog = field(default_factory=RollbackLog)
     checkpoints: list[dict] = field(default_factory=list)
     last_dispatch: dict | None = None
@@ -317,7 +330,7 @@ _PAGE_TPL = """\
 # screen). Set via ``--sim-url`` at startup (mobilegym demo only).
 SIM_URL: str = ""
 CLI_TASK: str = "doc_handoff"
-CLI_EXECUTOR: str = "gui_agent"
+CLI_EXECUTOR: str = "gui_agent"   # Agent B: legacy knob, inert (GUI-only now)
 
 
 def _genui_rw_zone_html(sess: WorkspaceSession,
@@ -397,7 +410,7 @@ def render_two_zone_html(sess: WorkspaceSession) -> str:
     state after the last edit/undo. W3: detects concurrent-external-change
     conflicts (re-read vs the cached projection) and renders them AMBER with
     merge options — no silent overwrite, no human-block (handoff §5 inv 4-5)."""
-    canonical = canonical_snapshot(sess.adapters, sess.sid)
+    canonical = canonical_snapshot(sess.oracle, sess.sid)
     # GG: per-app {entity_id: row} for the renderers to translate entity_id →
     # visible title (screen-visible → not a GT leak). Used by readonly_card_html,
     # saga_undo_timeline_html, conflict_row_html (de-leaked in GG.1-4 sweep).
@@ -421,10 +434,10 @@ def render_two_zone_html(sess: WorkspaceSession) -> str:
     # very divergence we're detecting — handoff §5 inv 5: detection from real
     # re-read vs the user's view, not a fresh re-project that hides the gap).
     if sess.last_projection is None:
-        sess.last_projection = resync_values(sess.binding, sess.adapters, sess.sid)
+        sess.last_projection = resync_values(sess.binding, sess.oracle, sess.sid)
     projected = sess.last_projection
     updated_proj, recon = resync_with_conflicts(
-        sess.binding, projected, sess.adapters, sess.sid)
+        sess.binding, projected, sess.oracle, sess.sid)
     sess.last_conflicts = recon.conflicts
     # amber conflict cards rendered ABOVE the read-only app cards (visible, not
     # silently overwritten). Clean fields re-projected normally.
@@ -469,10 +482,10 @@ def render_two_zone_html(sess: WorkspaceSession) -> str:
     if sess.last_undo:
         u = sess.last_undo
         # E10 rework: compensation now goes through the GUI executor (real
-        # browser gestures) when the adapter is in gui_agent mode — NOT an API
-        # call. The honest one-liner reflects this.
-        via = "GUI gesture" if any(getattr(a, "use_gui_executor", False)
-                                   for a in sess.adapters.values()) else "app API"
+        # browser gestures). Agent B (substrate isolation): the GUI gesture
+        # is the ONLY write path — the API executor is deleted, so the honest
+        # one-liner never has an "api" branch to report.
+        via = "GUI gesture"
         notice_html += (f'<div class="notice undo">undid {u.get("app")}.'
                         f'{u.get("entity_id")}.{u.get("field")}: '
                         f'{u.get("after")} → {u.get("before")} (compensation via {via}).</div>')
@@ -504,59 +517,12 @@ def render_two_zone_html(sess: WorkspaceSession) -> str:
         workflow_html=workflow_html)
 
 
-def _suggest_milestones(goal: str, n: int = 3) -> list[dict]:
-    """FF.3 §4.1: call the LLM ONCE at seed time to suggest N governance
-    milestones for the task goal. Returns a list of {id, name, description}.
-    Honest degrade: ANY failure (429/timeout/parse) → [] (the rw-zone simply
-    doesn't render the suggestion block; the session works normally).
-
-    Deviation from §4.1's ``temperature=0.3``: gpt-5.6-sol (the default model,
-    大纲附录 B.2) is a reasoning model that rejects non-default temperature
-    (same lesson as W1/EE — memory taskvm-env-and-proxy-gotchas). Passing 0.3
-    would 400 → graceful-degrade to [] every time. We pass ``temperature=None``
-    (the reasoning-model-safe default) so the suggestion actually returns. The
-    prompt + repair_retries=2 are otherwise exactly §4.1."""
-    from taskvm.benchmark.model_client import complete_json
-    system = (
-        "你是 TaskVM 的 governance 规划助手。给定一个跨多个应用的任务目标，"
-        "建议 2-3 个有意义的里程碑 checkpoint，每个 checkpoint 代表任务推进到某个"
-        "可以暂停/回退的中间状态。格式：JSON 数组，每项包含 id(C1/C2/C3)、"
-        "name(简短中文名)、description(一句话描述达到这个 checkpoint 时的状态)。"
-        "不要超过 3 个 checkpoint。不要解释，直接输出 JSON。"
-    )
-    user = f"任务目标：{goal}"
-    try:
-        parsed, raw, _resp = complete_json(
-            system=system, user=user, max_tokens=400, temperature=None,
-            model=None, repair_retries=2)
-    except Exception as e:
-        logger.warning("[suggest_milestones] LLM call failed (%s); "
-                       "graceful-degrading to []", e)
-        return []
-    # complete_json returns the FIRST balanced {...} object as `parsed` (here a
-    # single milestone dict, NOT the array). The model emits a JSON ARRAY of
-    # milestones → parse the raw text directly to get all of them (same pattern
-    # as genui_decoder._parse_jsonl handling a JSONL stream).
-    import json as _json
-    arr = None
-    try:
-        arr = _json.loads(raw) if raw else None
-    except Exception:
-        arr = None
-    if not isinstance(arr, list):
-        arr = parsed if isinstance(parsed, list) else (
-            parsed.get("checkpoints") if (isinstance(parsed, dict)
-                and isinstance(parsed.get("checkpoints"), list)) else None)
-    if not isinstance(arr, list):
-        return []
-    out = []
-    for i, m in enumerate(arr[:n]):
-        if isinstance(m, dict):
-            mid = m.get("id") or f"C{i+1}"
-            out.append({"id": str(mid),
-                        "name": str(m.get("name") or m.get("description") or mid),
-                        "description": str(m.get("description") or "")})
-    return out
+# ── Agent-C role collapse (2026-08-14) ────────────────────────────────────────
+# The FF.3 Milestone Suggester role is DELETED: milestones/checkpoints are
+# produced JOINTLY with the workflow topology and projection schema by ONE
+# Task Architect call (taskvm.architect.TaskArchitect.compose — see
+# docs/contracts/architect.md §1). Until Agent D wires the projection
+# rewrite to the architect path, ``suggested_milestones`` stays empty.
 
 
 # ── mock binding (W2 gate / visual mode) ─────────────────────────────────────
@@ -576,70 +542,72 @@ def _gt_binding(fixture) -> TaskBinding:
     return TaskBinding(task_id=fixture.task_id, variables=list(var_groups.values()))
 
 
-def seed_session(fixture, adapters: dict[str, StateAdapter],
+def _make_anchor_lookup(oracle: dict, sid: str):
+    """Visible-anchor lookup for GG.3 instructions (Agent B): title IS
+    screen-visible, so translating entity→title through the evaluation
+    env is the registered transitional source (Agent C/E replace it with
+    the SurfaceHandle cache from session.observe())."""
+    from taskvm.governance.translate import TITLE_FIELD
+
+    def lookup(app: str, entity_id: str):
+        env = (oracle or {}).get(app)
+        if env is None or not entity_id:
+            return None
+        try:
+            ent = (env.oracle_state(sid).get("entities")
+                   or {}).get(entity_id) or {}
+        except Exception:
+            return None
+        return ent.get(TITLE_FIELD.get(app, "title"))
+    return lookup
+
+
+def seed_session(fixture, adapters: dict, oracle: dict | None = None,
                  host: str = "localhost") -> WorkspaceSession:
     """Create a fresh sid, seed the apps, build the mock binding, register the
-    workspace session. Returns the session."""
+    workspace session. Returns the session.
+
+    Agent B: reset/seed go through the EVALUATION plane (``oracle``);
+    ``adapters`` are the GUI-only write drivers."""
     import time
     sid = f"{fixture.task_id}_ui_{int(time.time() * 1000) % 100000}"
-    for ad in adapters.values():
-        ad.reset(sid)
-    replay.seed_apps(fixture, adapters, sid)
+    oracle = oracle or {}
+    for env in oracle.values():
+        env.reset(sid)
+    replay.seed_apps(fixture, oracle, sid)
     sess = WorkspaceSession(sid=sid, task_id=fixture.task_id, goal=fixture.goal,
-                            binding=_gt_binding(fixture), adapters=adapters)
+                            binding=_gt_binding(fixture), adapters=adapters,
+                            oracle=oracle)
     # FF.1 §2.2 D / FF.6: surface the task's predefined milestones so the
     # /<sid>/checkpoint route can name a celebrate badge (C1/C2/…).
     sess.task_milestones = list(getattr(fixture, "checkpoints", []) or [])
-    # GG.5: build the WorkflowPlan at seed time (deterministic classification —
-    # Sequential/Parallel/Loop — from the task's event sequence via
-    # interpret_as_workflow). The plan drives the autonomous /start execution.
-    # Honest degrade: if plan building fails, workflow_plan stays None (the
-    # session still works for manual /edit; /start will honest-fail).
-    try:
-        from taskvm.governance import (make_scripted_driver, GovernanceInterpreter,
-                                       VMStateSnapshot)
-        from taskvm.governance.scripted_driver import _build_minimal_binding
-        drv = make_scripted_driver(fixture.task_id)
-        binding = _build_minimal_binding(drv.task)
-        vm = VMStateSnapshot(sid=sid, binding=binding, adapters=adapters,
-                             rollback_log=sess.rollback_log,
-                             checkpoints=drv.task.checkpoints)
-        events = []
-        while True:
-            ev = drv.next_event()
-            if ev is None:
-                break
-            events.append(ev)
-        interp = GovernanceInterpreter(enable_llm_rollback_nl=False)
-        sess.workflow_plan = interp.interpret_as_workflow(events, vm, task=drv.task)
-        logger.info(f"[workspace_ui] workflow_plan: type={sess.workflow_plan.workflow_type} "
-                    f"nodes={len(sess.workflow_plan.nodes)}")
-    except Exception as e:
-        logger.warning(f"[workspace_ui] workflow_plan build failed ({e}); "
-                       f"/start will honest-fail")
-        sess.workflow_plan = None
+    # Agent-C role collapse: the fixture-driven scripted-event planner
+    # (make_scripted_driver + GovernanceInterpreter._classify_workflow —
+    # which read task.bindings to guess Sequential/Parallel/Loop) is DELETED
+    # as the production planner. The production path is ONE Task Architect
+    # call (taskvm.architect) wired by the projection/runtime rewrites
+    # (Agents D/E). Until then workflow_plan stays None and /start
+    # HONEST-FAILS instead of executing a scripted answer.
+    sess.workflow_plan = None
     user_sessions[sid] = sess
     logger.info(f"[workspace_ui] seeded sid={sid} task={fixture.task_id}")
     return sess
 
 
-def _get_fixture_and_adapters(task_id: str, host: str = "localhost",
-                              executor: str = "gui_agent"):
-    """Resolve a task_id to (fixture, adapters). MobileGym demo tasks route to
-    the mobilegym fixture + bridge-backed wechat/alipay adapters; core tasks use
-    ``benchmark.fixtures.get_task`` + the core adapters. This keeps the two
-    worlds disjoint: a core kill-test never health-checks the bridge, and the
-    mobilegym demo never touches the calendar/drive apps.
+def _get_fixture_and_adapters(task_id: str, host: str = "localhost"):
+    """Resolve a task_id to (fixture, task_adapters, evaluation_envs).
 
-    EE.1 (§12.16 backdoor fix): ``executor`` defaults to ``gui_agent`` so the
-    demo/server write+rollback path drives a real browser (non-invasive real
-    gestures) instead of ``requests.post`` to the app's internal Flask API.
-    Pass ``executor='api'`` explicitly for the legacy mock/debug path only."""
+    Agent B (substrate isolation): there is no ``executor`` knob anymore —
+    the API write path is deleted; every write goes through real GUI
+    gestures (task drivers). Seeds/oracle go through the physically
+    separate evaluation environments (the exam room)."""
     from taskvm.benchmark.mobilegym_fixtures import MOBILEGYM_TASKS
     if task_id in MOBILEGYM_TASKS:
         from taskvm.benchmark.mobilegym_fixtures import get_mobilegym_task
-        return get_mobilegym_task(task_id), make_adapters(
-            apps=["wechat", "alipay"], host=host, executor=executor)
+        return (get_mobilegym_task(task_id),
+                make_task_adapters(apps=["wechat", "alipay"], host=host),
+                make_mobilegym_environments(["wechat", "alipay"], sid="",
+                                            host=host))
     from taskvm.benchmark.fixtures import get_task
     fixture = get_task(task_id)
     # FF.1 (honest pre-existing-fix): build the adapter set from the TASK's
@@ -652,7 +620,9 @@ def _get_fixture_and_adapters(task_id: str, host: str = "localhost",
     # doc_handoff) the union is unchanged (byte-identical regression).
     apps = sorted(set(fixture.seed_state.keys())
                   | {b.app for b in fixture.bindings})
-    return fixture, make_adapters(apps=apps, host=host, executor=executor)
+    return (fixture,
+            make_task_adapters(apps=apps, host=host),
+            make_evaluation_environments(apps, host=host))
 
 
 # ── routes ───────────────────────────────────────────────────────────────────
@@ -678,9 +648,8 @@ def index_route():
     """GET / auto-seeds a session for the configured --task and redirects.
     Convenience entry point so browsers hitting the root URL get a usable page
     instead of a 404 (the real route is POST /seed → /<sid>)."""
-    fixture, adapters = _get_fixture_and_adapters(
-        CLI_TASK, "localhost", executor=CLI_EXECUTOR)
-    sess = seed_session(fixture, adapters, host="localhost")
+    fixture, adapters, oracle = _get_fixture_and_adapters(CLI_TASK, "localhost")
+    sess = seed_session(fixture, adapters, oracle=oracle, host="localhost")
     return redirect(f"/{sess.sid}")
 
 
@@ -699,14 +668,10 @@ def seed_route():
     data = request.get_json(silent=True) or {}
     task_id = data.get("task_id") or "doc_handoff"
     host = data.get("host", "localhost")
-    executor = data.get("executor", "gui_agent")   # EE.1: default gui_agent
-    suggest = data.get("suggest_milestones", True)
-    fixture, adapters = _get_fixture_and_adapters(task_id, host, executor=executor)
-    sess = seed_session(fixture, adapters, host=host)
-    if suggest:
-        sess.suggested_milestones = _suggest_milestones(fixture.goal)
-        logger.info(f"[workspace_ui] suggested {len(sess.suggested_milestones)} "
-                    f"milestone(s) for sid={sess.sid}")
+    # Agent B: the legacy ``executor`` body field is inert (GUI-only runtime).
+    fixture, adapters, oracle = _get_fixture_and_adapters(task_id, host)
+    sess = seed_session(fixture, adapters, oracle=oracle, host=host)
+    sess.suggested_milestones = []
     if _wants_json():
         return jsonify({"ok": True, "sid": sess.sid, "task_id": sess.task_id,
                         "suggested_milestones": sess.suggested_milestones})
@@ -736,7 +701,7 @@ def readonly_partial(sid: str):
     sess = user_sessions.get(sid)
     if sess is None:
         return ("session not found", 404)
-    canonical = canonical_snapshot(sess.adapters, sess.sid)
+    canonical = canonical_snapshot(sess.oracle, sess.sid)
     canonical_entities = {app: (snap or {}).get("entities") or {}
                           for app, snap in canonical.items()}
     changed_set = set(sess.last_changed) if sess.last_changed else None
@@ -749,7 +714,7 @@ def readonly_partial(sid: str):
     # partial refresh after an SSE conflict-push also AMBER-marks.
     if sess.last_projection is not None:
         _updated, recon = resync_with_conflicts(
-            sess.binding, sess.last_projection, sess.adapters, sess.sid)
+            sess.binding, sess.last_projection, sess.oracle, sess.sid)
         if recon.has_conflicts:
             conflict_html = "".join(
                 conflict_row_html(vid, info.get("label", vid),
@@ -847,7 +812,7 @@ def edit(sid: str):
     sess.last_changed = changed_tuples or None
     # the user's own action reconciles → refresh the projection cache so the next
     # render's Y = the new post-edit state (only EXTERNAL changes then conflict)
-    sess.last_projection = resync_values(sess.binding, sess.adapters, sid)
+    sess.last_projection = resync_values(sess.binding, sess.oracle, sid)
     n_applied = rep_dict.get("n_applied", rep_dict.get("n_applied_ops", 0))
     logger.info(f"[workspace_ui] edit {var_id}={new_value!r} → "
                 f"{n_applied}/{len(ops)} applied")
@@ -877,7 +842,7 @@ def undo_latest(sid: str):
         sess.last_undo_saga = empty
         sess.last_dispatch = None
         sess.last_resolve = None
-        sess.last_projection = resync_values(sess.binding, sess.adapters, sid)
+        sess.last_projection = resync_values(sess.binding, sess.oracle, sid)
         logger.info(f"[workspace_ui] undo (latest): no saga records")
         return redirect(f"/{sid}")
     sres = sess.rollback_log.undo_saga(saga_id, sid, sess.adapters)
@@ -894,7 +859,7 @@ def undo_latest(sid: str):
                                    "partial_failure": sres.partial_failure}}
     sess.last_dispatch = None
     sess.last_resolve = None
-    sess.last_projection = resync_values(sess.binding, sess.adapters, sid)
+    sess.last_projection = resync_values(sess.binding, sess.oracle, sid)
     logger.info(f"[workspace_ui] undo latest saga {saga_id} → "
                 f"{sres.n_reverted}/{sres.n_targets} reverted, "
                 f"partial_failure={sres.partial_failure}")
@@ -923,7 +888,7 @@ def undo(sid: str, app: str):
         sess.last_undo_saga = empty
         sess.last_dispatch = None
         sess.last_resolve = None
-        sess.last_projection = resync_values(sess.binding, sess.adapters, sid)
+        sess.last_projection = resync_values(sess.binding, sess.oracle, sid)
         logger.info(f"[workspace_ui] undo {app}: no saga records for this app")
         return redirect(f"/{sid}")
     sres = sess.rollback_log.undo_saga(saga_id, sid, sess.adapters)
@@ -941,7 +906,7 @@ def undo(sid: str, app: str):
                                    "partial_failure": sres.partial_failure}}
     sess.last_dispatch = None
     sess.last_resolve = None
-    sess.last_projection = resync_values(sess.binding, sess.adapters, sid)
+    sess.last_projection = resync_values(sess.binding, sess.oracle, sid)
     logger.info(f"[workspace_ui] undo saga {saga_id} (via {app}) → "
                 f"{sres.n_reverted}/{sres.n_targets} reverted, "
                 f"partial_failure={sres.partial_failure}")
@@ -959,7 +924,7 @@ def checkpoint(sid: str):
     sess = user_sessions.get(sid)
     if sess is None:
         return ("session not found", 404)
-    snap = canonical_snapshot(sess.adapters, sid)
+    snap = canonical_snapshot(sess.oracle, sid)
     sess.checkpoints.append(snap)
     n = len(sess.checkpoints)
     # name the milestone: map the checkpoint count to the task's predefined
@@ -1003,7 +968,7 @@ def start_workflow(sid: str):
     if sess is None:
         return ("session not found", 404)
     if sess.workflow_plan is None:
-        return jsonify({"ok": False, "error": "no workflow_plan (seed failed to build one)"}), 400
+        return jsonify({"ok": False, "error": "no workflow_plan: the fixture-driven scripted planner was removed (Agent-C role collapse); the production planner is taskvm.architect.TaskArchitect, wired by the projection/runtime rewrites (Agents D/E)"}), 400
     if sess.workflow_thread is not None and sess.workflow_thread.is_alive():
         return jsonify({"ok": False, "error": "workflow already running"}), 409
     sess.paused = False
@@ -1098,6 +1063,7 @@ def rollback_to(sid: str):
     # build a VMStateSnapshot to resolve sagas_after_checkpoint
     from taskvm.governance import VMStateSnapshot
     vm = VMStateSnapshot(sid=sid, binding=sess.binding, adapters=sess.adapters,
+                         anchor_lookup=_make_anchor_lookup(sess.oracle, sid),
                          rollback_log=sess.rollback_log, checkpoints=sess.task_milestones,
                          checkpoint_saga_map=sess.checkpoint_saga_map)
     try:
@@ -1226,9 +1192,9 @@ def poll(sid: str):
                 # 2. the regular conflict check (EE.8 — §0 property 1)
                 try:
                     if sess.last_projection is None:
-                        sess.last_projection = resync_values(sess.binding, sess.adapters, sid)
+                        sess.last_projection = resync_values(sess.binding, sess.oracle, sid)
                     _updated, recon = resync_with_conflicts(
-                        sess.binding, sess.last_projection, sess.adapters, sid)
+                        sess.binding, sess.last_projection, sess.oracle, sid)
                     if recon.has_conflicts:
                         sess.last_conflicts = recon.conflicts
                         yield (f"event: conflict\ndata: "
@@ -1282,7 +1248,7 @@ def resolve(sid: str):
     sess.last_dispatch = None
     sess.last_undo = None
     sess.last_undo_saga = None
-    sess.last_projection = resync_values(sess.binding, sess.adapters, sid)
+    sess.last_projection = resync_values(sess.binding, sess.oracle, sid)
     logger.info(f"[workspace_ui] resolve {var_id} {option} → wrote={result.get('wrote')}")
     return redirect(f"/{sid}")
 

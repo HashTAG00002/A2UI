@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from taskvm.harness.state_adapter import StateAdapter
+from taskvm.substrate import EvaluationEnvironment   # port type only (Agent B)
 from taskvm.task_state.entity_binding import TaskBinding
 
 
@@ -55,17 +55,22 @@ def project_readonly(binding: TaskBinding,
     return out
 
 
-def resync_values(binding: TaskBinding, adapters: dict[str, StateAdapter],
+def resync_values(binding: TaskBinding,
+                  adapters: dict[str, EvaluationEnvironment],
                   sid: str) -> dict[str, dict[str, Any]]:
     """Re-read canonical state from every app and project the read-only zone.
-    This is the re-read-on-action / heartbeat re-sync (W2; no conflict-marking)."""
-    canonical = {name: ad.read_canonical(sid) for name, ad in adapters.items()}
+    This is the re-read-on-action / heartbeat re-sync (W2; no conflict-marking).
+    (Agent B note — registered blocker for Agent D: the production
+    projection should resync from SubstrateSession.observe() (visible
+    observation), not from the evaluation plane. Kept on the evaluation
+    read for behavior continuity in this wave.)"""
+    canonical = {name: ad.oracle_state(sid) for name, ad in adapters.items()}
     return project_readonly(binding, canonical)
 
 
 def resync_with_conflicts(binding: TaskBinding,
                           projected_snapshot: dict[str, dict[str, Any]],
-                          adapters: dict[str, StateAdapter],
+                          adapters: dict[str, EvaluationEnvironment],
                           sid: str) -> tuple[dict[str, dict[str, Any]], "ReconciliationResult"]:
     """Re-read canonical state and detect concurrent-external-change conflicts
     (W3 reconciliation, handoff §5 inv 4-5).
@@ -85,7 +90,7 @@ def resync_with_conflicts(binding: TaskBinding,
     surfaced as affordances the user MAY act on.
     """
     from taskvm.verifier.reconciliation import detect_conflicts
-    fresh_canonical = {name: ad.read_canonical(sid) for name, ad in adapters.items()}
+    fresh_canonical = {name: ad.oracle_state(sid) for name, ad in adapters.items()}
     recon = detect_conflicts(binding, projected_snapshot, fresh_canonical)
     # build the updated projection: clean fields → fresh value; conflicts → keep
     # projected (Y) but tag with the conflict (so the template shows Y + X + merge)
@@ -105,7 +110,7 @@ def resync_with_conflicts(binding: TaskBinding,
     return out, recon
 
 
-def canonical_snapshot(adapters: dict[str, StateAdapter], sid: str) -> dict[str, dict]:
-    """{app: read_canonical(sid)} — the raw canonical snapshot (for checkpointing
+def canonical_snapshot(adapters: dict[str, EvaluationEnvironment], sid: str) -> dict[str, dict]:
+    """{app: oracle_state(sid)} — the raw canonical snapshot (for checkpointing
     / comparing pre vs post)."""
-    return {name: ad.read_canonical(sid) for name, ad in adapters.items()}
+    return {name: ad.oracle_state(sid) for name, ad in adapters.items()}

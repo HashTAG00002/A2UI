@@ -3,7 +3,7 @@
 Runs the same task (release_reschedule) with different grounding backends to
 produce the model-ablation table that defends against the "results only hold on
 gpt-5.6-sol" reviewer attack (handoff EE.6). For each backend (gpt56sol, glm5v):
-  - N samples of release_reschedule via gui_agent executor
+  - N samples of release_reschedule via the GUI executor
   - report binding_f1, round_trip, avg_steps (GUI calls), success_rate
   - output eval_results/model_ablation_<ts>.json (the paper's ablation table source)
 
@@ -26,8 +26,11 @@ from pathlib import Path
 from taskvm.benchmark.cost_model import CostModel
 from taskvm.benchmark.fixtures import get_task
 from taskvm.evaluation.run_w1_killtest import run_one_sample
+from taskvm.execution.gui_driver import make_task_adapters
 from taskvm.execution.grounding_backend import make_grounding_backend
-from taskvm.harness.state_adapter import make_adapters
+from taskvm.substrate.builtin_web.evaluation import (
+    make_evaluation_environments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +46,12 @@ def run_backend(task_id: str, backend_name: str, *, samples: int, host: str,
                   {b.app for b in fixture.bindings})
     gui_shot_dir = str(EVAL_DIR / f"model_ablation_{backend_name}_"
                                   f"{time.strftime('%Y%m%d_%H%M%S')}")
-    adapters = make_adapters(apps=apps, host=host, executor="gui_agent",
-                             gui_screenshot_dir=gui_shot_dir,
-                             grounding_backend=backend_name)
-    for app, ad in adapters.items():
-        h = ad.health()
+    adapters = make_task_adapters(apps=apps, host=host,
+                                  screenshot_dir=gui_shot_dir,
+                                  grounding_backend=backend_name)
+    envs = make_evaluation_environments(apps, host=host)
+    for app, env in envs.items():
+        h = env.health()
         if h.get("status") != "ok":
             logger.error(f"{app} not healthy: {h}")
             sys.exit(2)
@@ -58,8 +62,9 @@ def run_backend(task_id: str, backend_name: str, *, samples: int, host: str,
                  screenshot_dir=gui_shot_dir)
     sample_records = []
     for i in range(samples):
-        s = run_one_sample(fixture, adapters, model=None, temperature=None,
-                           sample_i=i, mock=False, cost_model=cost_model)
+        s = run_one_sample(fixture, adapters, envs, model=None,
+                           temperature=None, sample_i=i, mock=False,
+                           cost_model=cost_model)
         sample_records.append(s)
         logger.info(f"[{backend_name}] sample {i+1}: score={s['round_trip']['score']} "
                     f"binding_f1={s['binding_accuracy']['f1']} "

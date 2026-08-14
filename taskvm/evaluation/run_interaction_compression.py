@@ -37,8 +37,11 @@ from pathlib import Path
 from taskvm.benchmark.fixtures import get_task
 from taskvm.execution.action_dispatcher import dispatch
 from taskvm.execution.patch_compiler import compile_patch
+from taskvm.execution.gui_driver import make_task_adapters
 from taskvm.harness import replay_engine as replay
-from taskvm.harness.state_adapter import make_adapters
+from taskvm.substrate.builtin_web.evaluation import (
+    make_evaluation_environments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,25 +80,30 @@ def _baseline_actions(fixture) -> dict:
                      f"(lower bound — real users take more)"}
 
 
-def run_taskvm_path(fixture, host: str, *, executor: str = "api") -> dict:
+def run_taskvm_path(fixture, host: str) -> dict:
     """Run the TaskVM path: 1 user edit → dispatch → verify fanout. Returns the
-    action count (always 1 user action) + the fanout proof (n_ops dispatched)."""
+    action count (always 1 user action) + the fanout proof (n_ops dispatched).
+
+    Agent B (substrate isolation): writes go through the GUI-only task
+    adapters; reset/seed go through the evaluation environments."""
     apps = sorted(set(fixture.seed_state.keys()) |
                   {b.app for b in fixture.bindings})
-    adapters = make_adapters(apps=apps, host=host, executor=executor)
-    for ad in adapters.values():
-        ad.health()
+    # Agent B (substrate isolation): API write executor deleted — GUI-only runtime.
+    adapters = make_task_adapters(apps=apps, host=host)
+    envs = make_evaluation_environments(apps=apps, host=host)
+    for env in envs.values():
+        env.health()
     sid = f"compress_{fixture.task_id}_{int(time.time()) % 100000}"
-    for ad in adapters.values():
-        ad.reset(sid)
-    replay.seed_apps(fixture, adapters, sid)
+    for env in envs.values():
+        env.reset(sid)
+    replay.seed_apps(fixture, envs, sid)
     tb = _gt_binding(fixture)
     # THE user action: one edit_field event (release_date 8/14→8/18).
     # compile_patch fans this 1 edit into N PatchOps (the VM fanout).
     ops = compile_patch(fixture.user_edit, tb)
     rep = dispatch(ops, adapters, sid, broken=None)
-    for ad in adapters.values():
-        ad.reset(sid)
+    for env in envs.values():
+        env.reset(sid)
     return {"taskvm_user_actions": 1,   # one edit_field event
             "fanout_ops": rep.n_applied,
             "apps_written": sorted({r.op.app for r in rep.ops if r.applied}),
@@ -107,8 +115,6 @@ def main(argv=None):
     parser.add_argument("--task", default="launch_full",
                         help="task to measure (default launch_full = 4-App fanout)")
     parser.add_argument("--host", default="localhost")
-    parser.add_argument("--execution-mode", choices=["api", "gui_agent"],
-                        default="api", help="api (default; structure) or gui_agent")
     parser.add_argument("--out", default=None)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO,
@@ -116,7 +122,7 @@ def main(argv=None):
 
     fixture = get_task(args.task)
     baseline = _baseline_actions(fixture)
-    taskvm = run_taskvm_path(fixture, args.host, executor=args.execution_mode)
+    taskvm = run_taskvm_path(fixture, args.host)
     compression = round(baseline["total"] / taskvm["taskvm_user_actions"], 2)
 
     # the handoff's ≥4x threshold applies to a 4-App task
@@ -124,7 +130,7 @@ def main(argv=None):
     report = {
         "ts": time.strftime("%Y%m%d_%H%M%S"),
         "test": "interaction_compression", "task": args.task,
-        "execution_mode": args.execution_mode,
+        "execution_mode": "gui_only",
         "baseline_actions": baseline,
         "taskvm_actions": taskvm,
         "compression_ratio": compression,

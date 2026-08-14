@@ -12,7 +12,9 @@ state API directly; it reads what ``capture_obs`` captured from the GUI.
 
 **Replay/state consistency assert (load-bearing — protects "live state")**:
 ``assert_obs_matches_state`` verifies the DOM-parsed entity map is field-by-field
-consistent with ``read_canonical(sid)`` (the real session state). Catches the
+consistent with ``oracle_state(sid)`` (the real session state, read through an
+EvaluationEnvironment — Agent B: the evaluation plane owns canonical reads;
+the runtime decision chain never calls it). Catches the
 "chain passes but the compiler is looking at a static image detached from the
 current real session" failure. Runs before every compiler call; fails loudly.
 """
@@ -241,13 +243,15 @@ def load_task(task_id: str) -> CanonicalTaskGraph:
     return get_task(task_id)
 
 
-def seed_apps(fixture: CanonicalTaskGraph, adapters: dict, sid: str) -> None:
-    """Seed each app with the fixture's ``seed_state`` (the visible initial state).
+def seed_apps(fixture: CanonicalTaskGraph, envs: dict, sid: str) -> None:
+    """Seed each app with the fixture's ``seed_state`` (the visible initial state)
+    through the EVALUATION environments (Agent B: seeding is an exam-room
+    power — reset/seed live on the evaluation plane, never the runtime port).
     No canonical GT is sent to the apps — only the visible events/tasks."""
-    for app, ad in adapters.items():
+    for app, ad in envs.items():
         seed = (fixture.seed_state.get(app) or {})
         ad.seed(sid, task_id=fixture.task_id, goal=fixture.goal, seed_state=seed)
-    logger.info(f"[replay] seeded {list(adapters)} for sid={sid} task={fixture.task_id}")
+    logger.info(f"[replay] seeded {list(envs)} for sid={sid} task={fixture.task_id}")
 
 
 def capture_obs(adapters: dict, sid: str, step: int = 0,
@@ -269,10 +273,11 @@ def capture_obs(adapters: dict, sid: str, step: int = 0,
     return obs
 
 
-def assert_obs_matches_state(adapters: dict, sid: str,
+def assert_obs_matches_state(envs: dict, sid: str,
                              obs: dict[str, StepObservation]) -> None:
     """Field-by-field assert: the DOM-parsed entity map (what the compiler sees)
-    must match ``read_canonical(sid)`` (the real session state). Raises
+    must match ``oracle_state(sid)`` (the real session state, via the
+    evaluation environments). Raises
     ``AssertionError`` on mismatch — loudly fails the run (protects "live state").
 
     GG: the DOM is now keyed by **visible title** and canonical by **entity_id**.
@@ -281,8 +286,8 @@ def assert_obs_matches_state(adapters: dict, sid: str,
     is not a GT leak). Title collisions (two entities share a title) are
     reported honestly — the assert fails rather than silently picking one."""
     mismatches: list[str] = []
-    for app, ad in adapters.items():
-        canonical = ad.read_canonical(sid)
+    for app, ad in envs.items():
+        canonical = ad.oracle_state(sid)
         canonical_entities = canonical["entities"]
         dom_entities = parse_dom_entities(obs[app].dom_html)  # {title: {field}}
         # build title→entity_id from canonical (strict: detect collisions)

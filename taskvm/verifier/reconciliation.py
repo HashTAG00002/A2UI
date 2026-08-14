@@ -32,7 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from taskvm.harness.state_adapter import StateAdapter
+from taskvm.substrate import EvaluationEnvironment   # port type only (Agent B)
 from taskvm.task_state.entity_binding import TaskBinding
 
 
@@ -159,12 +159,17 @@ def merge_options(conflict: FieldConflict) -> list[dict]:
 
 def apply_merge_option(conflict: FieldConflict, option: str,
                        resolved_value: Any | None,
-                       adapters: dict[str, StateAdapter], sid: str,
+                       task_adapters: dict, sid: str,
                        binding: TaskBinding) -> dict:
     """Apply ONE merge option the user picked. Finds the executable operator for
     the conflict's binding in ``binding`` (the var_id → operator map the compiler
     already discovered) and re-dispatches. ``accept_underlying`` writes nothing
     (just re-projects). Returns the mutate response or a no-op marker.
+
+    Agent B: ``task_adapters`` is the RUNTIME write plane — GUI-only task
+    drivers (``GUITaskAdapter.mutate`` drives real browser gestures). The
+    evaluation environments are deliberately NOT accepted here: a merge
+    re-dispatch is a runtime write, never an exam-room power.
 
     This is the ONLY place reconciliation writes to an app, and ONLY on explicit
     user choice — never auto, never silent (handoff §5 inv 4)."""
@@ -192,10 +197,10 @@ def apply_merge_option(conflict: FieldConflict, option: str,
     if operator is None:
         return {"option": option, "wrote": False,
                 "error": f"no operator found for {conflict.app}.{conflict.entity_id}.{conflict.field}"}
-    ad = adapters.get(conflict.app)
+    ad = task_adapters.get(conflict.app)
     if ad is None:
         return {"option": option, "wrote": False,
-                "error": f"no adapter for app {conflict.app}"}
+                "error": f"no task adapter for app {conflict.app}"}
     resp = ad.mutate(sid, conflict.entity_id, operator, value)
     return {"option": option, "wrote": True, "value": value,
             "operator": operator, "response": resp}

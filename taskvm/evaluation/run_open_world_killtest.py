@@ -5,7 +5,7 @@ system works end-to-end on a task/operator the harness has NEVER hardcoded a
 template for — after GG.3 (SubgoalGenerator replaced all if/elif instruction
 templates) + GG.4 (deep-link removal) + the CalendarAdapter generalization
 (removed the LAST per-operator if/elif in the write path), the full chain
-(observe → binding discovery → workflow init → subgoal generation → GUI/API
+(observe → binding discovery → workflow init → subgoal generation → GUI
 execute → verify) works on a brand-new operator with ZERO operator-specific
 code anywhere in the harness.
 
@@ -25,7 +25,7 @@ jargon. One hit = FAIL + the evidence is落盘.
 FAIL (binding miss, leak, round-trip <0.85) is落盘 as FAIL, not papered over.
 
 Usage:
-    python -m taskvm.evaluation.run_open_world_killtest              # api mode
+    python -m taskvm.evaluation.run_open_world_killtest              # GUI-only runtime
     python -m taskvm.evaluation.run_open_world_killtest --mock       # no API (smoke)
     python -m taskvm.evaluation.run_open_world_killtest --samples 2
 """
@@ -43,7 +43,10 @@ from taskvm.benchmark import model_client
 from taskvm.evaluation.run_w1_killtest import run_one_sample, run_neg_control, summarize
 from taskvm.governance.translate import (INTERNAL_ID_RE, OPERATOR_JARGON_RE,
                                          assert_no_internal_id, assert_no_operator_jargon)
-from taskvm.harness.state_adapter import make_adapters
+from taskvm.execution.gui_driver import make_task_adapters
+from taskvm.substrate.builtin_web.evaluation import (
+    make_evaluation_environments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,9 +105,11 @@ def run_open_world(fixture: CanonicalTaskGraph, *, model: str | None,
                    mock: bool = False, samples: int = 3,
                    host: str = "localhost") -> dict:
     """Run the open-world killtest on one fixture. Returns the honest verdict."""
-    adapters = make_adapters(apps=["calendar"], host=host, executor="api")
-    for app, ad in adapters.items():
-        h = ad.health()
+    # Agent B (substrate isolation): API write executor deleted — GUI-only runtime.
+    adapters = make_task_adapters(apps=["calendar"], host=host)
+    envs = make_evaluation_environments(["calendar"], host=host)
+    for app, env in envs.items():
+        h = env.health()
         if h.get("status") != "ok":
             logger.error(f"{app} not healthy: {h}")
             return {"fixture": fixture.task_id, "verdict": "ERROR",
@@ -112,15 +117,15 @@ def run_open_world(fixture: CanonicalTaskGraph, *, model: str | None,
     sm_samples = []
     for i in range(samples):
         logger.info(f"--- open-world sample {i+1}/{samples} ({fixture.task_id}) ---")
-        s = run_one_sample(fixture, adapters, model=model, temperature=None,
-                           sample_i=i, mock=mock)
+        s = run_one_sample(fixture, adapters, envs, model=model,
+                           temperature=None, sample_i=i, mock=mock)
         gate = _no_leak_gate(s)
         s["gg6_no_leak_gate"] = gate
         logger.info(f"sample {i+1}: score={s['round_trip']['score']} "
                     f"binding_f1={s['binding_accuracy']['f1']} "
                     f"broke={s['which_link_broke']} gate_clean={gate['clean']}")
         sm_samples.append(s)
-    neg = run_neg_control(fixture, adapters, model=model, mock=mock)
+    neg = run_neg_control(fixture, adapters, envs, model=model, mock=mock)
     sm = summarize(fixture.task_id, sm_samples, neg)
     # GG.6 verdict: PASS requires round-trip PASS + no-leak gate clean + neg honest
     gate_all_clean = all(s["gg6_no_leak_gate"]["clean"] for s in sm_samples)
@@ -130,8 +135,8 @@ def run_open_world(fixture: CanonicalTaskGraph, *, model: str | None,
         verdict = "FAIL_no_leak_gate"
         logger.error(f"[GG.6] NO-LEAK GATE FAILED: a model input contained an "
                      f"internal id — {n_pass_gate}/{samples} samples clean")
-    for ad in adapters.values():
-        ad.reset(sm_samples[0]["task_id"] if sm_samples else "")
+    for env in envs.values():
+        env.reset(sm_samples[0]["task_id"] if sm_samples else "")
     return {"fixture": fixture.task_id, "verdict": verdict, "summary": sm,
             "n_samples": samples, "no_leak_gate_clean": gate_all_clean,
             "operator": "update_rsvp (never-templated)",

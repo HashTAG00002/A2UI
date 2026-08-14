@@ -15,8 +15,12 @@ from typing import Any
 
 
 def snapshot(adapters: dict, sid: str) -> dict:
-    """{app_name: read_canonical(sid)} — the pre/post snapshot shape."""
-    return {name: ad.read_canonical(sid) for name, ad in adapters.items()}
+    """{app_name: oracle_state(sid)} — the pre/post snapshot shape.
+
+    Agent B (substrate isolation): the dict is keyed by app and holds
+    ``EvaluationEnvironment`` objects (``oracle_state`` is the successor of
+    the deleted ``StateAdapter.read_canonical``)."""
+    return {name: ad.oracle_state(sid) for name, ad in adapters.items()}
 
 
 def entity_value(snap: dict, app: str, entity_id: str, field: str) -> Any:

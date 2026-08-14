@@ -40,7 +40,10 @@ from taskvm.benchmark.fixtures import get_task
 from taskvm.execution.action_dispatcher import dispatch
 from taskvm.execution.patch_compiler import compile_patch
 from taskvm.harness import replay_engine as replay
-from taskvm.harness.state_adapter import make_adapters
+from taskvm.execution.gui_driver import make_task_adapters
+from taskvm.substrate.builtin_web.evaluation import (
+    make_evaluation_environments, make_evaluation_environment,
+)
 from taskvm.verifier import canonical_state as cs
 from taskvm.verifier.reconciliation import apply_merge_option
 from taskvm.workspace_ui.live_sync import resync_values, resync_with_conflicts
@@ -80,40 +83,46 @@ def _gt_binding(fixture):
 
 
 def _inject_external(host: str, sid: str, tid: str, value: str) -> dict:
-    """External concurrent edit via taskboard's own mutate API (bypasses TaskVM)."""
-    r = requests.post(f"http://{host}:3014/api/task/{sid}/{tid}",
-                      json={"operator": "set_deadline", "value": value}, timeout=10)
-    if r.status_code != 200:
-        return {"injected": False, "error": f"{r.status_code}: {r.text[:200]}"}
-    return {"injected": True, "tid": tid, "value": value}
+    """External concurrent edit AS IF another actor changed taskboard behind
+    TaskVM's back. Agent B: injected through the EVALUATION plane's
+    ``force_write`` (exam-room power) — the runtime has no API write path."""
+    env = make_evaluation_environment("taskboard", host=host)
+    try:
+        env.force_write(sid, tid, "set_deadline", value)
+        return {"injected": True, "tid": tid, "value": value}
+    except Exception as e:
+        return {"injected": False, "error": str(e)[:200]}
 
 
-def _read_field(adapters, sid, app, eid, field):
-    ent = (cs.snapshot(adapters, sid).get(app, {}).get("entities", {}) or {}).get(eid) or {}
+def _read_field(envs, sid, app, eid, field):
+    ent = (cs.snapshot(envs, sid).get(app, {}).get("entities", {}) or {}).get(eid) or {}
     return ent.get(field)
 
 
-def run_scenario(scenario: dict, host: str, *, executor: str, sample_i: int) -> dict:
-    """Run one merge-strategy scenario. Returns the per-scenario record."""
+def run_scenario(scenario: dict, host: str, *, sample_i: int) -> dict:
+    """Run one merge-strategy scenario. Returns the per-scenario record.
+
+    Agent B: GUI-only write drivers (``adapters``) + evaluation environments
+    (``envs``) — there is no ``executor`` knob anymore."""
     fixture = get_task("release_reschedule")   # T1/T2 deadline + E1 date, 2 apps
-    adapters = make_adapters(apps=["calendar", "taskboard"], host=host,
-                             executor=executor)
+    adapters = make_task_adapters(apps=["calendar", "taskboard"], host=host)
+    envs = make_evaluation_environments(["calendar", "taskboard"], host=host)
     sid = f"recon_{scenario['name']}_s{sample_i}_{int(time.time()) % 100000}"
-    for ad in adapters.values():
-        ad.reset(sid)
-    replay.seed_apps(fixture, adapters, sid)
+    for env in envs.values():
+        env.reset(sid)
+    replay.seed_apps(fixture, envs, sid)
     tb = _gt_binding(fixture)
 
     # 1. user edits release_date 8/14→8/18 (T1/T2→8/18, E1→8/18)
     ops = compile_patch(fixture.user_edit, tb)
     dispatch(ops, adapters, sid, broken=None)
-    projected = resync_values(tb, adapters, sid)   # Y = what user sees (8/18)
+    projected = resync_values(tb, envs, sid)   # Y = what user sees (8/18)
 
     # 2. external injects T2.deadline=8/20
     inj = _inject_external(host, sid, "T2", "2026-08-20")
 
     # 3. detect conflict (re-read canonical, diff vs projected)
-    updated_proj, recon = resync_with_conflicts(tb, projected, adapters, sid)
+    updated_proj, recon = resync_with_conflicts(tb, projected, envs, sid)
     t2_conflict = next((c for c in recon.conflicts
                         if c.entity_id == "T2" and c.field == "deadline"), None)
 
@@ -136,18 +145,18 @@ def run_scenario(scenario: dict, host: str, *, executor: str, sample_i: int) -> 
                                               "ok": str(actual).strip().lower() == str(exp).strip().lower()}
     # invariants across all scenarios: T1=8/18 (user's, unaffected by T2 merge),
     # E1=8/18 (user's), E2/T3 untouched (non-interference)
-    t1 = _read_field(adapters, sid, "taskboard", "T1", "deadline")
-    e1 = _read_field(adapters, sid, "calendar", "E1", "date")
-    e2 = _read_field(adapters, sid, "calendar", "E2", "date")
-    t3_status = _read_field(adapters, sid, "taskboard", "T3", "status")
+    t1 = _read_field(envs, sid, "taskboard", "T1", "deadline")
+    e1 = _read_field(envs, sid, "calendar", "E1", "date")
+    e2 = _read_field(envs, sid, "calendar", "E2", "date")
+    t3_status = _read_field(envs, sid, "taskboard", "T3", "status")
     invariants = {
         "T1.deadline_is_8/18": str(t1) == "2026-08-18",
         "E1.date_is_8/18": str(e1) == "2026-08-18",
         "E2.untouched_8/12": str(e2) == "2026-08-12",
         "T3.untouched_done": str(t3_status).lower() == "done",
     }
-    for ad in adapters.values():
-        ad.reset(sid)
+    for env in envs.values():
+        env.reset(sid)
     all_ok = all(c["ok"] for c in checks.values()) and all(invariants.values()) \
         and t2_conflict is not None and merge_result.get("applied")
     return {
@@ -169,23 +178,21 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="EE.5 reconciliation killtest")
     parser.add_argument("--samples", type=int, default=2, help="samples per scenario")
     parser.add_argument("--host", default="localhost")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="executor='api' (no GUI model; apps online). Real merge "
-                             "numbers via the app API — validates the 3 strategies.")
-    parser.add_argument("--execution-mode", choices=["api", "gui_agent"],
-                        default="api")
+    # Agent B: the legacy --dry-run / --execution-mode 'api' backdoor is
+    # DELETED — writes go through real GUI gestures (make_task_adapters);
+    # oracle reads + external-change injection go through the evaluation
+    # environments (force_write is the exam-room power).
     parser.add_argument("--out", default=None)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s")
-    executor = "api" if args.dry_run else args.execution_mode
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     records = []
     for sc in SCENARIOS:
         for i in range(args.samples):
             logger.info(f"\n=== Scenario {sc['name']} sample {i+1}/{args.samples} ===")
-            r = run_scenario(sc, args.host, executor=executor, sample_i=i)
+            r = run_scenario(sc, args.host, sample_i=i)
             logger.info(f"[{sc['name']}] conflict={r['conflict_detected']} "
                         f"merge_applied={r['merge_result'].get('applied')} "
                         f"checks={ {k:v['ok'] for k,v in r['post_merge_checks'].items()} } "
@@ -199,7 +206,7 @@ def main(argv=None):
         by_scenario.setdefault(r["scenario"], []).append(r["pass"])
     report = {
         "ts": ts, "test": "reconciliation_killtest",
-        "mode": "dry_run(api)" if args.dry_run else executor,
+        "mode": "gui_only",
         "n_samples_per_scenario": args.samples,
         "n_scenarios": len(SCENARIOS),
         "scenarios": [{"name": s["name"], "option": s["option"],
@@ -213,11 +220,11 @@ def main(argv=None):
         "honest_framing": (
             "Tests the 3 merge strategies (accept_underlying / keep_projected / "
             "merge) on a real external-concurrent-change conflict (T2.deadline "
-            "injected via taskboard's own mutate API). Reconciliation Accuracy = "
-            "post-merge state matches the strategy's expected outcome AND non-"
-            "interference holds (E2/T3 untouched). dry_run uses executor='api' "
-            "(§12.16 backdoor) for wiring validation; the merge logic itself is "
-            "rule-based (apply_merge_option), so dry_run fully validates it."
+            "injected via the evaluation plane's force_write). Reconciliation "
+            "Accuracy = post-merge state matches the strategy's expected outcome "
+            "AND non-interference holds (E2/T3 untouched). Writes (user edit + "
+            "merge re-dispatch) drive real GUI gestures; the merge logic itself "
+            "is rule-based (apply_merge_option)."
         ),
     }
     out_path = Path(args.out) if args.out else (

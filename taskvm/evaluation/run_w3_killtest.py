@@ -43,7 +43,10 @@ from taskvm.benchmark.fixtures import CanonicalTaskGraph, all_tasks, get_task
 from taskvm.execution.action_dispatcher import dispatch
 from taskvm.execution.patch_compiler import compile_patch
 from taskvm.harness import replay_engine as replay
-from taskvm.harness.state_adapter import make_adapters
+from taskvm.execution.gui_driver import make_task_adapters
+from taskvm.substrate.builtin_web.evaluation import (
+    make_evaluation_environments,
+)
 from taskvm.verifier import canonical_state as cs
 from taskvm.verifier.cross_app_checks import (check_cross_app_consistency,
                                                 check_dependency_tracking)
@@ -102,11 +105,11 @@ def run_gate1(sess: WorkspaceSession, fixture: CanonicalTaskGraph) -> tuple[Gate
     edit_var = fixture.user_edit["var_id"]
     new_value = fixture.user_edit["new"]
     ops = compile_patch({"var_id": edit_var, "new": new_value}, sess.binding)
-    pre = cs.snapshot(sess.adapters, sess.sid)   # BEFORE dispatch (the state to restore)
+    pre = cs.snapshot(sess.oracle, sess.sid)   # BEFORE dispatch (the state to restore)
     dispatch(ops, sess.adapters, sess.sid, broken=None, rollback_log=sess.rollback_log)
     sess.last_projection = None   # force re-project (mimic the edit route)
     html_after_dispatch = _render_html(sess)
-    post_dispatch = cs.snapshot(sess.adapters, sess.sid)
+    post_dispatch = cs.snapshot(sess.oracle, sess.sid)
     cx = check_cross_app_consistency(post_dispatch, fixture)
     dt = check_dependency_tracking(post_dispatch, fixture)
 
@@ -119,8 +122,8 @@ def run_gate1(sess: WorkspaceSession, fixture: CanonicalTaskGraph) -> tuple[Gate
         return g1, html_after_dispatch, html_after_dispatch, \
             {"error": "no saga records (dispatch produced no writes)", "dependency_tracking": dt.score}
     sres = sess.rollback_log.undo_saga(saga_id, sess.sid, sess.adapters)
-    post_undo = cs.snapshot(sess.adapters, sess.sid)
-    rf = check_rollback_fidelity(pre, post_undo, sess.adapters, sess.sid, sres)
+    post_undo = cs.snapshot(sess.oracle, sess.sid)
+    rf = check_rollback_fidelity(pre, post_undo, sess.oracle, sess.sid, sres)
     html_after_undo = _render_html(sess)
 
     n_apps = len({s.app for s in sres.steps})
@@ -151,15 +154,18 @@ def run_gate2(sess: WorkspaceSession, fixture: CanonicalTaskGraph) -> tuple[Gate
     sess.last_projection = None
     html_before = _render_html(sess)   # caches the projection Y = post-edit state
 
-    # EXTERNAL concurrent change: pick a binding whose field we can mutate via the
-    # app's own API (bypassing TaskVM). Use the LAST binding (often a dependent
-    # taskboard deadline) so the change is on a non-primary bound entity.
+    # EXTERNAL concurrent change: pick a binding whose field we can mutate as if
+    # an external actor edited the app behind TaskVM's back. Agent B: the
+    # injection goes through the EVALUATION plane's ``force_write`` (exam-room
+    # power) — the runtime has no API write path anymore. Use the LAST binding
+    # (often a dependent taskboard deadline) so the change is on a non-primary
+    # bound entity.
     target = fixture.bindings[-1]
-    ad = sess.adapters[target.app]
+    env = sess.oracle[target.app]
     # mutate to a DIFFERENT value than the user's edit (the conflict)
     conflict_val = "2026-08-20" if "date" in (target.field or "") or "deadline" in (target.field or "") \
         else ("archived" if target.field in ("parent", "state") else "ZZZ_external")
-    ad.mutate(sess.sid, target.entity_id, target.operator, conflict_val)
+    env.force_write(sess.sid, target.entity_id, target.operator, conflict_val)
 
     html_after = _render_html(sess)   # re-read → detect conflict
     conflicts = sess.last_conflicts
@@ -177,17 +183,17 @@ def run_gate2(sess: WorkspaceSession, fixture: CanonicalTaskGraph) -> tuple[Gate
     return g2, html_before, html_after
 
 
-def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
+def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, envs: dict, *,
                    sample_i: int, host: str = "localhost") -> dict:
     sid = f"{fixture.task_id}_w3_s{sample_i}_{int(time.time()*1000) % 100000}"
-    for ad in adapters.values():
-        ad.reset(sid)
-    replay.seed_apps(fixture, adapters, sid)
-    replay.capture_obs(adapters, sid)   # assert obs matches state
-    replay.assert_obs_matches_state(adapters, sid, replay.capture_obs(adapters, sid))
+    for env in envs.values():
+        env.reset(sid)
+    replay.seed_apps(fixture, envs, sid)
+    replay.capture_obs(envs, sid)   # assert obs matches state
+    replay.assert_obs_matches_state(envs, sid, replay.capture_obs(envs, sid))
     tb = _gt_task_binding(fixture)
     sess = WorkspaceSession(sid=sid, task_id=fixture.task_id, goal=fixture.goal,
-                            binding=tb, adapters=adapters)
+                            binding=tb, adapters=adapters, oracle=envs)
     # gate-1 needs a cross-app task; skip (vacuous pass) for single-app tasks
     if _cross_app_task(fixture):
         g1, html_disp, html_undo, rf_detail = run_gate1(sess, fixture)
@@ -198,14 +204,14 @@ def run_one_sample(fixture: CanonicalTaskGraph, adapters: dict, *,
                          passed=True)  # vacuous for single-app (W2 covers it)
         html_disp = html_undo = _render_html(sess); rf_detail = {"vacuous": True}
     # gate-2 (reconciliation) — fresh session (gate-1 undid the edit)
-    for ad in adapters.values():
-        ad.reset(sid)
-    replay.seed_apps(fixture, adapters, sid)
+    for env in envs.values():
+        env.reset(sid)
+    replay.seed_apps(fixture, envs, sid)
     sess2 = WorkspaceSession(sid=sid, task_id=fixture.task_id, goal=fixture.goal,
-                             binding=tb, adapters=adapters)
+                             binding=tb, adapters=adapters, oracle=envs)
     g2, html_before, html_after = run_gate2(sess2, fixture)
-    for ad in adapters.values():
-        ad.reset(sid)
+    for env in envs.values():
+        env.reset(sid)
     return {
         "task_id": fixture.task_id, "sample": sample_i, "mock": True,
         "cross_app": _cross_app_task(fixture),
@@ -278,10 +284,11 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s")
 
-    adapters = make_adapters(host=args.host)
-    for app, ad in adapters.items():
+    adapters = make_task_adapters(host=args.host)
+    envs = make_evaluation_environments(sorted(set(adapters)), host=args.host)
+    for app, env in envs.items():
         try:
-            h = ad.health()
+            h = env.health()
             if h.get("status") != "ok":
                 logger.error(f"{app} not healthy: {h}"); sys.exit(2)
         except Exception as e:
@@ -293,7 +300,7 @@ def main(argv=None):
     if args.neg_control:
         results = []
         for fx in tasks:
-            neg = run_neg_control(fx, adapters, model=None, mock=True, cost_model=cost_model)
+            neg = run_neg_control(fx, adapters, envs, model=None, mock=True, cost_model=cost_model)
             results.append({"task_id": fx.task_id, **neg})
         out = Path(args.out) if args.out else EVAL_DIR / f"w3_negcontrol_{ts}.json"
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -306,10 +313,10 @@ def main(argv=None):
         logger.info(f"\n=== TASK {fx.task_id} (cross_app={_cross_app_task(fx)}) ===")
         samples = []
         for i in range(args.samples):
-            s = run_one_sample(fx, adapters, sample_i=i, host=args.host)
+            s = run_one_sample(fx, adapters, envs, sample_i=i, host=args.host)
             logger.info(f"sample {i+1}: gate1={s['gate1']['passed']} gate2={s['gate2']['passed']} → {'PASS' if s['passed'] else 'FAIL'}")
             samples.append(s)
-        neg = run_neg_control(fx, adapters, model=None, mock=True, cost_model=cost_model)
+        neg = run_neg_control(fx, adapters, envs, model=None, mock=True, cost_model=cost_model)
         sm = summarize(fx.task_id, samples, neg)
         summaries.append(sm); all_samples.extend(samples)
         logger.info(f"TASK {fx.task_id}: PASS={sm['PASS']} g1={sm['gate1_pass']} g2={sm['gate2_pass']} neg={neg['score']}")

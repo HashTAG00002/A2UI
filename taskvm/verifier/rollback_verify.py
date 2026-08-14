@@ -30,7 +30,7 @@ from typing import Any
 
 from taskvm.execution.rollback import SagaResult
 from taskvm.verifier.canonical_state import (entity_record, entity_unchanged)
-from taskvm.harness.state_adapter import StateAdapter
+from taskvm.substrate import EvaluationEnvironment   # port type only (Agent B)
 
 
 @dataclass
@@ -55,7 +55,7 @@ def _touched_set(saga_records) -> set[tuple[str, str]]:
 
 def check_rollback_fidelity(
         pre_dispatch: dict, post_undo: dict,
-        adapters: dict[str, StateAdapter], sid: str,
+        adapters: dict[str, EvaluationEnvironment], sid: str,
         saga_result: SagaResult) -> RollbackFidelityResult:
     """Verify the saga undo restored the real app state.
 

@@ -1,0 +1,698 @@
+"""TaskArchitect / Projection Composer — ONE call, ONE coherent architecture.
+
+The SECOND high-level model role (architect contract §1). A single
+``compose`` call jointly produces everything the old role-zoo produced
+inconsistently (Milestone Suggester / rule-based Workflow Classifier /
+GenUI structural decoder):
+
+- milestones / checkpoints          → CHECKPOINT nodes (a committed one
+                                       becomes a kernel CheckpointRecord)
+- workflow topology                 → Sequence / Fan-out–Barrier–Fan-in /
+                                       Bounded Loop (the only three
+                                       primitives; domain-validated shapes)
+- projection schema                 → semantic component tree (data deltas
+                                       never re-compose it)
+- semantic action contracts         → ActionContract (desired_state,
+                                       completion, reversibility, risk)
+- verification intent               → VERIFY nodes
+- desired plane                     → variable targets
+
+Production vs validation (layered ownership): assembly maps the model JSON
+into ``taskvm.domain`` constructors; STATIC coherence (shape / key ⊆
+variables / binding ⊆ variables / split-brain / orphan) is proven by Agent
+A's ``TaskArchitecture`` validating constructor — ONE owner. A failed
+construction triggers a bounded repair (the ValidationError is fed back to
+the model); after ``max_repairs`` the failure is honest and final. There is
+NO fallback to a fixture/GT plan — ever.
+
+``recompose_future`` is the GoalPatch path: the kernel has already applied
+``apply_goal_patch`` (history preserved, uncommitted future invalidated,
+execution blocked). The architect re-organises ONLY the remaining future:
+committed history is carried VERBATIM (same ids, same definitions — kernel
+``replace_future`` enforces it), the model sees a committed-work summary and
+the new goal, and the deterministic stitcher connects the fresh future to
+the carried frontier. Nothing is re-executed from scratch.
+"""
+from __future__ import annotations
+
+import re
+import time
+from dataclasses import dataclass, replace
+from typing import Iterable
+
+from taskvm.architect.compiler import CompilerResult
+from taskvm.architect.noleak import assert_prompt_clean, scan_json_values
+from taskvm.architect.port import (
+    MODEL_ROLE_TASK_ARCHITECT, ModelCallLedger, ModelPort,
+)
+from taskvm.domain.architecture import TaskArchitecture
+from taskvm.domain.contract import ActionContract, Reversibility
+from taskvm.domain.errors import ValidationError
+from taskvm.domain.intent import TaskIntent
+from taskvm.domain.projection import ProjectionComponent, ProjectionSchema
+from taskvm.domain.state import (
+    MUTABILITY_EDITABLE, MUTABILITY_LOCKED, MUTABILITY_READONLY,
+    SurfaceEvidence, SurfaceHandle, TaskVariable,
+)
+from taskvm.domain.workflow import (
+    NodeKind, NodeStatus, WorkflowGraph, WorkflowNode,
+)
+from taskvm.kernel import WorkflowSnapshot
+
+_REVERSIBILITY = {r.value: r for r in Reversibility}
+_NODE_KINDS = {k.value: k for k in NodeKind}
+_MUTABILITY = {MUTABILITY_EDITABLE, MUTABILITY_READONLY, MUTABILITY_LOCKED}
+_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+_SYSTEM_PROMPT = """\
+You are the Task Architect of a Task Virtual Machine. Given the human goal \
+and the current task state (semantic variables with their OBSERVED values), \
+produce ONE coherent task architecture as JSON with EXACTLY this shape:
+{"variables": [{"semantic_key": "<one of the given keys, or a new \
+snake_case business key>", "label": "...", "value_type": \
+"string|date|number|status|boolean", "mutability": "editable|readonly|locked",
+  "desired": <target value for a written variable, else the observed value>}],
+ "workflow": {"nodes": [
+   {"kind": "sequence", "label": "<unique label>"},
+   {"kind": "fan_out", "label": "<unique label>"},
+   {"kind": "bounded_loop", "label": "...", "termination": "<state-driven \
+termination predicate in words>", "max_iterations": 3},
+   {"kind": "action", "label": "...", "container": "<container label or null>",
+    "after": ["<labels this node waits for>"],
+    "semantic_goal": "<what must become true, in business words>",
+    "sets": {"<semantic_key>": "<target value>"},
+    "completion": "<how a user recognises completion on the visible screen>",
+    "reversibility": "reversible|partially_reversible|irreversible",
+    "risk": "<one short risk note, or empty>",
+    "target_evidence": ["<a visible label a user could read on screen>"]},
+   {"kind": "verify", "label": "...", "container": "...", "after": [],
+    "condition": "<semantic verification condition>"},
+   {"kind": "checkpoint", "label": "...", "after": []},
+   {"kind": "barrier", "label": "...", "after": ["<the fan-out lanes, or the \
+fan-out container>"]},
+   {"kind": "terminal", "label": "<unique label>"}]},
+ "projection": {"root": "<component label>", "components": [
+   {"label": "<unique label>", "type": "card|field|list|progress|note",
+    "binds": "<semantic_key or null>", "editable": false,
+    "children": ["<child component labels>"]}]}}
+Topology rules: use ONLY sequence / fan-out+barrier / bounded-loop shapes; a \
+sequence's steps run in your listed order; fan-out lanes are independent and \
+re-join at exactly one barrier; a bounded loop has BOTH a termination \
+predicate and max_iterations and its body is only action/verify nodes; there \
+is EXACTLY ONE terminal and it is the final sink; place checkpoint nodes at \
+boundaries worth pausing or rolling back to; every variable whose desired \
+value differs from observed must be finally written by some action to that \
+exact value; address targets ONLY by visible labels and business keys, \
+never by internal ids or operator names.
+Output ONLY the JSON object."""
+
+
+class ArchitectOutputError(ValidationError):
+    """The model output could not be assembled after bounded repair."""
+
+
+@dataclass(frozen=True)
+class RecomposeProposal:
+    """Everything ``kernel.recompose`` needs to close a GoalPatch."""
+
+    variables: tuple[TaskVariable, ...]
+    graph: WorkflowGraph
+    schema: ProjectionSchema | None
+    carried_node_ids: tuple[str, ...]
+    reason: str
+
+
+def historical_node_ids(snapshot: WorkflowSnapshot) -> frozenset[str]:
+    """Derive the historical node set from the PUBLIC snapshot.
+
+    COMMITTED/COMPENSATED nodes, minus ephemeral loop-body commits (a
+    committed child of a not-yet-committed BOUNDED_LOOP is per-iteration
+    scratch, not history — mirrors WorkflowStore's own rule, computed from
+    public data only; the store stays authoritative).
+    """
+    graph = snapshot.graph
+    if graph is None:
+        return frozenset()
+    out: set[str] = set()
+    for nid, st in snapshot.statuses.items():
+        if st not in (NodeStatus.COMMITTED, NodeStatus.COMPENSATED):
+            continue
+        node = graph.node(nid)
+        if node is not None and node.parent_id is not None:
+            parent = graph.node(node.parent_id)
+            if (parent is not None
+                    and parent.kind is NodeKind.BOUNDED_LOOP
+                    and snapshot.statuses.get(parent.node_id) not in (
+                        NodeStatus.COMMITTED, NodeStatus.COMPENSATED)):
+                continue  # ephemeral per-iteration commit
+        out.add(nid)
+    return frozenset(out)
+
+
+def _closure(graph: WorkflowGraph,
+             seeds: Iterable[str]) -> tuple[WorkflowNode, ...]:
+    """Nodes the seeds structurally require: depends_on targets, the parent
+    chain, and (for fan-outs / bounded loops, which must have members)
+    COMMITTED children only — recursively. Deterministic order = graph
+    order.
+
+    Uncommitted siblings (an old-future lane the GoalPatch just
+    invalidated) are deliberately NOT carried: they belong to the future
+    the architect is about to redesign, and carrying them would either
+    re-schedule stale targets or trip the split-brain guard against the
+    new writers. A fan-out with a single remaining committed lane is
+    still a valid shape (domain rule: ≥1 lane)."""
+    by_id = {n.node_id: n for n in graph.nodes}
+    committed = frozenset(seeds)
+    carried: dict[str, WorkflowNode] = {}
+    frontier = [by_id[s] for s in seeds if s in by_id]
+    while frontier:
+        n = frontier.pop()
+        if n.node_id in carried:
+            continue
+        carried[n.node_id] = n
+        for dep in n.depends_on:
+            if dep in by_id and dep not in carried:
+                frontier.append(by_id[dep])
+        if n.parent_id is not None and n.parent_id in by_id:
+            frontier.append(by_id[n.parent_id])
+        if n.kind in (NodeKind.FAN_OUT, NodeKind.BOUNDED_LOOP):
+            for child in graph.children_of(n.node_id):
+                if child.node_id in committed:
+                    frontier.append(child)
+    return tuple(n for n in graph.nodes if n.node_id in carried)
+
+
+class TaskArchitect:
+    """Goal + observed state → one validated TaskArchitecture."""
+
+    def __init__(self, port: ModelPort, ledger: ModelCallLedger | None = None,
+                 *, model: str | None = None, max_repairs: int = 1) -> None:
+        self._port = port
+        self._ledger = ledger
+        self._model = model
+        if max_repairs < 0:
+            raise ValidationError("max_repairs must be >= 0")
+        self._max_repairs = max_repairs
+
+    # ── initial composition ─────────────────────────────────────────────
+    def compose(self, intent: TaskIntent,
+                variables: Iterable[TaskVariable] | CompilerResult, *,
+                purpose: str = "initial_compose") -> TaskArchitecture:
+        """ONE model call → the complete coherent artifact.
+
+        ``variables``: a :class:`CompilerResult` or an iterable of
+        TaskVariables carrying the OBSERVED plane (from the State Compiler).
+        The merge is one-way: observed / evidence / confidence come only
+        from observation; the architect contributes desired / mutability /
+        label / new variables. It can never rewrite an observed value.
+        """
+        base_vars = self._base_variables(variables)
+        user = self._build_user_prompt(intent, base_vars,
+                                       committed_summary=None)
+        return self._compose_with_repair(intent, base_vars, user,
+                                         carried=(), id_offset=0,
+                                         exempt_ids=frozenset(),
+                                         purpose=purpose)
+
+    # ── GoalPatch recomposition (affected future only) ──────────────────
+    def recompose_future(self, intent: TaskIntent,
+                         variables: Iterable[TaskVariable] | CompilerResult,
+                         snapshot: WorkflowSnapshot, *,
+                         reason: str = "goal patch",
+                         purpose: str = "goal_recompose") -> RecomposeProposal:
+        """Re-organise ONLY the uncommitted future after a GoalPatch.
+
+        Committed history (see :func:`historical_node_ids`) is carried
+        verbatim — same ids, same definitions — plus its structural closure
+        (dependencies / parents / required members), so the installed graph
+        stays well-formed. The model only designs the remaining future
+        against the new goal; committed work is never re-executed.
+        """
+        base_vars = self._base_variables(variables)
+        graph = snapshot.graph
+        if graph is None:
+            raise ValidationError(
+                "recompose_future requires an installed workflow graph")
+        historical = historical_node_ids(snapshot)
+        carried = _closure(graph, historical)
+        summary = self._committed_summary(graph, historical)
+        user = self._build_user_prompt(intent, base_vars,
+                                       committed_summary=summary)
+        arch = self._compose_with_repair(
+            intent, base_vars, user, carried=carried,
+            id_offset=self._max_numeric_suffix(carried) + 1,
+            exempt_ids=frozenset(historical),
+            purpose=purpose)
+        return RecomposeProposal(
+            variables=arch.variables, graph=arch.graph,
+            schema=arch.schema,
+            carried_node_ids=tuple(n.node_id for n in carried),
+            reason=reason)
+
+    # ── model-call loop with bounded repair ─────────────────────────────
+    def _compose_with_repair(self, intent: TaskIntent,
+                             base_vars: tuple[TaskVariable, ...],
+                             user: str, *, carried: tuple[WorkflowNode, ...],
+                             id_offset: int,
+                             exempt_ids: frozenset[str],
+                             purpose: str) -> TaskArchitecture:
+        assert_prompt_clean(_SYSTEM_PROMPT + "\n" + user,
+                            what="task-architect prompt")
+        repair_note = ""
+        last_err: Exception | None = None
+        for attempt in range(1 + self._max_repairs):
+            is_repair = attempt > 0
+            reply = self._call_model(user + repair_note, purpose=purpose,
+                                     is_repair=is_repair)
+            parsed = reply.parsed
+            if not isinstance(parsed, dict) or "workflow" not in parsed:
+                last_err = ArchitectOutputError(
+                    "architect output is not a JSON object with 'workflow'")
+                repair_note = self._repair_note(last_err)
+                continue
+            leaks = scan_json_values(parsed)
+            if leaks:
+                last_err = ArchitectOutputError(
+                    "architect output echoes internal vocabulary: "
+                    f"{sorted(set(leaks))}")
+                repair_note = self._repair_note(last_err)
+                continue
+            try:
+                return self._assemble(parsed, base_vars, carried, id_offset,
+                                      exempt_ids)
+            except ValidationError as e:
+                last_err = e
+                repair_note = self._repair_note(e)
+        raise ArchitectOutputError(
+            f"task architect failed after {1 + self._max_repairs} attempt(s); "
+            f"last error: {last_err}")
+
+    def _call_model(self, user: str, *, purpose: str, is_repair: bool):
+        if self._ledger is None:
+            return self._port.complete_json(
+                system=_SYSTEM_PROMPT, user=user, model=self._model)
+        from taskvm.architect.port import ModelCallRecord
+        t0 = time.monotonic()
+        reply = None
+        try:
+            reply = self._port.complete_json(
+                system=_SYSTEM_PROMPT, user=user, model=self._model)
+            return reply
+        finally:
+            self._ledger.record(ModelCallRecord(
+                role=MODEL_ROLE_TASK_ARCHITECT, purpose=purpose,
+                model=(reply.model if reply else (self._model or "")),
+                ok=reply is not None and reply.parsed is not None,
+                is_repair=is_repair,
+                prompt_tokens=(reply.prompt_tokens if reply else None),
+                completion_tokens=(reply.completion_tokens if reply else None),
+                latency_ms=int((time.monotonic() - t0) * 1000)))
+
+    # ── prompt building ─────────────────────────────────────────────────
+    @staticmethod
+    def _base_variables(variables) -> tuple[TaskVariable, ...]:
+        if isinstance(variables, CompilerResult):
+            return tuple(variables.variables)
+        return tuple(variables)
+
+    @staticmethod
+    def _build_user_prompt(intent: TaskIntent,
+                           base_vars: tuple[TaskVariable, ...],
+                           committed_summary: str | None) -> str:
+        parts = ["# Task goal", intent.goal]
+        if intent.constraints:
+            parts.append("Constraints: " + "; ".join(intent.constraints))
+        if intent.success_criteria:
+            parts.append("Success criteria: "
+                         + "; ".join(intent.success_criteria))
+        parts += ["", "# Current task state (observed plane — from the "
+                      "State Compiler; you set ONLY the desired plane)"]
+        for v in base_vars:
+            parts.append(f"- {v.semantic_key} ({v.label}, type="
+                         f"{v.value_type}, mutability={v.mutability}, "
+                         f"observed={v.observed!r})")
+        if committed_summary:
+            parts += ["", "# Already COMMITTED history (labels are frozen; "
+                          "design ONLY the remaining future; new nodes may "
+                          "wait 'after' these labels)",
+                      committed_summary]
+        parts += ["", "Produce the task architecture now. Output ONLY the "
+                      "JSON object."]
+        return "\n".join(parts)
+
+    @staticmethod
+    def _committed_summary(graph: WorkflowGraph,
+                           historical: frozenset[str]) -> str:
+        lines = []
+        for n in graph.nodes:
+            if n.node_id not in historical:
+                continue
+            extra = f" — did: {n.contract.semantic_goal}" if (
+                n.contract is not None) else ""
+            lines.append(f"- [committed] {n.label} ({n.kind.value}){extra}")
+        return "\n".join(lines) if lines else "(no committed work yet)"
+
+    @staticmethod
+    def _repair_note(err: Exception) -> str:
+        return (f"\n\nYour previous output was rejected: {err}\nFix exactly "
+                f"that and output the corrected JSON object only.")
+
+    @staticmethod
+    def _max_numeric_suffix(nodes: tuple[WorkflowNode, ...]) -> int:
+        best = 0
+        for n in nodes:
+            m = re.search(r"(\d+)$", n.node_id)
+            if m:
+                best = max(best, int(m.group(1)))
+        return best
+
+    # ── deterministic JSON → domain assembly ────────────────────────────
+    def _assemble(self, parsed: dict, base_vars: tuple[TaskVariable, ...],
+                  carried: tuple[WorkflowNode, ...], id_offset: int,
+                  exempt_ids: frozenset[str]) -> TaskArchitecture:
+        variables = self._merge_variables(parsed, base_vars)
+        graph = self._assemble_graph(parsed, variables, carried, id_offset)
+        schema = self._assemble_schema(parsed, variables, id_offset)
+        # exempt_ids = frozen history (committed/compensated): their
+        # contracts are records of verified work, exempt from coherence —
+        # the SAME exemption kernel.recompose re-proves at install time
+        # (workflow_store.historical_node_ids).
+        return TaskArchitecture(variables=variables, graph=graph,
+                                schema=schema, exempt_node_ids=exempt_ids)
+
+    @staticmethod
+    def _merge_variables(parsed: dict,
+                         base_vars: tuple[TaskVariable, ...],
+                         ) -> tuple[TaskVariable, ...]:
+        """One-way merge: observation owns ``observed``/``evidence``/
+        ``confidence``; the architect contributes ``desired`` /
+        ``mutability`` / ``label`` / new variables — never an observed
+        value."""
+        raw = parsed.get("variables")
+        if not isinstance(raw, list) or not raw:
+            raise ArchitectOutputError(
+                "'variables' must be a non-empty array")
+        by_key = {v.semantic_key: v for v in base_vars}
+        out: list[TaskVariable] = []
+        seen: set[str] = set()
+        for i, rv in enumerate(raw):
+            if not isinstance(rv, dict):
+                raise ArchitectOutputError(f"variable #{i} is not an object")
+            key = str(rv.get("semantic_key") or "").strip()
+            if not _KEY_RE.match(key):
+                raise ArchitectOutputError(
+                    f"variable #{i} semantic_key {key!r} is not lower "
+                    f"snake_case")
+            if key in seen:
+                raise ArchitectOutputError(f"duplicate semantic_key {key!r}")
+            seen.add(key)
+            base = by_key.get(key)
+            label = str(rv.get("label") or (base.label if base else key))
+            value_type = str(rv.get("value_type")
+                             or (base.value_type if base else "string"))
+            mutability = str(rv.get("mutability")
+                             or (base.mutability if base
+                                 else MUTABILITY_EDITABLE))
+            if mutability not in _MUTABILITY:
+                raise ArchitectOutputError(
+                    f"variable {key!r} mutability {mutability!r} unknown")
+            desired = rv.get("desired")
+            if desired is None:
+                desired = base.observed if base is not None else None
+            if base is not None:
+                out.append(replace(base, label=label, value_type=value_type,
+                                   mutability=mutability, desired=desired))
+            else:
+                out.append(TaskVariable(
+                    semantic_key=key, label=label, observed=None,
+                    desired=desired, value_type=value_type,
+                    mutability=mutability))
+        return tuple(out)
+
+    def _assemble_graph(self, parsed: dict,
+                        variables: tuple[TaskVariable, ...],
+                        carried: tuple[WorkflowNode, ...],
+                        id_offset: int) -> WorkflowGraph:
+        wf = parsed.get("workflow")
+        raw_nodes = wf.get("nodes") if isinstance(wf, dict) else None
+        if not isinstance(raw_nodes, list) or not raw_nodes:
+            raise ArchitectOutputError("'workflow.nodes' must be non-empty")
+
+        # label → id map: carried nodes first (their labels are frozen),
+        # then new nodes in listed order.
+        label_to_id: dict[str, str] = {n.label: n.node_id for n in carried}
+        seq = id_offset
+
+        def next_id() -> str:
+            nonlocal seq
+            seq += 1
+            return f"n{seq:03d}"
+
+        parsed_nodes: list[dict] = []
+        for i, rn in enumerate(raw_nodes):
+            if not isinstance(rn, dict):
+                raise ArchitectOutputError(f"workflow node #{i} not an object")
+            kind = str(rn.get("kind") or "")
+            if kind not in _NODE_KINDS:
+                raise ArchitectOutputError(
+                    f"workflow node #{i} kind {kind!r} unknown")
+            label = str(rn.get("label") or "").strip()
+            if not label:
+                raise ArchitectOutputError(
+                    f"workflow node #{i} needs a non-empty label")
+            if label in label_to_id:
+                raise ArchitectOutputError(
+                    f"duplicate workflow label {label!r} (a committed "
+                    f"history label must not be reused)")
+            label_to_id[label] = next_id()
+            parsed_nodes.append(rn)
+
+        def ids_of(labels, owner: str) -> tuple[str, ...]:
+            out = []
+            for lb in labels or []:
+                lb = str(lb)
+                if lb not in label_to_id:
+                    raise ArchitectOutputError(
+                        f"{owner} references unknown node label {lb!r}")
+                out.append(label_to_id[lb])
+            return tuple(out)
+
+        new_nodes: list[WorkflowNode] = []
+        for rn in parsed_nodes:
+            nid = label_to_id[str(rn["label"])]
+            kind = _NODE_KINDS[str(rn["kind"])]
+            parent_label = rn.get("container") or rn.get("parent")
+            parent_id = None
+            if parent_label:
+                if parent_label not in label_to_id:
+                    raise ArchitectOutputError(
+                        f"node {rn['label']!r} container {parent_label!r} "
+                        f"unknown")
+                parent_id = label_to_id[parent_label]
+            depends_on = ids_of(rn.get("after"), f"node {rn['label']!r}")
+            contract = None
+            termination = None
+            max_iters = None
+            verification = None
+            if kind is NodeKind.ACTION:
+                sets = rn.get("sets")
+                if not isinstance(sets, dict) or not sets:
+                    raise ArchitectOutputError(
+                        f"action {rn['label']!r} needs a non-empty 'sets' "
+                        f"mapping")
+                rev = str(rn.get("reversibility") or "reversible")
+                if rev not in _REVERSIBILITY:
+                    raise ArchitectOutputError(
+                        f"action {rn['label']!r} reversibility {rev!r} "
+                        f"unknown")
+                ev = rn.get("target_evidence") or []
+                if not isinstance(ev, list):
+                    raise ArchitectOutputError(
+                        f"action {rn['label']!r} target_evidence must be a "
+                        f"list of visible labels")
+                evidence = tuple(
+                    SurfaceEvidence(
+                        surface=SurfaceHandle(handle_id=f"ha{e_i:03d}"),
+                        visible_label=str(s))
+                    for e_i, s in enumerate(ev, start=1)
+                    if str(s).strip())
+                contract = ActionContract(
+                    contract_id=f"c{label_to_id[str(rn['label'])][1:]}",
+                    semantic_goal=str(rn.get("semantic_goal")
+                                      or rn["label"]),
+                    desired_state=dict(sets),
+                    completion_condition=str(rn.get("completion") or ""),
+                    target_evidence=evidence,
+                    reversibility=_REVERSIBILITY[rev],
+                    risk_note=str(rn.get("risk") or ""))
+            elif kind is NodeKind.VERIFY:
+                verification = str(rn.get("condition") or "").strip()
+                if not verification:
+                    raise ArchitectOutputError(
+                        f"verify node {rn['label']!r} needs a 'condition'")
+            elif kind is NodeKind.BOUNDED_LOOP:
+                termination = str(rn.get("termination") or "").strip()
+                if not termination:
+                    raise ArchitectOutputError(
+                        f"bounded loop {rn['label']!r} needs a termination "
+                        f"predicate")
+                try:
+                    max_iters = int(rn.get("max_iterations"))
+                except (TypeError, ValueError):
+                    max_iters = 0
+                if max_iters is None or max_iters < 1:
+                    raise ArchitectOutputError(
+                        f"bounded loop {rn['label']!r} needs "
+                        f"max_iterations >= 1")
+            new_nodes.append(WorkflowNode(
+                node_id=nid, kind=kind, label=str(rn["label"]),
+                depends_on=depends_on, parent_id=parent_id,
+                contract=contract, verification=verification,
+                termination_predicate=termination,
+                max_iterations=max_iters))
+
+        nodes = list(carried) + new_nodes
+        nodes = self._chain_fill(nodes, new_nodes, carried)
+        return WorkflowGraph(nodes=tuple(nodes))
+
+    @staticmethod
+    def _chain_fill(nodes: list[WorkflowNode],
+                    new_nodes: list[WorkflowNode],
+                    carried: tuple[WorkflowNode, ...]) -> list[WorkflowNode]:
+        """Deterministic order-fill + history stitching.
+
+        1. When the model listed NO explicit ordering edges inside a scope,
+           wire that scope's nodes in the listed order (the listed order IS
+           the model's ordering intent). Scopes: each SEQUENCE container's
+           children, and the top level.
+        2. Stitch the carried frontier: the terminal also depends on every
+           carried TOP-LEVEL node it cannot already reach — committed
+           history must remain on the path to the end. This can never
+           create a cycle: carried nodes never depend on new nodes.
+        """
+        by_id = {n.node_id: n for n in nodes}
+        top_new_ids = {n.node_id for n in new_nodes if n.parent_id is None}
+
+        def has_explicit_edges(scope_ids: set[str]) -> bool:
+            return any(set(by_id[nid].depends_on)
+                       & (scope_ids - {nid})
+                       for nid in scope_ids if nid in by_id)
+
+        # 1a. sequence containers with no intra-child edges → listed order
+        for cont in [n for n in new_nodes
+                     if n.kind is NodeKind.SEQUENCE]:
+            child_ids = [c.node_id for c in nodes
+                         if c.parent_id == cont.node_id]
+            if (len(child_ids) > 1
+                    and not has_explicit_edges(set(child_ids))):
+                for prev_nid, next_nid in zip(child_ids, child_ids[1:]):
+                    node = by_id[next_nid]
+                    if prev_nid not in node.depends_on:
+                        by_id[next_nid] = replace(
+                            node,
+                            depends_on=node.depends_on + (prev_nid,))
+        # 1b. top level with no intra-top edges → listed order
+        if len(top_new_ids) > 1 and not has_explicit_edges(top_new_ids):
+            chain = [n.node_id for n in nodes if n.node_id in top_new_ids]
+            for prev_nid, next_nid in zip(chain, chain[1:]):
+                node = by_id[next_nid]
+                if prev_nid not in node.depends_on:
+                    by_id[next_nid] = replace(
+                        node, depends_on=node.depends_on + (prev_nid,))
+        # refresh to the CURRENT edge set before reachability
+        nodes = [by_id[n.node_id] for n in nodes]
+        # 2. stitch carried frontier to the terminal
+        terminals = [n for n in nodes if n.kind is NodeKind.TERMINAL]
+        if terminals and carried:
+            term = terminals[0]
+            succ: dict[str, set[str]] = {}
+            for n in nodes:
+                for d in n.depends_on:
+                    succ.setdefault(d, set()).add(n.node_id)
+                if n.parent_id is not None:
+                    succ.setdefault(n.node_id, set()).add(n.parent_id)
+
+            def reaches(start: str, target: str) -> bool:
+                seen = {start}
+                stack = [start]
+                while stack:
+                    cur = stack.pop()
+                    if cur == target:
+                        return True
+                    for s in succ.get(cur, ()):
+                        if s not in seen:
+                            seen.add(s)
+                            stack.append(s)
+                return False
+
+            carried_tops = [c for c in carried if c.parent_id is None]
+            extra = tuple(c.node_id for c in carried_tops
+                          if not reaches(c.node_id, term.node_id))
+            if extra:
+                by_id[term.node_id] = replace(
+                    term, depends_on=term.depends_on + extra)
+                nodes = [by_id[n.node_id] for n in nodes]
+        return nodes
+
+    @staticmethod
+    def _assemble_schema(parsed: dict,
+                         variables: tuple[TaskVariable, ...],
+                         id_offset: int) -> ProjectionSchema | None:
+        proj = parsed.get("projection")
+        if not isinstance(proj, dict):
+            return None
+        raw = proj.get("components")
+        if not isinstance(raw, list) or not raw:
+            return None
+        keys = {v.semantic_key for v in variables}
+        editable_by_key = {v.semantic_key: v.mutability == MUTABILITY_EDITABLE
+                           for v in variables}
+        label_to_id: dict[str, str] = {}
+        comps: list[dict] = []
+        for i, rc in enumerate(raw):
+            if not isinstance(rc, dict):
+                raise ArchitectOutputError(
+                    f"projection component #{i} is not an object")
+            label = str(rc.get("label") or "").strip()
+            if not label:
+                raise ArchitectOutputError(
+                    f"projection component #{i} needs a label")
+            if label in label_to_id:
+                raise ArchitectOutputError(
+                    f"duplicate projection label {label!r}")
+            cid = f"p{id_offset + i + 1:03d}"
+            label_to_id[label] = cid
+            comps.append(rc)
+        components: list[ProjectionComponent] = []
+        for rc in comps:
+            binds = rc.get("binds")
+            binding_key = (str(binds).strip() or None) if binds else None
+            if binding_key is not None and binding_key not in keys:
+                raise ArchitectOutputError(
+                    f"projection component {rc['label']!r} binds unknown "
+                    f"variable {binding_key!r}")
+            children = []
+            for ch in rc.get("children") or []:
+                ch = str(ch)
+                if ch not in label_to_id:
+                    raise ArchitectOutputError(
+                        f"projection component {rc['label']!r} references "
+                        f"unknown child {ch!r}")
+                children.append(label_to_id[ch])
+            editable = bool(rc.get("editable"))
+            if binding_key is not None:
+                editable = editable and editable_by_key[binding_key]
+            components.append(ProjectionComponent(
+                component_id=label_to_id[str(rc["label"])],
+                component_type=str(rc.get("type") or "field"),
+                label=str(rc["label"]), binding_key=binding_key,
+                children=tuple(children), editable=editable))
+        root = str(proj.get("root") or "").strip()
+        if not root:
+            raise ArchitectOutputError("projection needs a 'root' label")
+        if root not in label_to_id:
+            raise ArchitectOutputError(
+                f"projection root {root!r} is not a component label")
+        return ProjectionSchema(root_id=label_to_id[root],
+                                components=tuple(components))

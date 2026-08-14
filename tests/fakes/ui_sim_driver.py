@@ -25,7 +25,7 @@ import logging
 from typing import Any
 
 from taskvm.benchmark.fixtures import CanonicalTaskGraph
-from taskvm.governance.user_behavior_driver import (UserBehaviorDriver,
+from tests.fakes.user_behavior_driver import (UserBehaviorDriver,
                                                      UserBehaviorEvent)
 from taskvm.governance.vm_state import VMStateSnapshot
 

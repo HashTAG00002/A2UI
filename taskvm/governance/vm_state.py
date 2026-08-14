@@ -37,7 +37,13 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from taskvm.execution.rollback import RollbackLog
-    from taskvm.harness.state_adapter import StateAdapter
+    # Agent B (substrate isolation): the adapters field carries the
+    # execution layer's GUI-only task drivers (GUITaskAdapter /
+    # MobileGymTaskAdapter — duck-typed on ``mutate``), NOT the deleted
+    # StateAdapter. Oracle/seed powers live on a separate
+    # EvaluationEnvironment the interpreter never receives here.
+    from taskvm.execution.gui_driver import (GUITaskAdapter,
+                                              MobileGymTaskAdapter)
     from taskvm.benchmark.fixtures import Checkpoint
     from taskvm.task_state.entity_binding import TaskBinding
 
@@ -47,12 +53,19 @@ class VMStateSnapshot:
     """The typed VM-state input to ``GovernanceInterpreter.interpret``."""
     sid: str
     binding: "TaskBinding"
-    adapters: dict[str, "StateAdapter"]
+    adapters: dict[str, "GUITaskAdapter | MobileGymTaskAdapter | Any"]
     rollback_log: "RollbackLog"
     checkpoints: list["Checkpoint"] = field(default_factory=list)
     recorded_checkpoints: list[dict] = field(default_factory=list)
     checkpoint_saga_map: list[tuple[str, str]] = field(default_factory=list)
     current_values: dict[str, dict[str, Any]] | None = None
+    # Agent B: visible-anchor lookup injected by the composition root
+    # (title translation for GG.3 instructions; never an oracle read
+    # inside governance — see interpreter._canonical_for_op). Kept AFTER
+    # all required fields — dataclasses forbid a default-valued field
+    # before a required one (E29: this ordering bug broke the whole
+    # taskvm.governance import chain).
+    anchor_lookup: "Any | None" = None
 
     # ── helpers the interpreter uses ──────────────────────────────────────
     def sagas_after_checkpoint(self, target_checkpoint_id: str) -> list[str]:

@@ -15,12 +15,12 @@ writes ``eval_results/four_step_arc_<ts>/four_step_arc_<ts>.json``. This is the
 ONLY material evidence source for the paper's teaser figure (handoff EE.3).
 
 Modes:
-  --dry-run  : executor='api' (no GUI model needed; apps must be online). Produces
-               REAL round_trip/conflict/rollback numbers via the app API path —
-               stronger than pure structure validation, but NOT §12.16-compliant
-               (API writes are the backdoor). Use to validate the arc wiring.
   default    : executor='gui_agent' (real browser gestures via the GUI executor,
                gpt-5.6-sol; §12.16-compliant). Needs the model + Playwright.
+               GUI-ONLY (Agent B, substrate isolation): the API write executor
+               is deleted — there is no other write path. ``--dry-run`` is kept
+               in argparse only to fail loudly: it used the deleted API write
+               executor (the §12.16 backdoor), so passing it now errors out.
 
 Screenshots are best-effort (Playwright headless); if unavailable the path is
 still recorded in the JSON (the screenshot is evidence, not a gate).
@@ -41,7 +41,10 @@ from taskvm.execution.action_dispatcher import dispatch
 from taskvm.execution.patch_compiler import compile_patch
 from taskvm.execution.rollback import RollbackLog
 from taskvm.harness import replay_engine as replay
-from taskvm.harness.state_adapter import make_adapters
+from taskvm.execution.gui_driver import make_task_adapters
+from taskvm.substrate.builtin_web.evaluation import (
+    make_evaluation_environment, make_evaluation_environments,
+)
 from taskvm.task_state.entity_binding import TaskBinding
 from taskvm.verifier import canonical_state as cs
 from taskvm.verifier.reconciliation import (apply_merge_option, detect_conflicts,
@@ -103,49 +106,53 @@ def _inject_external_taskboard_change(host: str, sid: str, tid: str,
                                       field: str, value: str) -> dict:
     """Simulate a teammate's external concurrent edit on taskboard.<tid>.<field>.
 
-    Uses the taskboard app's OWN mutate API directly (``POST /api/task/<sid>/<tid>``)
-    via a raw ``requests`` call — bypassing TaskVM's adapter/dispatcher entirely.
-    This is what a teammate editing through the taskboard's own UI would effectively
-    do, and crucially it does NOT go through TaskVM's rollback_log (so the external
-    change is unrecorded → the workspace's next re-read detects the divergence,
-    which is exactly the reconciliation conflict §0 property 1 requires).
+    Agent B (substrate isolation): injected through the EVALUATION plane's
+    ``force_write`` (exam-room power) — the runtime has no API write path
+    (the raw ``requests.post`` to the taskboard mutate API lived in the
+    deleted API-executor class and is banned in upper layers by the
+    substrate contract's no-API-backdoor gate). It bypasses TaskVM's
+    adapter/dispatcher entirely — this is what a teammate editing through
+    the taskboard's own UI would effectively do, and crucially it does NOT
+    go through TaskVM's rollback_log (so the external change is unrecorded
+    → the workspace's next re-read detects the divergence, which is exactly
+    the reconciliation conflict §0 property 1 requires).
 
-    Going around the adapter (not through ``inject_task``) is the honest choice:
-    ``inject_task`` replaces the WHOLE session and corrupts sibling entities (T1
-    lost its deadline when re-injecting to edit T2), whereas the mutate API
-    touches only the one field — a clean, minimal external edit."""
-    import requests
-    base = f"http://{host}:3014"
+    ``force_write`` touches only the one field — a clean, minimal external
+    edit (unlike ``inject_task``, which replaces the WHOLE session and
+    corrupts sibling entities)."""
     # taskboard's mutate API maps field→operator (deadline→set_deadline, etc.)
     _FIELD_OP = {"deadline": "set_deadline", "status": "set_status",
                  "assignee": "set_assignee"}
     op = _FIELD_OP.get(field)
     if op is None:
         return {"injected": False, "error": f"no operator for field {field}"}
-    r = requests.post(f"{base}/api/task/{sid}/{tid}",
-                      json={"operator": op, "value": value}, timeout=10)
-    if r.status_code != 200:
-        return {"injected": False, "error": f"{r.status_code}: {r.text[:200]}"}
+    env = make_evaluation_environment("taskboard", host=host)
+    try:
+        env.force_write(sid, tid, op, value)
+    except Exception as e:
+        return {"injected": False, "error": str(e)[:200]}
     return {"injected": True, "tid": tid, "field": field, "operator": op,
-            "value": value, "via": "taskboard_mutate_api_direct"}
+            "value": value, "via": "evaluation_plane_force_write"}
 
 
 # ── the four steps ───────────────────────────────────────────────────────────
-def step1_write(fixture, adapters, sid, rb, *, shot_dir: Path | None,
-                live: bool) -> dict:
+def step1_write(fixture, adapters, envs, sid, rb, *, shot_dir: Path | None) -> dict:
     """Step 1 — bidirectional write-back + non-interference + re-projection.
-    Dispatch release_date 8/14→8/18 across 4 apps; verify round-trip."""
+    Dispatch release_date 8/14→8/18 across 4 apps; verify round-trip.
+
+    Agent B: ``adapters`` = GUI-only write plane (dispatch/compensation);
+    ``envs`` = evaluation plane (canonical snapshots / URLs)."""
     tb = _gt_binding(fixture)
-    pre = cs.snapshot(adapters, sid)
+    pre = cs.snapshot(envs, sid)
     ops = compile_patch(fixture.user_edit, tb)
     rep = dispatch(ops, adapters, sid, broken=None, rollback_log=rb)
-    res = check_round_trip(sid, fixture, adapters, pre)
+    res = check_round_trip(sid, fixture, envs, pre)
     # screenshots after each app's write
     shots = {}
     if shot_dir is not None:
-        for app, ad in adapters.items():
+        for app, env in envs.items():
             p = shot_dir / f"step1_{app}.png"
-            shots[app] = _screenshot(f"{ad.base_url}/{sid}", p) or f"(failed){p.name}"
+            shots[app] = _screenshot(f"{env.base_url}/{sid}", p) or f"(failed){p.name}"
     apps_written = sorted({r.op.app for r in rep.ops if r.applied})
     return {
         "round_trip": round(res.score, 4),
@@ -160,17 +167,21 @@ def step1_write(fixture, adapters, sid, rb, *, shot_dir: Path | None,
     }
 
 
-def step2_reconciliation(fixture, adapters, sid, host) -> dict:
+def step2_reconciliation(fixture, envs, sid, host) -> dict:
     """Step 2 — external concurrent change → conflict marked amber.
     Inject taskboard.T2.deadline=2026-08-20 (teammate edit, conflicts with the
-    user's 8/18); re-read canonical + detect conflicts via resync_with_conflicts."""
+    user's 8/18); re-read canonical + detect conflicts via resync_with_conflicts.
+
+    Agent B: canonical re-reads go through the evaluation environments
+    (``envs``); the external inject goes through the evaluation plane's
+    force_write (see ``_inject_external_taskboard_change``)."""
     tb = _gt_binding(fixture)
     # the projection the user is looking at = the post-step1 state
-    projected = resync_values(tb, adapters, sid)
+    projected = resync_values(tb, envs, sid)
     inj = _inject_external_taskboard_change(host, sid, "T2", "deadline", "2026-08-20")
     # re-read canonical + diff → conflicts (the workspace did NOT trigger this;
     # the external inject did — §0 property 1: re-projection on world-state change)
-    updated_proj, recon = resync_with_conflicts(tb, projected, adapters, sid)
+    updated_proj, recon = resync_with_conflicts(tb, projected, envs, sid)
     conflict_vars = [{"var_id": c.var_id, "app": c.app, "entity_id": c.entity_id,
                       "field": c.field, "projected": c.projected,
                       "underlying": c.underlying} for c in recon.conflicts]
@@ -191,7 +202,8 @@ def step2_reconciliation(fixture, adapters, sid, host) -> dict:
     }
 
 
-def step3_rollback(fixture, adapters, sid, rb, *, shot_dir: Path | None) -> dict:
+def step3_rollback(fixture, adapters, envs, sid, rb, *,
+                  shot_dir: Path | None) -> dict:
     """Step 3 — saga undo → real app state restored.
     undo_saga reverts every write from step 1 (cross-app, LIFO). T2 was externally
     changed in step 2 → its compensation target (8/14) ≠ the external 8/20, so
@@ -201,9 +213,11 @@ def step3_rollback(fixture, adapters, sid, rb, *, shot_dir: Path | None) -> dict
     if saga_id is None:
         return {"saga_id": None, "n_reverted": 0, "partial_failure": True,
                 "error": "no saga to undo", "pass": False}
-    pre_undo = cs.snapshot(adapters, sid)
+    pre_undo = cs.snapshot(envs, sid)
+    # Agent B: compensation re-dispatches through the GUI-only task adapters
+    # (undo_saga -> adapter.mutate = real gestures); snapshots go through envs.
     sres = rb.undo_saga(saga_id, sid, adapters)
-    post_undo = cs.snapshot(adapters, sid)
+    post_undo = cs.snapshot(envs, sid)
     # verify the real app state actually reverted (independent read) + honestly
     # detect external changes between the write (step 1) and the undo (here). If a
     # field's pre-undo value ≠ the saga's recorded `after`, the world changed under
@@ -229,10 +243,10 @@ def step3_rollback(fixture, adapters, sid, rb, *, shot_dir: Path | None) -> dict
     shots = {}
     if shot_dir is not None:
         for app in ("calendar", "taskboard"):
-            ad = adapters.get(app)
-            if ad:
+            env = envs.get(app)
+            if env:
                 p = shot_dir / f"step3_rollback_{app}.png"
-                shots[app] = _screenshot(f"{ad.base_url}/{sid}", p) or f"(failed){p.name}"
+                shots[app] = _screenshot(f"{env.base_url}/{sid}", p) or f"(failed){p.name}"
     return {
         "saga_id": saga_id,
         "n_targets": sres.n_targets,
@@ -247,42 +261,43 @@ def step3_rollback(fixture, adapters, sid, rb, *, shot_dir: Path | None) -> dict
     }
 
 
-def step4_jvm_moment(host, *, live: bool, shot_dir: Path | None) -> dict:
+def step4_jvm_moment(host, *, shot_dir: Path | None) -> dict:
     """Step 4 — JVM moment: same release_date edit on Stack B (outlook_cal+
     taskboard). Different substrate (appointment/scheduled_for/reschedule_appointment
     vs event/date/move_event), same VM op, stable surface."""
     fixture = get_ood_task("outlook_release_reschedule")
     apps = _apps_for(fixture)
-    executor = "gui_agent" if live else "api"
-    adapters = make_adapters(apps=apps, host=host, executor=executor)
+    # Agent B (substrate isolation): API write executor deleted — GUI-only runtime.
+    adapters = make_task_adapters(apps=apps, host=host)
+    envs = make_evaluation_environments(apps, host=host)
     sid = f"arc_step4_{int(time.time()) % 100000}"
-    for ad in adapters.values():
-        ad.reset(sid)
-    replay.seed_apps(fixture, adapters, sid)
+    for env in envs.values():
+        env.reset(sid)
+    replay.seed_apps(fixture, envs, sid)
     tb = _gt_binding(fixture)
-    pre = cs.snapshot(adapters, sid)
+    pre = cs.snapshot(envs, sid)
     ops = compile_patch(fixture.user_edit, tb)
     rep = dispatch(ops, adapters, sid, broken=None)
-    res = check_round_trip(sid, fixture, adapters, pre)
+    res = check_round_trip(sid, fixture, envs, pre)
     # neg-control: broken dispatcher must score ≤0.3 (verifier honesty on Stack B)
     sid_neg = f"arc_step4_neg_{int(time.time()) % 100000}"
-    for ad in adapters.values():
-        ad.reset(sid_neg)
-    replay.seed_apps(fixture, adapters, sid_neg)
+    for env in envs.values():
+        env.reset(sid_neg)
+    replay.seed_apps(fixture, envs, sid_neg)
     ops_neg = compile_patch(fixture.user_edit, _gt_binding(fixture))
     dispatch(ops_neg, adapters, sid_neg, broken="noop")
-    res_neg = check_round_trip(sid_neg, fixture, adapters, pre)
+    res_neg = check_round_trip(sid_neg, fixture, envs, pre)
     # GenUI surface slot comparison: project both stacks' release_date var
-    proj_b = resync_values(tb, adapters, sid)
+    proj_b = resync_values(tb, envs, sid)
     slots_b = [{"var_id": v, "field": info.get("field"), "app": info.get("app"),
                 "value": info.get("value")} for v, info in proj_b.items()]
     shots = {}
     if shot_dir is not None:
-        for app, ad in adapters.items():
+        for app, env in envs.items():
             p = shot_dir / f"step4_stackB_{app}.png"
-            shots[app] = _screenshot(f"{ad.base_url}/{sid}", p) or f"(failed){p.name}"
-    for ad in adapters.values():
-        ad.reset(sid); ad.reset(sid_neg)
+            shots[app] = _screenshot(f"{env.base_url}/{sid}", p) or f"(failed){p.name}"
+    for env in envs.values():
+        env.reset(sid); env.reset(sid_neg)
     return {
         "stack": "B",
         "task": fixture.task_id,
@@ -302,30 +317,38 @@ def step4_jvm_moment(host, *, live: bool, shot_dir: Path | None) -> dict:
 def main(argv=None):
     parser = argparse.ArgumentParser(description="EE.3 four-step arc demo")
     parser.add_argument("--dry-run", action="store_true",
-                        help="executor='api' (no GUI model; apps online). Real "
-                             "numbers via the app API path — validates wiring, "
-                             "NOT §12.16-compliant. Default off = gui_agent.")
+                        help="REMOVED (Agent B): dry-run used the deleted API "
+                             "write executor (the §12.16 backdoor) — the GUI "
+                             "path is the only write path. Passing this now "
+                             "exits with an error instead of silently "
+                             "changing meaning.")
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--out", default=None)
     parser.add_argument("--no-step4", action="store_true",
                         help="skip step 4 (JVM moment) — for fast step1-3 validation")
     args = parser.parse_args(argv)
+    if args.dry_run:
+        # Agent B (substrate isolation): dry_run used the deleted API write
+        # executor (§12.16 backdoor) — removed; the GUI path is the only
+        # write path. Fail loudly rather than silently change meaning.
+        parser.error("--dry-run is removed: it used the deleted API write "
+                     "executor (the §12.16 backdoor — taskvm/harness/"
+                     "state_adapter.py is gone). The GUI path is the only "
+                     "write path; run WITHOUT --dry-run.")
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s")
 
-    live = not args.dry_run
-    executor = "gui_agent" if live else "api"
     ts = time.strftime("%Y%m%d_%H%M%S")
     shot_dir = EVAL_DIR / f"four_step_arc_{ts}"
     out_path = Path(args.out) if args.out else (
-        EVAL_DIR / (f"four_step_arc_live_{ts}.json" if live else f"four_step_arc_{ts}.json"))
+        EVAL_DIR / f"four_step_arc_live_{ts}.json")
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     def _write(report, interrupted=False, steps_completed=None):
         """FF.8: write the report JSON INCREMENTALLY after each step so a
         foreground-window timeout (Step1 launch_full + Step3 rollback exceed
         the 555s bash limit on this box) still yields a partial JSON with
-        execution_mode=gui_agent + the steps that completed + an honest
+        execution_mode=gui_only + the steps that completed + an honest
         `interrupted` flag (§12: don't hide a timeout behind silence)."""
         report["interrupted"] = interrupted
         if steps_completed is not None:
@@ -335,66 +358,65 @@ def main(argv=None):
     # ── Step 1-3: launch_full on Stack A ─────────────────────────────────────
     fixture = get_task("launch_full")
     apps = _apps_for(fixture)
-    adapters = make_adapters(apps=apps, host=args.host, executor=executor)
-    # health check
-    for app, ad in adapters.items():
-        h = ad.health()
+    # Agent B (substrate isolation): API write executor deleted — GUI-only runtime.
+    adapters = make_task_adapters(apps=apps, host=args.host)
+    envs = make_evaluation_environments(apps, host=args.host)
+    # health check (evaluation plane)
+    for app, env in envs.items():
+        h = env.health()
         if h.get("status") != "ok":
             logger.error(f"{app} not healthy: {h} (start the apps first)")
             sys.exit(2)
-        logger.info(f"{app} healthy @ {ad.base_url}")
+        logger.info(f"{app} healthy @ {env.base_url}")
     rb = RollbackLog()
     sid = f"arc_step1_{int(time.time()) % 100000}"
-    for ad in adapters.values():
-        ad.reset(sid)
-    replay.seed_apps(fixture, adapters, sid)
+    for env in envs.values():
+        env.reset(sid)
+    replay.seed_apps(fixture, envs, sid)
 
     base_report = {
         "ts": ts, "test": "four_step_arc",
-        "mode": "gui_agent" if live else "dry_run(api)",
-        "execution_mode": "gui_agent" if live else "api",
+        "mode": "gui_only",
+        "execution_mode": "gui_only",
         "shot_dir": str(shot_dir),
         "honest_framing": (
-            "dry_run mode uses executor='api' (app API writes = the §12.16 backdoor) — "
-            "it validates the arc wiring + produces real round_trip/conflict/rollback "
-            "numbers, but is NOT the §12.16-compliant GUI-gesture path. For the paper's "
-            "teaser figure, re-run WITHOUT --dry-run (gui_agent, gpt-5.6-sol). Step 3's "
-            "partial_failure reflects that T2 was externally changed in step 2 — its "
-            "compensation overwrites the external edit, reported honestly."
-        ) if args.dry_run else (
-            "gui_agent mode: write/rollback drive a real browser via the GUI executor "
-            "(§12.16-compliant). This is the teaser-figure evidence path."
+            "gui_only mode: write/rollback drive a real browser via the GUI "
+            "executor (§12.16-compliant; Agent B deleted the API write "
+            "executor, so the GUI path is the only write path). This is the "
+            "teaser-figure evidence path. Step 3's partial_failure reflects "
+            "that T2 was externally changed in step 2 — its compensation "
+            "overwrites the external edit, reported honestly."
         ),
     }
 
     logger.info("\n=== STEP 1: bidirectional write-back (launch_full 4-App fanout) ===")
-    s1 = step1_write(fixture, adapters, sid, rb, shot_dir=shot_dir, live=live)
+    s1 = step1_write(fixture, adapters, envs, sid, rb, shot_dir=shot_dir)
     logger.info(f"[step1] round_trip={s1['round_trip']} non_interference={s1['non_interference']} "
                 f"n_ops={s1['n_ops']} apps={s1['apps_written']} pass={s1['pass']}")
     _write({**base_report, "step1_write": s1}, interrupted=True, steps_completed=["step1_write"])
 
     logger.info("\n=== STEP 2: reconciliation (external T2.deadline→8/20) ===")
-    s2 = step2_reconciliation(fixture, adapters, sid, args.host)
+    s2 = step2_reconciliation(fixture, envs, sid, args.host)
     logger.info(f"[step2] conflict_detected={s2['conflict_detected']} "
                 f"n_conflicts={s2['n_conflicts']} vars={s2['conflict_vars']} pass={s2['pass']}")
     _write({**base_report, "step1_write": s1, "step2_reconciliation": s2},
            interrupted=True, steps_completed=["step1_write", "step2_reconciliation"])
 
     logger.info("\n=== STEP 3: rollback (saga undo, honest partial_failure) ===")
-    s3 = step3_rollback(fixture, adapters, sid, rb, shot_dir=shot_dir)
+    s3 = step3_rollback(fixture, adapters, envs, sid, rb, shot_dir=shot_dir)
     logger.info(f"[step3] saga={s3.get('saga_id')} n_reverted={s3.get('n_reverted')}/"
                 f"{s3.get('n_targets')} partial_failure={s3.get('partial_failure')} pass={s3.get('pass')}")
     _write({**base_report, "step1_write": s1, "step2_reconciliation": s2, "step3_rollback": s3},
            interrupted=True, steps_completed=["step1_write", "step2_reconciliation", "step3_rollback"])
 
-    for ad in adapters.values():
-        ad.reset(sid)
+    for env in envs.values():
+        env.reset(sid)
 
     # ── Step 4: JVM moment on Stack B ────────────────────────────────────────
     s4 = None
     if not args.no_step4:
         logger.info("\n=== STEP 4: JVM moment (Stack B = outlook_cal+taskboard) ===")
-        s4 = step4_jvm_moment(args.host, live=live, shot_dir=shot_dir)
+        s4 = step4_jvm_moment(args.host, shot_dir=shot_dir)
         logger.info(f"[step4] stack={s4['stack']} round_trip={s4['round_trip']} "
                     f"trajectory={s4['trajectory_apps']} neg={s4['neg_control']} pass={s4['pass']}")
 
