@@ -1,5 +1,7 @@
 # Coding Agent C：State Compiler、Task Architect 与 Governance/Replan
 
+> **分层协议（冻结）**：见 [docs/contracts/layered_ownership_protocol.md](../../contracts/layered_ownership_protocol.md)。**内容合法性由生产者负责。** 你 own `TaskArchitecture` 的静态合法性：workflow 三 primitive shape（SEQUENCE 单链 / FAN_OUT lane 独立 / BARRIER fan-in / terminal 唯一 sink / 无 orphan）、ActionContract.desired_state keys ⊆ variables、contract desired 与 TaskVariable desired 一致（split-brain guard）、ProjectionSchema binding ⊆ variables、duplicate key。`TaskArchitecture.validate()` 在**构造时一次性**自我合法；Kernel 不再遍历 plan 重查 shape/key/binding/split-brain。
+
 ## 你的唯一任务
 
 把初始化阶段的多个零散模型角色合并成清晰的两步高层智能：

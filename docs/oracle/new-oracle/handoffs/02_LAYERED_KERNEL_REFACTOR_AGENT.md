@@ -1,5 +1,7 @@
 # Coding Agent A：层级骨架、TaskVM Domain 与 Kernel 重构
 
+> **分层协议（冻结）**：见 [docs/contracts/layered_ownership_protocol.md](../../contracts/layered_ownership_protocol.md)。**内容合法性由生产者负责；时序合法性由 Kernel 负责。** 你只保留 §4 的时序/状态不变量（epoch/lifecycle/atomicity/rewind/boundary/timeline）；**内容校验下放到 domain 构造器与 typed result**，不在 Kernel 重查。本 wave 的具体瘦身任务见 [12_KERNEL_SLIM_AGENT_A_v5.md](12_KERNEL_SLIM_AGENT_A_v5.md)（kernel.py 1194→≤600）。
+
 ## 你的唯一任务
 
 建立整个重构的稳定骨架与跨层协议。你不负责实现具体 Web/Mobile substrate，不负责做前端视觉，不负责调用真实模型，也不负责写最终 benchmark。你的输出必须让后续四个 agent 可以在不互相读实现细节的情况下并行工作。

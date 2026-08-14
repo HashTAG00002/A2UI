@@ -1,5 +1,7 @@
 # Coding Agent E：CUA Autonomy Runtime、同步、热中断、验证与真实回退
 
+> **分层协议（冻结）**：见 [docs/contracts/layered_ownership_protocol.md](../../contracts/layered_ownership_protocol.md)。**内容合法性由生产者负责。** 你 own `VerificationResult` 与 `CompensationResult` 的内容合法性：before/after 来自执行前后新鲜观察、独立 visible verifier、completion_condition 已查、IRREVERSIBLE 能力正确报告、CompensationResult 只含当前 plan entries（typed，按 plan.entries 构造，无 `dict[str,Any]`）。Kernel 只查 action_id/epoch/plan 的时序与 lifecycle，**不重做 verifier**、不替你证明 freshness。Verifier 只存在一份（你），不 Runtime 验一次 Kernel 再验一次。
+
 ## 你的唯一任务
 
 实现一个 substrate-neutral 的自治执行循环：TaskVM 在用户不介入时持续推进；每个 CUA action 后产生观察并更新 runtime；用户热插拔时阻止过时动作；验证后才 commit；回退只走真实 GUI compensation。

@@ -1,5 +1,7 @@
 # Coding Agent B：Substrate 完全隔离、GUI-only Port 与可见观察
 
+> **分层协议（冻结）**：见 [docs/contracts/layered_ownership_protocol.md](../../contracts/layered_ownership_protocol.md)。**内容合法性由生产者负责。** 你 own `Observation` 的内容合法性：format、timestamp/revision、surface 是 TaskVM-owned handle_id、无 hidden DB ID、GuiAction 是真实 click/type/scroll。这些在**你构造 Observation 时**自我合法；Kernel 不替你重查 substrate 细节。
+
 ## 你的唯一任务
 
 让 Web built-in、MobileGym、OSWorld 的所有差异只存在于 `taskvm/substrate/`，并让上层只看到统一的观察与动作接口。彻底删除 TaskVM runtime 的 API executor、hidden database ID 和 `read_canonical()` 依赖。

@@ -4,6 +4,7 @@
 > **适用对象**：审计 Agent、规划 Agent、各模块 Coding Agent、最终集成 Agent。  
 > **唯一目标**：交付最终可运行的 TaskVM prototype、最终 benchmark 和稳定用户前端。  
 > **不再保留**：W1/W2/W3/GG/EE 等阶段叙事、kill-test 产物、API executor、hidden-ID runtime、fixture 驱动的生产工作流、临时 fallback UI。
+> **分层协议（冻结，2026-08-14）**：见 [docs/contracts/layered_ownership_protocol.md](../../contracts/layered_ownership_protocol.md) —— **内容合法性由生产者负责；时序合法性由 Kernel 负责。一个性质只有一个 owner，不在下一层重证。** 各 Agent 产出的对象必须在**构造时**自我合法，Kernel 不替下游重查内容。审计不得再以"假设下游 hostile"为由扩 Kernel 防御面积（treadmill 闸门）。
 
 ---
 
