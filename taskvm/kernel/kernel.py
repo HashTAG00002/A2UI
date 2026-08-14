@@ -762,10 +762,15 @@ class TaskVMKernel:
                             "detail": result.detail}, plan_id)
                 self._refresh_projection_data()
                 return "failed"
-            complete = undone_keys == known
+            # §4.11: COMPLETE means the timeline is fully back at the
+            # boundary — every reversible entry landed compensated AND no
+            # uncompensatable standing work remains (an IRREVERSIBLE
+            # commit that stays is honest PARTIAL, never a fake COMPLETE)
+            complete = (undone_keys == known and not plan.uncompensatable)
             undone_nodes = self._undone_nodes(plan, undone_keys)
             rec = self._checkpoints.get(plan.target_checkpoint_id)
-            audit = self._restore_governance_locked(plan, rec, reported)
+            audit = self._restore_governance_locked(
+                plan, rec, reported, complete)
             blocked_ids = {b.node_id for b in plan.uncompensatable}
             boundary = set(rec.committed_nodes)
             compensated_nodes = sorted(
@@ -777,6 +782,13 @@ class TaskVMKernel:
                 # deterministic frontier rewind to the boundary
                 self._workflows.rewind_to_boundary(
                     frozenset(boundary | blocked_ids))
+                # §4.11: the checkpoint's desired plane is authoritative
+                # for the re-armed future — deterministically retarget the
+                # surviving future contracts (the same channel as
+                # LocalPatch; committed history is never touched), so the
+                # runtime chases the restored targets, never the abandoned
+                # ones
+                self._workflows.retarget_action_contracts(dict(rec.desired))
             else:
                 # cross-boundary, or PARTIAL: undone work is honestly
                 # marked COMPENSATED; the remaining future is void and the
@@ -788,6 +800,16 @@ class TaskVMKernel:
                     + ("crossed an intent/structure boundary"
                        if plan.requires_recompose else "is PARTIAL"))
             self._consume_history(rec, undone_nodes, complete)
+            # §4.11: loops rewound or voided by the rollback lose their
+            # pre-rollback progress and restart from iteration 1 — only
+            # loops still COMMITTED keep their counter (checkpoints pin
+            # stable boundaries, so no loop is mid-flight here)
+            still_committed = {
+                nid for nid, st in self._workflows.snapshot().statuses.items()
+                if st is NodeStatus.COMMITTED}
+            self._loop_iters = {
+                nid: it for nid, it in self._loop_iters.items()
+                if nid in still_committed}
             payload = {"plan_id": plan_id, "detail": result.detail,
                        "restored": audit["restored"],
                        "compensated_nodes": compensated_nodes,
@@ -915,11 +937,15 @@ class TaskVMKernel:
 
     def _restore_governance_locked(
             self, plan: CompensationPlan, rec: CheckpointRecord,
-            reported: dict) -> dict[str, Any]:
+            reported: dict, complete: bool) -> dict[str, Any]:
         """Fold the reported fresh observations (plan order ⇒ the
         earliest action's value is the resting one), then restore the
         checkpoint's desired plane + structure metadata + intent. Never
-        deletes later-appeared variables; never restores stale evidence."""
+        deletes later-appeared variables; never restores stale evidence.
+        On COMPLETE the desired plane is restored for EVERY surviving
+        variable (a LocalPatch-only drift owns no physical entry); on
+        PARTIAL only the physically undone entries rewind their desired
+        — standing writes keep their standing targets."""
         by_key: dict[str, Any] = {}
         for e in plan.entries:
             r = reported.get((e.node_id, e.semantic_key))
@@ -937,6 +963,11 @@ class TaskVMKernel:
             nv = v
             if v.semantic_key in final_entry:
                 nv = nv.with_desired(final_entry[v.semantic_key].to_desired)
+            elif complete and v.semantic_key in rec.desired:
+                # §4.11: a COMPLETE rollback rewinds governance to the
+                # boundary for every surviving variable — not only those
+                # with a physical compensation entry
+                nv = nv.with_desired(rec.desired[v.semantic_key])
             meta = rec.structure.get(v.semantic_key)
             if meta and (nv.label, nv.value_type, nv.mutability) != (
                     meta["label"], meta["value_type"], meta["mutability"]):
@@ -952,7 +983,7 @@ class TaskVMKernel:
                 new_vars.append(TaskVariable(
                     semantic_key=key, label=meta["label"],
                     value_type=meta["value_type"], mutability=meta["mutability"],
-                    observed=rec.observed.get(key),
+                    observed=None,
                     desired=rec.desired.get(key)))
                 restored_structure.append(key)
         intent_restored = (rec.intent is not None

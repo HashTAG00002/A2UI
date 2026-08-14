@@ -100,8 +100,8 @@ event_log 等内部模块禁止被 kernel 包外 import（gate 强制执行）�
 - `request_compensation(patch) -> CompensationPlan` — **从 kernel 自己的已提交动作历史生成**：只覆盖 checkpoint 之后 verified 的动作（before/after 是动作当时真实记录）；TaskVM 没碰过的外部漂移不产生回退项；IRREVERSIBLE 动作进 `uncompensatable`；intent/structure（含 label/type/mutability）不同 ⇒ `requires_recompose=True`
 - `record_compensation_result(plan_id, result: CompensationResult) -> str` — **epoch 绑定 + 单次落地**，返回时间线 disposition：
   - `"discarded"`：stale plan（独立 `CompensationDiscarded` 事件，不混同执行失败）；terminal plan 再落地抛错
-  - `"complete"`：全部 plan entry 落地 compensated ⇒ 折叠上报的新鲜观察；恢复 checkpoint 变量的 desired + label/type/mutability（**不恢复陈旧 evidence**）；重新挂上结构上消失的 checkpoint 变量；**绝不逻辑删除后出现的变量**；恢复 checkpoint intent。同 intent/结构 ⇒ frontier 确定性倒回边界并重新武装同一路径；跨边界 ⇒ 被撤销的提交标 COMPENSATED + 剩余未来 INVALIDATED + 等待 recompose。**target 之后的 active future checkpoints 从 active timeline 截断**（`truncated_checkpoint_ids` 进事件 payload）
-  - `"partial"`：有 entry 未撤销 ⇒ 诚实归档（`CompensationPartial` 事件，payload 含 `uncompensated` 明细）；被撤销的工作标 COMPENSATED（绝不伪装成仍成立，也不静默重新武装）；standing 写入保持 COMMITTED；**不截断未来 checkpoint history**；只消费已撤销条目的动作历史（standing 写入的历史保留给更早 checkpoint 的回滚）；forward autonomy 阻断，等待治理（recompose）
+- `"complete"`：**全部 reversible entry 落地 compensated 且无 uncompensatable standing work**（IRREVERSIBLE 提交仍在 ⇒ 诚实的 partial，绝不限伪 complete）⇒ 折叠上报的新鲜观察；恢复 checkpoint 的 desired 平面（**全部幸存变量**，含无物理 entry 的 LocalPatch-only 漂移）+ label/type/mutability（**不恢复陈旧 evidence**）；重新挂上结构上消失的 checkpoint 变量（**observed = unknown**：kernel 没有眼睛，现实由 verifier 重新观察填入，绝不从 checkpoint 快照伪造，§4.12）；**绝不逻辑删除后出现的变量**；恢复 checkpoint intent。同 intent/结构 ⇒ frontier 确定性倒回边界并重新武装同一路径，且对幸存未来合同做**确定性 retarget 回 checkpoint desired**（与 LocalPatch 同一通道；committed 历史永不动）+ 被倒回的 loop counter 重置（仍 COMMITTED 的 loop 保留）；跨边界 ⇒ 被撤销的提交标 COMPENSATED + 剩余未来 INVALIDATED + 等待 recompose。**target 之后的 active future checkpoints 从 active timeline 截断**（`truncated_checkpoint_ids` 进事件 payload）
+- `"partial"`：有 entry 未撤销**或存在 uncompensatable standing work** ⇒ 诚实归档（`CompensationPartial` 事件，payload 含 `uncompensated` 明细与 `uncompensatable_nodes`）；被撤销的工作标 COMPENSATED（绝不伪装成仍成立，也不静默重新武装）；standing 写入（含不可逆提交）保持 COMMITTED；**不截断未来 checkpoint history**；只消费已撤销条目的动作历史（standing 写入的历史保留给更早 checkpoint 的回滚）；forward autonomy 阻断，等待治理（recompose）；被作废未来的 loop counter 同样重置
   - `"failed"`：无 entry 被撤销 ⇒ `CompensationFailed` 事件；**状态完全不变**
 
 ### 治理事件与冲突
@@ -146,7 +146,7 @@ event_log 等内部模块禁止被 kernel 包外 import（gate 强制执行）�
 12. bounded loop 只能被显式终止决定提交：iteration 计数、termination 评估、max_iterations 强制（超限 ⇒ FAILED + escalation）。
 13. **pending compensation 阻断一切 forward autonomy**，直到计划落地（complete/partial/failed）或被治理超越。
 14. **两阶段封闭**：set_plan/init_task_state one-shot；GoalPatch 后执行阻断直至 recompose 原子闭环；VERIFY 独占 READY→FAILED。
-15. **rollback 时间线归档**：COMPLETE 倒回 frontier + 截断 active future checkpoints；PARTIAL 诚实标记 COMPENSATED、不截断、等待治理；FAILED 零副作用；组合边界（set_plan/recompose）只安装经 `TaskArchitecture` 验证的组合（dangling 引用 / split-brain / orphan 一律拒；已提交历史节点豁免）。
+15. **rollback 时间线归档**：COMPLETE = 全部 reversible entry 撤销且无 uncompensatable standing work——倒回 frontier + 恢复全部 checkpoint desired + retarget 幸存未来合同 + 重置被倒回的 loop counter + 截断 active future checkpoints；PARTIAL（含不可逆提交仍在）诚实标记 COMPENSATED、不截断、等待治理；跨结构恢复的变量 observed=unknown，等 verifier 重新观察；FAILED 零副作用；组合边界（set_plan/recompose）只安装经 `TaskArchitecture` 验证的组合（dangling 引用 / split-brain / orphan 一律拒；已提交历史节点豁免）。
 
 > 内容合法性（workflow shape、projection tree、contract/binding 引用、duplicate key、typed result 可表达性）**不是** Kernel 不变量——它们是 domain constructor 的所有物，由 `tests/domain/` 锁定。Kernel 不为它们设第二道检查。
 

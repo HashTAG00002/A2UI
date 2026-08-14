@@ -362,14 +362,19 @@ def test_irreversible_action_is_never_fake_reverted():
         patch_id="rb", target_checkpoint_id="ckpt:C0"))
     assert plan.entries == ()                        # NO fake "set it back"
     assert [b.node_id for b in plan.uncompensatable] == ["a1"]
+    # v5 rollback closure: standing uncompensatable work means the
+    # timeline is NOT fully back at the boundary — honest PARTIAL,
+    # never a fake COMPLETE (§4.11)
     assert k.record_compensation_result(
-        plan.plan_id, _comp_success(plan, k.epoch)) == "complete"
+        plan.plan_id, _comp_success(plan, k.epoch)) == "partial"
     # the node is honestly NOT compensated — the send still stands
     assert k.workflow().statuses["a1"] is NodeStatus.COMMITTED
     assert k.task_state().variable("announcement").observed == "已发送"
     ev = [e for e in k.events()
-          if e.kind is EventKind.COMPENSATION_APPLIED][-1]
+          if e.kind is EventKind.COMPENSATION_PARTIAL][-1]
     assert "a1" in ev.payload["uncompensatable_nodes"]
+    # PARTIAL waits for governance (recompose) before forward autonomy
+    assert k.pending_recompose is not None
 
 
 def test_external_drift_is_not_rolled_back():

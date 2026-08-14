@@ -20,12 +20,15 @@ from taskvm.domain import (
     CompensationResult,
     EventKind,
     GoalPatch,
+    LocalPatch,
     NodeKind,
     NodeStatus,
     ObservedValue,
+    Reversibility,
     TaskIntent,
     TaskVariable,
     ValidationError,
+    VariableUpdate,
     VerificationResult,
     WorkflowGraph,
     WorkflowNode,
@@ -359,7 +362,150 @@ def test_compensation_result_identity_and_single_use():
             plan.plan_id, _full_success(plan, k.epoch))
 
 
-# ══ 6. checkpoint id namespace (no collision with node ids by construction) ═
+# ══ 6. v5 rollback closure (Oracle audit: §4.11 / §4.12 gaps) ══════════════
+def test_irreversible_only_rollback_is_partial():
+    """§4.11: an IRREVERSIBLE commit the runtime cannot undo must NEVER
+    be recorded as COMPLETE. 'every reversible entry compensated' is
+    necessary, not sufficient — no uncompensatable standing work is."""
+    g = WorkflowGraph(nodes=(
+        WorkflowNode(node_id="send", kind=NodeKind.ACTION, label="send",
+                     contract=ActionContract(
+                         contract_id="c_send",
+                         semantic_goal="send the message",
+                         desired_state={"sent": "yes"},
+                         completion_condition="message visibly sent",
+                         reversibility=Reversibility.IRREVERSIBLE)),
+        _action_node("a2", "x", 3, depends_on=("send",)),
+        _terminal("t", "a2"),
+    ))
+    k = _kernel((_var("sent", "no", "yes"), _var("x", 1, 3)), g)
+    k.commit_checkpoint("C0", "boundary")
+    _run(k, "send", "sent", "yes")            # message is out — for good
+    k.commit_checkpoint("C1", "future boundary")
+    plan = k.request_compensation(CompensationPatch(
+        patch_id="rb", target_checkpoint_id="ckpt:C0"))
+    assert plan.entries == ()                 # nothing reversible to undo
+    assert [b.node_id for b in plan.uncompensatable] == ["send"]
+    # empty entries + honest uncompensatable ⇒ PARTIAL, never COMPLETE
+    assert k.record_compensation_result(
+        plan.plan_id, _result(plan, k.epoch)) == "partial"
+    # the irreversible write honestly stays COMMITTED
+    assert k.workflow().statuses["send"] is NodeStatus.COMMITTED
+    # the future checkpoint history is NOT truncated
+    assert [r.checkpoint_id for r in k.checkpoints()] == ["ckpt:C0", "ckpt:C1"]
+    # PARTIAL waits for governance (recompose), per protocol §8
+    assert k.pending_recompose is not None
+    ev = [e for e in k.events()
+          if e.kind is EventKind.COMPENSATION_PARTIAL][-1]
+    assert ev.payload["uncompensatable_nodes"] == ["send"]
+
+
+def test_localpatch_only_rollback_restores_checkpoint_desired():
+    """§4.11: a rollback with NO physical action is a pure governance
+    rewind. The checkpoint desired plane must be restored for every
+    surviving variable — not only variables that happen to own a
+    physical compensation entry."""
+    g = WorkflowGraph(nodes=(
+        _action_node("a1", "x", 1),
+        _terminal("t", "a1"),
+    ))
+    k = _kernel((_var("x", 1, 1),), g)
+    k.commit_checkpoint("C0", "boundary")      # x: observed=1, desired=1
+    k.apply_local_patch(LocalPatch(patch_id="lp", variable_updates=(
+        VariableUpdate(semantic_key="x", new_value=2),)))
+    assert k.task_state().variable("x").desired == 2
+    plan = k.request_compensation(CompensationPatch(
+        patch_id="rb", target_checkpoint_id="ckpt:C0"))
+    assert plan.entries == ()                  # no action ever ran
+    assert not plan.requires_recompose
+    assert k.record_compensation_result(
+        plan.plan_id, _result(plan, k.epoch)) == "complete"
+    assert k.task_state().variable("x").desired == 1   # governance rewound
+
+
+def test_complete_rollback_retargets_surviving_future_contracts():
+    """§4.11: a COMPLETE same-path rollback restores the checkpoint
+    desired AND deterministically retargets the re-armed future
+    contracts — otherwise the CUA would chase the abandoned target."""
+    g = WorkflowGraph(nodes=(
+        _action_node("a1", "x", 1),
+        _terminal("t", "a1"),
+    ))
+    k = _kernel((_var("x", 1, 1),), g)
+    k.commit_checkpoint("C0", "boundary")
+    k.apply_local_patch(LocalPatch(patch_id="lp", variable_updates=(
+        VariableUpdate(semantic_key="x", new_value=2),)))
+    # LocalPatch deterministically retargeted the future contract to 2
+    assert k.workflow().graph.node("a1").contract.desired_state == {"x": 2}
+    plan = k.request_compensation(CompensationPatch(
+        patch_id="rb", target_checkpoint_id="ckpt:C0"))
+    assert k.record_compensation_result(
+        plan.plan_id, _result(plan, k.epoch)) == "complete"
+    # a1 is re-armed on the checkpoint target, not the abandoned one
+    assert k.workflow().graph.node("a1").contract.desired_state == {"x": 1}
+    assert k.workflow().statuses["a1"] is NodeStatus.READY
+
+
+def test_complete_rollback_resets_rewound_loop_counters():
+    """§4.11: loops re-armed by a rewind start over from iteration 1 —
+    their pre-rollback progress is gone with the undone timeline."""
+    g = WorkflowGraph(nodes=(
+        WorkflowNode(node_id="L", kind=NodeKind.BOUNDED_LOOP, label="loop",
+                     termination_predicate="x settled", max_iterations=3),
+        _action_node("b", "x", 1, parent_id="L"),
+        _terminal("t", "L"),
+    ))
+    k = _kernel((_var("x", 1, 1),), g)
+    k.commit_checkpoint("C0", "boundary")
+    for _ in range(2):                          # two full iterations
+        k.begin_loop_iteration("L")
+        _run(k, "b", "x", 1)                    # no value change → no entry
+        k.evaluate_loop_termination("L", terminated=False)
+    assert k.begin_loop_iteration("L") == 3     # (also re-arms the body)
+    _run(k, "b", "x", 1)
+    k.evaluate_loop_termination("L", terminated=False)
+    plan = k.request_compensation(CompensationPatch(
+        patch_id="rb", target_checkpoint_id="ckpt:C0"))
+    assert k.record_compensation_result(
+        plan.plan_id, _result(plan, k.epoch)) == "complete"
+    # the loop was rewound: it restarts from iteration 1, not 4
+    assert k.workflow().statuses["L"] is NodeStatus.READY
+    assert k.begin_loop_iteration("L") == 1
+
+
+def test_cross_structure_rollback_restores_variable_with_unknown_observed():
+    """§4.12: a cross-structure rollback re-attaches the checkpoint's
+    variable with its structure metadata and desired plane — but the
+    kernel has no eyes: observed stays UNKNOWN until a fresh observation
+    lands, never faked from the checkpoint snapshot."""
+    g = WorkflowGraph(nodes=(
+        _action_node("a1", "x", 2),
+        _terminal("t", "a1"),
+    ))
+    k = _kernel((_var("x", 1, 2),), g)
+    k.commit_checkpoint("C0", "boundary")       # x: observed=1, desired=2
+    # structure drift: x disappears, only y remains
+    k.recompose(
+        (_var("y", 0, 5),), reason="drift",
+        new_graph=WorkflowGraph(nodes=(
+            _action_node("a2", "y", 5), _terminal("t2", "a2"))))
+    assert k.task_state().variable("x") is None
+    plan = k.request_compensation(CompensationPatch(
+        patch_id="rb", target_checkpoint_id="ckpt:C0"))
+    assert plan.requires_recompose               # structure crossed
+    assert k.record_compensation_result(
+        plan.plan_id, _result(plan, k.epoch)) == "complete"
+    v = k.task_state().variable("x")
+    assert v is not None                         # structure restored
+    assert v.label == "x"
+    assert v.desired == 2                        # governance plane restored
+    assert v.observed is None                    # reality NOT faked (§4.12)
+    # the fresh observation is what fills observed — nothing else may
+    k.apply_observation([_obs("x", 1)])
+    assert k.task_state().variable("x").observed == 1
+
+
+# ══ 7. checkpoint id namespace (no collision with node ids by construction) ═
 def test_checkpoint_ids_are_namespaced():
     g = WorkflowGraph(nodes=(
         _action_node("a1", "x", 2),

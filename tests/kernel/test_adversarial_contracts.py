@@ -300,7 +300,11 @@ def test_rollback_restores_structure_without_logical_deletion():
     assert state.variable("x").observed == 10   # external drift kept — honest
     y = state.variable("y")
     assert y is not None and y.label == "Y 标签"   # structure restored
-    assert y.value_type == "date" and y.observed == 2 and y.desired == 2
+    assert y.value_type == "date" and y.desired == 2
+    # v5 rollback closure (§4.12): the kernel has no eyes — a restored
+    # variable's observed plane is UNKNOWN until a fresh observation lands,
+    # never faked from the checkpoint snapshot
+    assert y.observed is None
     z = state.variable("z")
     assert z is not None and z.observed == 9   # NOT logically deleted
     ev = [e for e in k.events()
