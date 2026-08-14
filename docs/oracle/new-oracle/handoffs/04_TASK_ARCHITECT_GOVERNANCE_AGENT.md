@@ -1,17 +1,26 @@
 # Coding Agent C：State Compiler、Task Architect 与 Governance/Replan
 
 > **分层协议（冻结）**：见 [docs/contracts/layered_ownership_protocol.md](../../contracts/layered_ownership_protocol.md)。**内容合法性由生产者负责。** 你 own `TaskArchitecture` 的静态合法性：workflow 三 primitive shape（SEQUENCE 单链 / FAN_OUT lane 独立 / BARRIER fan-in / terminal 唯一 sink / 无 orphan）、ActionContract.desired_state keys ⊆ variables、contract desired 与 TaskVariable desired 一致（split-brain guard）、ProjectionSchema binding ⊆ variables、duplicate key。`TaskArchitecture.validate()` 在**构造时一次性**自我合法；Kernel 不再遍历 plan 重查 shape/key/binding/split-brain。
+>
+> **owner 分工（A owns type+validation；C owns production）**：C **复用** `taskvm/domain/architecture.py` 中 `TaskArchitecture` 的 validating 构造器产出 TaskArchitecture——构造时由 A 的 ctor+`validate()` 一次证明静态合法性。C **不重新实现也不重复** shape/key/binding/split-brain 校验（那是 A 的单一 owner 职责，layered_ownership_protocol §1）。C 只负责把 model 输出组装进 A 的构造器签名；组装失败 = 报错或有限 repair，绝不在 C 侧另起一套 validate。
 
 ## 你的唯一任务
 
 把初始化阶段的多个零散模型角色合并成清晰的两步高层智能：
+
+> **FIRST TASK（audit_charter §2：合同未冻结先冻结合同）**：先交付一页 SHORT 层合同 `docs/contracts/architect.md`（列出 C 拥有的静态不变量 + 输入 DTO + facade 消费面），再开始实现。短合同，不是 1000 行实现手册。
 
 1. State Compiler：可见观察 → 任务相关状态与 binding evidence。
 2. Task Architect / Projection Composer：目标 + task state → milestone、workflow topology、projection schema、action contracts。
 
 同时实现 LocalPatch / GoalPatch / CompensationPatch 的治理语义和受影响未来重规划。不要负责 CUA 具体点击，不负责 Flask 页面视觉。
 
-依赖：Agent A 的 domain/kernel contract；使用 Agent B 暴露的 Observation 类型，但不要 import 具体 substrate。
+依赖：仅 Agent A 的 `taskvm.kernel` facade + `taskvm.domain` 类型。
+
+**C 不耦合 B（单一 owner，跨层零 concrete-type 依赖）**：
+- C 定义自己的纯层内输入 DTO `CompilerObservationView`（字段：visible content / visual evidence / surface identity / observation revision / visible-handle evidence）。这是 C 唯一接受的观察类型，纯 domain 类型，不 import 任何 substrate。
+- B 的 raw `SubstrateObservation` 由 composition/runtime 层**确定性转换**成 `CompilerObservationView`；C 永远不见 B 的 Python concrete 类型，也绝不 `import taskvm.substrate`。类比：Ethernet frame → IP packet → TCP stream，上层不知底层 driver 类。
+- architecture gate（`tests/architecture/test_import_boundaries.py` L54-57）已给 `taskvm/architect` `allowed_taskvm = {taskvm.domain, taskvm.kernel}` 且无 substrate——**保持该 gate，不得放宽以让 C import substrate**。
 
 ---
 
@@ -25,7 +34,11 @@ tests/governance/**
 docs/contracts/architect.md
 ```
 
-只通过公开接口修改 kernel，不修改 substrate/projection/execution 实现。
+只通过公开接口消费 kernel，不修改 substrate/projection/execution 实现。
+
+**冻结边界（B/C 并行开工，audit 已 APPROVE 并 FROZEN Agent A）**：
+- A 冻结。C 禁止修改 `taskvm/domain/**`、`taskvm/kernel/**` 与冻结合同 `docs/contracts/kernel.md`。任何对 A 合同的改动 = 先在本目录提 RFC（audit_charter §3.1），不在本 wave 内动 A。
+- C 只消费 A 公共 facade：`from taskvm.kernel import TaskVMKernel` + `from taskvm.domain import ...`。**禁止** `from taskvm.kernel.event_log import ...`、`from taskvm.kernel.workflow_store import ...`、或任何 `taskvm.kernel.*_store` 内部模块（architecture gate 强制；facade 只暴露 `Kernel` + 只读 snapshot/record）。
 
 ---
 
@@ -44,6 +57,8 @@ docs/contracts/architect.md
 ## State Compiler
 
 输入只能是：
+
+> 这些输入的字段对齐 C 的 `CompilerObservationView` DTO；C 不接收、也不解构 B 的 `SubstrateObservation` 原始类型。
 
 - 用户目标与约束；
 - Substrate Observation 中的截图、可见文本、a11y/DOM 可见结构；

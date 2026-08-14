@@ -6,6 +6,8 @@
 > **不再保留**：W1/W2/W3/GG/EE 等阶段叙事、kill-test 产物、API executor、hidden-ID runtime、fixture 驱动的生产工作流、临时 fallback UI。
 > **分层协议（冻结，2026-08-14）**：见 [docs/contracts/layered_ownership_protocol.md](../../contracts/layered_ownership_protocol.md) —— **内容合法性由生产者负责；时序合法性由 Kernel 负责。一个性质只有一个 owner，不在下一层重证。** 各 Agent 产出的对象必须在**构造时**自我合法，Kernel 不替下游重查内容。审计不得再以"假设下游 hostile"为由扩 Kernel 防御面积（treadmill 闸门）。
 > **审计 Agent 专属 charter（冻结）**：见 [docs/contracts/audit_charter.md](../../contracts/audit_charter.md) —— 审计开工前必读。审计只验"冻结不变量是否真的成立 + 分层是否干净 + doc-vs-code 是否一致"，**不重设计、不扩防御、不跨轮 drip-feed**；新 invariant category 走 RFC 不算 finding；越权 finding 作废不阻塞冻结。
+>
+> **权威源规则**：`docs/contracts/*.md` + 本目录 handoffs 是唯一权威源。`taskvm/__init__.py` 携带陈旧文本（"Verifier always reads hidden canonical sandbox state"、"W1 = kill-test ..."、`__version__ = "0.1.0-w1"`），与 v5 不一致；**B/C 必须忽略该文件的陈旧文本**，不得据其推断当前合同。该 drift 已路由给 Agent G（`08_INTEGRATION_RELEASE_CLEANUP_AGENT.md`，Wave 3）清理，**non-blocking、非 A 职责**——不得现在改动。
 
 ---
 
@@ -191,11 +193,13 @@ Evaluation 可以使用 hidden state 来：
 
 ### Wave 1：冻结契约
 
+> **审计最终裁决（2026-08-14，针对 main @ 6848f26）**：Agent A = **APPROVE / FROZEN**。B 与 C 获授权在冻结的 A 基础上**并行开工**。A 已冻结：B/C **不得修改** `taskvm/domain/**`、`taskvm/kernel/**` 或冻结的 Kernel 合同（`docs/contracts/kernel.md`）；任何对 A 合同的改动先走 RFC（`audit_charter.md` §3.1），不得直接重开 A、不得为假设的 hostile caller 给 Kernel 加校验（`audit_charter.md` §3-4）。
+
 1. **Agent A：`02_LAYERED_KERNEL_REFACTOR_AGENT.md`**  
-   拥有 `domain/`、`kernel/`、依赖 gate 和目录骨架。先合并。
-2. 对外发布接口冻结后，以下任务可在独立 worktree 并行：
-   - **Agent B：`03_SUBSTRATE_ISOLATION_AGENT.md`**
-   - **Agent C：`04_TASK_ARCHITECT_GOVERNANCE_AGENT.md`**
+   拥有 `domain/`、`kernel/`、依赖 gate 和目录骨架。**已合并、已冻结**——后续 agent 只消费其公开 facade（`taskvm.kernel` + `taskvm.domain`），禁止 import `taskvm.kernel.*_store` / `event_log` 等内部模块。
+2. A 接口冻结后，B 与 C 在独立 worktree **并行**（B/C 各写一层合同 MD 作为首个交付：B → `docs/contracts/substrate.md`，C → `docs/contracts/architect.md`，短合同非实现手册，见 `audit_charter.md` §2 冻结合同优先）。
+   - **Agent B：`03_SUBSTRATE_ISOLATION_AGENT.md`** — 只动 `taskvm/substrate/**` + `tests/substrate/**`；杀 API executor + hidden DB identity + `read_canonical`；Web/MobileGym/OSWorld diff 全部留在 substrate 内。
+   - **Agent C：`04_TASK_ARCHITECT_GOVERNANCE_AGENT.md`** — **禁止 import `taskvm.substrate`**（架构 gate `tests/architecture/test_import_boundaries.py` L54-57 给 architect `allowed_taskvm = {taskvm.domain, taskvm.kernel}`，不含 substrate，保持不动）；C 自定义纯层内输入 DTO `CompilerObservationView`，B 的 `SubstrateObservation` 由 composition/runtime 层确定性转换，C 永不通过 Python 具体类型耦合 B（类比 Ethernet frame→IP packet→TCP stream）。C 复用 A 的 `TaskArchitecture` validating constructor 产出 `TaskArchitecture`，不重做校验（A 拥有类型+校验，C 拥有生产）。
    - **Agent D：`05_PROJECTION_FRONTEND_AGENT.md`**
    - **Agent E：`06_CUA_EXECUTION_SYNC_ROLLBACK_AGENT.md`**
 

@@ -182,6 +182,15 @@ README 只写：概念、最终架构、快速启动、用户 workflow、final b
 - 所有 phase/killtest 注释与用户可见文案；
 - 未使用的 duplicated mobilegym bridges。
 
+### 路由债务：`taskvm/__init__.py` 陈旧文案
+
+`taskvm/__init__.py` 承载与 v5 不一致的陈旧 docstring 与版本号（非 A、非阻塞；owner = G，本 wave 清理）：
+
+- 删除 docstring 中 `Verifier always reads hidden canonical sandbox state` 与 `W1 = kill-test ...` 句子（hidden canonical 已非 runtime 能力；W1 不是当前阶段）；
+- 四锚描述与 `__version__ = "0.1.0-w1"` 一并更新到 v5 baseline；版本号 bump 至与 `pyproject.toml` 一致的当前版本。
+
+权威来源以 `docs/contracts/*.md` + 当前 handoffs 为准；该文件陈旧文案仅为路由债务，不回滚 A、不为假想 hostile caller 加校验（audit_charter §3-4）。
+
 运行 dead-code/import scan，不要因为“可能以后有用”保留两个真源。
 
 ---

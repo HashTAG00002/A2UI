@@ -8,6 +8,18 @@
 
 依赖：Agent A 的 domain/kernel public contract 已合并。
 
+## B/C 并行开工约束（审计 2026-08-14 冻结）
+
+Agent A 已 FROZEN（APPROVE）。B/C 在冻结的 A 基线上并行开工，**不得重开 A**。
+
+1. **A 冻结边界**：不得修改 `taskvm/domain/**`、`taskvm/kernel/**` 或冻结合同 `docs/contracts/kernel.md`。需要新跨层接口 → 先在 `docs/contracts/` 提一页 RFC（audit_charter §3.1），不得直接改 A。
+2. **B 的 owned paths 仅** `taskvm/substrate/**` + `tests/substrate/**`（见下）。所有 Web/MobileGym/OSWorld diff 必须留在 substrate 内。**B 不产出 TaskArchitecture**——B 只回答"我观察到什么 / 我执行了什么"（Observation / ActionReceipt / VisualArtifact）。TaskArchitecture 的生产是 C 的职责，B 不碰。
+3. **facade-only 消费**：B 只消费 A 公共 facade `taskvm.kernel` + `taskvm.domain`。**禁止** `from taskvm.kernel.event_log import ...`、`from taskvm.kernel.workflow_store import ...` 或任何 `taskvm.kernel.*_store` 内部模块（architecture gate `test_upper_layers_cannot_import_kernel_store_implementation` 强制执行；Kernel 只暴露 `Kernel` + 只读 snapshot/record）。
+4. **不与 C 耦合**：B **不得 import `taskvm.architect`**（architecture gate `taskvm/architect` 的 `allowed_taskvm` 是 `{taskvm.domain, taskvm.kernel}`，本就不含 substrate；反向 gate 也禁止 substrate import 上层）。B 只产出 raw `SubstrateObservation`；由**组合/runtime 层**将其确定性转换为 C 的 layer-local `CompilerObservationView`（visible content / visual evidence / surface identity / observation revision / visible-handle evidence）。B 与 C 之间**绝不经 Python 具体类型耦合**（类比 Ethernet frame → IP packet → TCP stream：上层不知道下层 driver 类）。
+5. **首个交付 = 短合同 MD**（audit_charter §2：合同未冻结不得做开放式实现）：先写 `docs/contracts/substrate.md`——一页短合同，不是 1000 行实现手册。冻结后再动 substrate 代码。
+
+> ROUTED DEBT（非 B，不阻塞）：`taskvm/__init__.py` 的陈旧文本（"Verifier always reads hidden canonical sandbox state"、"W1 = kill-test ..."、`__version__ = "0.1.0-w1"`）与 v5 不一致，owner = 集成/Agent G（handoff 08）。B **忽略**该文件陈旧文本；权威来源 = `docs/contracts/*.md` + 当前 handoff。
+
 先阅读：
 
 - `00_README_MASTER_HANDOFF.md`
@@ -36,6 +48,8 @@ taskvm/apps/**           # 仅启动适配，不改业务 demo 内容
 ```
 
 不要修改 projection、Task Architect、workflow/kernel 语义。
+
+**重申（与上方 B/C 约束一致）**：B 不产出 `TaskArchitecture`，不读/改 Projection Store 业务语义；上层组合层把 B 的 raw `SubstrateObservation` 转给 C，B 不经 Python 类型与 C 耦合，也不 import `taskvm.architect`。
 
 ---
 
