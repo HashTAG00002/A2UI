@@ -1,9 +1,13 @@
-"""Kernel invariant + regression tests (v4 contract).
+"""Kernel invariant + regression tests (v5 contract).
 
 Invariants 1-7 from handoff 02; 8 (atomicity) and 9 (observed/desired
-planes) from Wave-A; 13/14 (composition coherence, one-shot/two-phase
-closure) from the Wave-A.2 audit. Adversarial coverage lives in
-test_adversarial_contracts.py and test_v4_audit_fixes.py.
+planes); 13/14 (composition coherence, one-shot/two-phase closure).
+Adversarial temporal coverage: test_adversarial_contracts.py and
+test_v4_audit_fixes.py; v5 timeline governance (pending-compensation
+gate / COMPLETE truncation / PARTIAL): test_timeline_governance.py.
+The composition CONTENT rules (unknown binding/key, split-brain) are
+owned by TaskArchitecture — tests/domain/test_architecture.py; the
+kernel-side tests here pin ATOMICITY of the rejection (invariant 8).
 """
 import dataclasses
 
@@ -12,7 +16,9 @@ import pytest
 from taskvm.domain import (
     ActionContract,
     CommittedNodeViolationError,
+    CompensationEntryResult,
     CompensationPatch,
+    CompensationResult,
     EventKind,
     GoalPatch,
     LocalPatch,
@@ -29,6 +35,7 @@ from taskvm.domain import (
     UnknownCheckpointError,
     ValidationError,
     VariableUpdate,
+    VerificationResult,
     WorkflowGraph,
     WorkflowNode,
 )
@@ -98,11 +105,26 @@ def _kernel():
     return k
 
 
+def _verify(k, node_id, passed, h=None, detail=""):
+    k.land_verification(VerificationResult(
+        node_id=node_id, epoch=k.epoch, passed=passed,
+        action_id=None if h is None else h["action_id"], detail=detail))
+
+
 def _run_action(k, node_id, observations=()):
     h = k.request_action(node_id)
     k.start_action(h["action_id"])
     assert k.finish_action(h["action_id"], observations=observations)
-    k.record_verification(node_id, True, detail="observed match")
+    _verify(k, node_id, True, h, detail="observed match")
+
+
+def _comp_success(plan, epoch, values=None):
+    return CompensationResult.for_plan(plan, epoch=epoch, outcomes=[
+        CompensationEntryResult(
+            node_id=e.node_id, semantic_key=e.semantic_key,
+            final_observed=((values or {}).get(e.semantic_key, e.to_observed)),
+            compensated=True)
+        for e in plan.entries])
 
 
 def _obs(key, value, *evidence):
@@ -135,7 +157,7 @@ def test_schema_and_data_revisions_are_independent():
 def test_goal_patch_preserves_committed_nodes():
     k = _kernel()
     _run_action(k, "a1", [_obs("release_date", "2026-08-18")])
-    k.record_verification("v1", True)  # VERIFY: READY → COMMITTED directly
+    _verify(k, "v1", True)  # VERIFY: READY → COMMITTED directly
     out = k.apply_goal_patch(GoalPatch(patch_id="gp1",
                                        new_intent=_intent("改到 8/20")))
     assert out["requires_replan"] is True
@@ -172,11 +194,16 @@ def test_committed_history_cannot_be_rewritten_via_recompose():
     tampered = WorkflowGraph(nodes=(
         WorkflowNode(node_id="a1", kind=NodeKind.ACTION, label="篡改",
                      contract=_contract("c_x", "release_date", "2026-01-01")),
+        WorkflowNode(node_id="a2", kind=NodeKind.ACTION, label="改到 8/20",
+                     depends_on=("a1",),
+                     contract=_contract("c_a2", "release_date", "2026-08-20")),
         WorkflowNode(node_id="t1", kind=NodeKind.TERMINAL, label="完成",
-                     depends_on=("a1",)),
+                     depends_on=("a2",)),
     ))
     with pytest.raises(CommittedNodeViolationError):
-        k.recompose(_vars(), reason="replan", new_graph=tampered)
+        k.recompose(_vars(desired="2026-08-20",
+                          release_observed="2026-08-18"),
+                    reason="replan", new_graph=tampered)
 
 
 def test_committed_history_cannot_be_dropped_via_recompose():
@@ -184,10 +211,15 @@ def test_committed_history_cannot_be_dropped_via_recompose():
     _run_action(k, "a1", [_obs("release_date", "2026-08-18")])
     k.apply_goal_patch(GoalPatch(patch_id="gp", new_intent=_intent("改到 8/20")))
     dropped = WorkflowGraph(nodes=(
-        WorkflowNode(node_id="t1", kind=NodeKind.TERMINAL, label="完成"),
+        WorkflowNode(node_id="a2", kind=NodeKind.ACTION, label="改到 8/20",
+                     contract=_contract("c_a2", "release_date", "2026-08-20")),
+        WorkflowNode(node_id="t1", kind=NodeKind.TERMINAL, label="完成",
+                     depends_on=("a2",)),
     ))
     with pytest.raises(CommittedNodeViolationError):
-        k.recompose(_vars(), reason="replan", new_graph=dropped)
+        k.recompose(_vars(desired="2026-08-20",
+                          release_observed="2026-08-18"),
+                    reason="replan", new_graph=dropped)
 
 
 # ── invariant 4: stale epoch results are discarded ─────────────────────────
@@ -223,6 +255,7 @@ def test_checkpoint_pins_event_revision_boundary():
     _run_action(k, "a1", [_obs("release_date", "2026-08-18")])
     n_events = len(k.events())
     rec = k.commit_checkpoint("C1", "会议已改期")
+    assert rec.checkpoint_id == "ckpt:C1"
     assert rec.event_index == n_events
     assert rec.state_revision == k.task_state().revision
     assert rec.observed["release_date"] == "2026-08-18"
@@ -230,7 +263,7 @@ def test_checkpoint_pins_event_revision_boundary():
     assert "a1" in rec.committed_nodes
     with pytest.raises(UnknownCheckpointError):
         k.request_compensation(CompensationPatch(
-            patch_id="cp_x", target_checkpoint_id="C99"))
+            patch_id="cp_x", target_checkpoint_id="ckpt:C99"))
 
 
 # ── invariant 6: compensation = committed action history, verified ────────
@@ -250,24 +283,30 @@ def _kernel_with_post_checkpoint_commit():
     """C1 taken after a1+v1; lane l1 commits AFTER the checkpoint."""
     k = _kernel()
     _run_action(k, "a1", [_obs("release_date", "2026-08-18")])
-    k.record_verification("v1", True)
+    _verify(k, "v1", True)
     k.commit_checkpoint("C1", "会议已改期")
     _run_action(k, "l1", [_obs("copy_deadline", "2026-08-18")])
     return k
 
 
-def test_compensation_wrong_observed_result_cannot_pass():
+def test_compensation_failed_verdict_is_honestly_archived():
+    """The runtime's verifier judged the reversion did NOT hold (its
+    content call — the kernel never re-checks values): the landing is
+    FAILED, the state is untouched, exactly one event is emitted."""
     k = _kernel_with_post_checkpoint_commit()
     plan = k.request_compensation(CompensationPatch(
-        patch_id="rb1", target_checkpoint_id="C1"))
+        patch_id="rb1", target_checkpoint_id="ckpt:C1"))
     assert {e.semantic_key: e.to_observed
             for e in plan.entries} == {"copy_deadline": "2026-08-14"}
     before = k.task_state()
     n_events = len(k.events())
-    # the runtime CLAIMS success but reality shows the wrong value
-    k.record_compensation_result(
-        plan.plan_id, applied=True,
-        observed_values={"copy_deadline": "2026-08-15"})
+    failed = CompensationResult.for_plan(plan, epoch=k.epoch, outcomes=[
+        CompensationEntryResult(
+            node_id=e.node_id, semantic_key=e.semantic_key,
+            final_observed="2026-08-15",   # the verifier saw the WRONG value
+            compensated=False)
+        for e in plan.entries], detail="visible value does not match target")
+    assert k.record_compensation_result(plan.plan_id, failed) == "failed"
     kinds = [e.kind for e in k.events()]
     assert EventKind.COMPENSATION_FAILED in kinds
     assert EventKind.COMPENSATION_APPLIED not in kinds
@@ -275,22 +314,25 @@ def test_compensation_wrong_observed_result_cannot_pass():
     assert len(k.events()) == n_events + 1  # exactly one event (the failure)
 
 
-def test_compensation_missing_observed_key_cannot_pass():
+def test_compensation_without_full_coverage_cannot_complete():
+    """COMPLETE requires every plan entry landed compensated; an entry the
+    runtime never reported on counts as NOT undone."""
     k = _kernel_with_post_checkpoint_commit()
     plan = k.request_compensation(CompensationPatch(
-        patch_id="rb1", target_checkpoint_id="C1"))
-    k.record_compensation_result(plan.plan_id, applied=True,
-                                 observed_values={})  # key missing entirely
+        patch_id="rb1", target_checkpoint_id="ckpt:C1"))
+    # the runtime reports NOTHING for the only entry ⇒ nothing undone ⇒ FAILED
+    empty_report = CompensationResult.for_plan(plan, epoch=k.epoch,
+                                               outcomes=[])
+    assert k.record_compensation_result(plan.plan_id, empty_report) == "failed"
     assert EventKind.COMPENSATION_APPLIED not in [e.kind for e in k.events()]
 
 
 def test_applied_compensation_restores_and_rearms():
     k = _kernel_with_post_checkpoint_commit()
     plan = k.request_compensation(CompensationPatch(
-        patch_id="rb1", target_checkpoint_id="C1"))
+        patch_id="rb1", target_checkpoint_id="ckpt:C1"))
     assert k.record_compensation_result(
-        plan.plan_id, applied=True,
-        observed_values={"copy_deadline": "2026-08-14"}) is True
+        plan.plan_id, _comp_success(plan, k.epoch)) == "complete"
     v = k.task_state().variable("copy_deadline")
     assert v.observed == "2026-08-14" and v.desired == "2026-08-18"
     assert v.diverged is True               # honestly back to pending work
@@ -475,7 +517,7 @@ def test_removed_workflow_nodes_disappear_from_projection():
     k = _kernel()
     assert "l2" in k.projection().data.node_status
     _run_action(k, "a1", [_obs("release_date", "2026-08-18")])
-    k.record_verification("v1", True)
+    _verify(k, "v1", True)
     k.apply_goal_patch(GoalPatch(patch_id="gp1",
                                  new_intent=_intent("改到 8/20")))
     carried = tuple(k.workflow().graph.node(nid) for nid in ("a1", "v1"))

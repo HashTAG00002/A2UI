@@ -1,6 +1,6 @@
 # Coding Agent A v5：Kernel 瘦身（按分层协议下放内容校验）
 
-> **适用分支**：从 `gg-phase@bf60e0c`（v4）开新分支。
+> **适用分支**：从 `gg-phase@f154b4c` 开新分支（f154b4c 含 v4 = ac505df 的 G1–G13 修复 + 本协议文档）。**bf60e0c 是 v3（未含 v4 修复），勿以此为基线。**
 > **唯一目标**：把 kernel.py 从 1194 行瘦到 ≤ 600 行，把"内容/静态"校验下放到 domain 构造器与 typed result，Kernel 只保留"时序/状态"不变量。**不新增 feature，不碰 substrate/runtime/architect/projection/benchmark/frontend/README。**
 > **冻结原则**（见 [docs/contracts/layered_ownership_protocol.md](../../contracts/layered_ownership_protocol.md)）：**内容合法性由生产者负责；时序合法性由 Kernel 负责。一个性质只有一个 owner，不在下一层重证。**
 
@@ -25,9 +25,11 @@
 7. **frozen immutable 替代无差别 deepcopy**：跨层公共对象 `@dataclass(frozen=True)`（含 observed/desired 不可变容器）；Kernel 私有 mutable state 不暴露引用。删 `request_action` 的 `copy.deepcopy(node.contract)`（若类型已不可变则多余）、删 store write 边界的无脑 deepcopy。**保留**真正 mutable private state 的隔离。
 8. **namespaced ID**：checkpoint/plan ID 由生成策略保证不撞 workflow node id（typed/前缀），删 Kernel 的 id-collision if。
 
-### B. 修 v4 真时序 bug（Kernel-owned，§4，必须保留/补）
+### B. v4 时序 bug —— 在 f154b4c **已修复**，本 wave 是「钉死 + 防回归」，不是「重新实现」
 
-这些是 v4 的真实缺口（runtime probe 在 bf60e0c 执行确认），**不能因为"瘦身"删**，必须补：
+执行验证（f154b4c，runtime probe）：G1(VERIFY→FAILED)✓、G2(start→verify 拒)✓、G3(GoalPatch 两阶段 block)✓、G4(NodeContractOverride 已删)✓、G5(compensation 不删 z)✓、G6(rewind: a2→READY / t1→PENDING / terminal 拒)✓、G7(CHECKPOINT 自在快照)✓、G8(set_plan one-shot)✓、G9(稳定 boundary)✓、G10(写边界无 alias)✓、G12(metadata 恢复 'A')✓。G11 / G13 / F4a-single-source 由 kernel.md 声称、未独立复验——**agent 须先逐条确认已实现**。
+
+**本 wave 对这些只做：补 adversarial test 钉死 + slim 时勿回归。仅当发现 doc-vs-code 谎（声称已修实际没修）才补实现。禁止把已正确的代码当 bug 重写（=regression）。**
 
 1. `_TRANSITIONS` 加 `READY→FAILED`，但**只允许 VERIFY 走**（Kernel node-kind gate）。修 F1。
 2. `land_verification`/ACTION 提交必须对应当前 epoch 下**已 FINISHED** 的 handle（不允许 start→verify 跳过 finish）。修 F2。

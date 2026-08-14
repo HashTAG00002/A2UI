@@ -123,8 +123,10 @@ class WorkflowStore:
     def replace_future(self, new_graph: WorkflowGraph, *,
                        epoch: int) -> tuple[WorkflowGraph, list[str]]:
         """Apply the plan half of a GoalPatch/recompose: keep committed
-        history, replace the uncommitted future (invariant 3). Assumes
-        ``validate_replace_future`` has already passed (re-checks it).
+        history, replace the uncommitted future (invariant 3). The caller
+        MUST run ``validate_replace_future`` first (patch atomicity:
+        validate fully before any state changes); the check is not
+        repeated here — one property, one owner, one check.
 
         Carried-over nodes keep their status; all other new nodes start
         PENDING/READY. Uncommitted nodes absent from the new graph are
@@ -135,7 +137,6 @@ class WorkflowStore:
         replaced future is explicit, never silent.
         """
         with self._lock:
-            self.validate_replace_future(new_graph)
             historical = self._historical_locked()
             stamped = replace(copy.deepcopy(new_graph),
                               revision=self._graph_rev + 1, epoch=epoch)

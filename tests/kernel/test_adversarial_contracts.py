@@ -1,19 +1,25 @@
-"""Wave-A.1 adversarial contract tests — the kernel under hostile usage
-(v4 contract).
+"""Adversarial TEMPORAL contract tests — the kernel's time/state machine
+under confused usage (v5 contract, layered ownership).
 
-These tests attack the kernel's public contract exactly the way a buggy
-or confused downstream agent would: double-landing action results,
-stale compensation reports, cross-GoalPatch rollbacks, loop termination
-abuse, illegal architect output at composition boundaries, and
-non-editable variable tampering. Happy-path coverage lives in
-test_kernel_invariants.py / test_scenario.py; the Wave-A.2 audit's 13
-counterexample groups live in test_v4_audit_fixes.py.
+Scope note (layered protocol §7): this file now pins only Kernel-owned
+semantics — epoch/lifecycle/exactly-once/history/rewind. The CONTENT
+rules that used to live here moved to their single owner:
+  - projection tree cycles            → tests/domain/test_static_shapes.py
+  - composition binding/contract keys → tests/domain/test_architecture.py
+    (the kernel-side ATOMICITY of the rejection stays here, #11/#12)
+  - duplicate LocalPatch keys         → tests/domain/test_static_shapes.py
+Happy-path coverage: test_kernel_invariants.py / test_scenario.py; the
+Wave-A.2 audit groups: test_v4_audit_fixes.py; v5 timeline governance
+(pending-compensation gate / COMPLETE truncation / PARTIAL / typed
+landing): test_timeline_governance.py.
 """
 import pytest
 
 from taskvm.domain import (
     ActionContract,
+    CompensationEntryResult,
     CompensationPatch,
+    CompensationResult,
     EventKind,
     GoalPatch,
     LocalPatch,
@@ -29,6 +35,7 @@ from taskvm.domain import (
     TaskVariable,
     ValidationError,
     VariableUpdate,
+    VerificationResult,
     WorkflowGraph,
     WorkflowNode,
 )
@@ -70,11 +77,28 @@ def _kernel(variables, graph=None, goal="g"):
     return k
 
 
+def _verify(k, node_id, passed, h=None, detail=""):
+    k.land_verification(VerificationResult(
+        node_id=node_id, epoch=k.epoch, passed=passed,
+        action_id=None if h is None else h["action_id"], detail=detail))
+
+
 def _run_body(k, node_id, key, value):
     h = k.request_action(node_id)
     assert k.start_action(h["action_id"])
     assert k.finish_action(h["action_id"], observations=[_obs(key, value)])
-    k.record_verification(node_id, True)
+    _verify(k, node_id, True, h)
+
+
+def _comp_success(plan, epoch, values=None):
+    """A typed full-success report: every entry compensated; the reported
+    final value defaults to the entry's target (``values`` overrides)."""
+    return CompensationResult.for_plan(plan, epoch=epoch, outcomes=[
+        CompensationEntryResult(
+            node_id=e.node_id, semantic_key=e.semantic_key,
+            final_observed=((values or {}).get(e.semantic_key, e.to_observed)),
+            compensated=True)
+        for e in plan.entries])
 
 
 def _loop_graph(max_iterations=3):
@@ -99,7 +123,7 @@ def test_one_active_action_per_node():
     with pytest.raises(ValidationError):
         k.request_action("a1")   # still active (STARTED → node RUNNING)
     k.finish_action(h1["action_id"], observations=[_obs("x", 2)])
-    k.record_verification("a1", True)
+    _verify(k, "a1", True, h1)
     with pytest.raises(ValidationError):
         k.request_action("a1")   # committed nodes take no new actions
 
@@ -150,7 +174,7 @@ def test_old_action_cannot_mutate_committed_state():
     assert h_new["epoch"] > h_old["epoch"]
     k.start_action(h_new["action_id"])
     k.finish_action(h_new["action_id"], observations=[_obs("x", 2)])
-    k.record_verification("a1", True)
+    _verify(k, "a1", True, h_new)
     assert k.workflow().statuses["a1"] is NodeStatus.COMMITTED
     # NOW the stale generation's result arrives — it must be discarded
     accepted = k.finish_action(h_old["action_id"],
@@ -169,15 +193,15 @@ def test_stale_compensation_result_is_discarded():
     k.commit_checkpoint("C1", "boundary")
     k.apply_observation([_obs("x", 5)])
     plan = k.request_compensation(CompensationPatch(
-        patch_id="rb", target_checkpoint_id="C1"))
+        patch_id="rb", target_checkpoint_id="ckpt:C1"))
     assert plan.epoch == k.epoch
     # an epoch boundary passes BEFORE the runtime reports back
     k.apply_goal_patch(GoalPatch(patch_id="gp",
                                  new_intent=TaskIntent(goal="goal-v2")))
     assert k.epoch > plan.epoch
-    ok = k.record_compensation_result(plan.plan_id, applied=True,
-                                      observed_values={"x": 1})
-    assert ok is False
+    disposition = k.record_compensation_result(
+        plan.plan_id, _comp_success(plan, plan.epoch))
+    assert disposition == "discarded"
     kinds = [e.kind for e in k.events()]
     assert EventKind.COMPENSATION_DISCARDED in kinds       # explicit signal
     assert EventKind.COMPENSATION_APPLIED not in kinds
@@ -195,23 +219,29 @@ def test_compensation_plan_is_single_use():
     k.commit_checkpoint("C1", "boundary")
     k.apply_observation([_obs("x", 5)])
     plan = k.request_compensation(CompensationPatch(
-        patch_id="rb", target_checkpoint_id="C1"))
-    assert k.record_compensation_result(plan.plan_id, applied=True,
-                                        observed_values={"x": 1}) is True
+        patch_id="rb", target_checkpoint_id="ckpt:C1"))
+    assert k.record_compensation_result(
+        plan.plan_id, _comp_success(plan, k.epoch)) == "complete"
     with pytest.raises(ValidationError, match="exactly once"):
-        k.record_compensation_result(plan.plan_id, applied=True,
-                                     observed_values={"x": 1})
+        k.record_compensation_result(plan.plan_id,
+                                     _comp_success(plan, k.epoch))
     # a FAILED plan is equally terminal — no silent retry through the
     # same plan; an honest retry requires a NEW CompensationPatch
-    k2 = _kernel((_var("x", 1, 1),), goal="g")
+    g = WorkflowGraph(nodes=(_action_node("a1", "x", 2),
+                             _terminal("t", "a1")))
+    k2 = _kernel((_var("x", 1, 2),), g)
     k2.commit_checkpoint("C1", "boundary")
-    k2.apply_observation([_obs("x", 5)])
+    _run_body(k2, "a1", "x", 2)
     plan_f = k2.request_compensation(CompensationPatch(
-        patch_id="rb2", target_checkpoint_id="C1"))
-    assert k2.record_compensation_result(plan_f.plan_id, applied=False,
-                                         detail="world refused") is False
+        patch_id="rb2", target_checkpoint_id="ckpt:C1"))
+    failed = CompensationResult.for_plan(plan_f, epoch=k2.epoch, outcomes=[
+        CompensationEntryResult(node_id=e.node_id, semantic_key=e.semantic_key,
+                                final_observed=e.from_observed,
+                                compensated=False)
+        for e in plan_f.entries], detail="world refused")
+    assert k2.record_compensation_result(plan_f.plan_id, failed) == "failed"
     with pytest.raises(ValidationError, match="exactly once"):
-        k2.record_compensation_result(plan_f.plan_id, applied=False)
+        k2.record_compensation_result(plan_f.plan_id, failed)
 
 
 # ══ 6. rollback restores the checkpoint's INTENT ══════════════════════════
@@ -226,10 +256,10 @@ def test_rollback_restores_checkpoint_intent():
                                  new_intent=TaskIntent(goal="目标二")))
     assert k.task_state().intent.goal == "目标二"
     plan = k.request_compensation(CompensationPatch(
-        patch_id="rb", target_checkpoint_id="C1"))
+        patch_id="rb", target_checkpoint_id="ckpt:C1"))
     assert plan.requires_recompose is True   # cross-GoalPatch signal
-    assert k.record_compensation_result(plan.plan_id, applied=True,
-                                        observed_values={"x": 1}) is True
+    assert k.record_compensation_result(
+        plan.plan_id, _comp_success(plan, k.epoch)) == "complete"
     assert k.task_state().intent.goal == "目标一"   # intent REALLY restored
     # the wrong future is not silently kept: uncommitted nodes planned
     # for the abandoned goal are invalidated
@@ -243,10 +273,10 @@ def test_rollback_restores_checkpoint_intent():
 
 # ══ 7. rollback restores structure — but never fakes the world ════════════
 def test_rollback_restores_structure_without_logical_deletion():
-    """The audit's reversal of the old z-test: a variable that appeared
-    after the checkpoint must NOT be logically deleted to fake a rollback;
-    a variable that vanished IS restored from the checkpoint's structure;
-    reality that moved without a TaskVM action is kept as-is."""
+    """A variable that appeared after the checkpoint must NOT be logically
+    deleted to fake a rollback; a variable that vanished IS restored from
+    the checkpoint's structure; reality that moved without a TaskVM action
+    is kept as-is."""
     k = _kernel((
         _var("x", 1, 1, label="X 变量"),
         _var("y", 2, 2, label="Y 标签", value_type="date"),
@@ -259,14 +289,13 @@ def test_rollback_restores_structure_without_logical_deletion():
                 reason="structure drift: y surface gone, z appeared")
     assert k.task_state().variable("y") is None
     plan = k.request_compensation(CompensationPatch(
-        patch_id="rb", target_checkpoint_id="C0"))
+        patch_id="rb", target_checkpoint_id="ckpt:C0"))
     assert plan.requires_recompose is True   # structure differs
     # no committed TaskVM action after C0 ⇒ NOTHING to compensate;
     # the old snapshot-diff would have fabricated reversion entries here
     assert plan.entries == ()
     assert k.record_compensation_result(
-        plan.plan_id, applied=True,
-        observed_values={"x": 10}) is True
+        plan.plan_id, _comp_success(plan, k.epoch)) == "complete"
     state = k.task_state()
     assert state.variable("x").observed == 10   # external drift kept — honest
     y = state.variable("y")
@@ -332,34 +361,11 @@ def test_bounded_loop_stops_at_max_iterations():
     assert ev.payload["reason"] == "max_iterations_exceeded"
 
 
-# ══ 10. projection schema is a real tree: cycles rejected ════════════════
-def test_projection_schema_rejects_cycle():
-    with pytest.raises(ValidationError):
-        ProjectionSchema(root_id="r", components=(
-            ProjectionComponent(component_id="r", component_type="column",
-                                children=("a",)),
-            ProjectionComponent(component_id="a", component_type="column",
-                                children=("b",)),
-            ProjectionComponent(component_id="b", component_type="column",
-                                children=("a",)),     # b→a closes a cycle
-        ))
-    with pytest.raises(ValidationError):
-        ProjectionSchema(root_id="a", components=(
-            ProjectionComponent(component_id="a", component_type="column",
-                                children=("a",)),     # self-loop
-        ))
-    with pytest.raises(ValidationError):
-        ProjectionSchema(root_id="r", components=(
-            ProjectionComponent(component_id="r", component_type="column",
-                                children=("x",)),
-            ProjectionComponent(component_id="x", component_type="field"),
-            ProjectionComponent(component_id="orphan",  # unreachable
-                                component_type="field"),
-        ))
-
-
-# ══ 11. projection bindings must reference declared variables ════════════
-def test_projection_binding_must_exist():
+# ══ 10. composition rejection is ATOMIC at the kernel boundary ════════════
+# (the RULE itself is owned by TaskArchitecture — see
+#  tests/domain/test_architecture.py; what the kernel pins here is that a
+#  rejected composition changes NOTHING)
+def test_rejected_composition_changes_nothing():
     k = _kernel((_var("x", 1, 2),))
     bad_schema = ProjectionSchema(root_id="root", components=(
         ProjectionComponent(component_id="root", component_type="column",
@@ -375,21 +381,15 @@ def test_projection_binding_must_exist():
     assert k.projection().schema is None
     assert k.workflow().graph is None
     assert EventKind.PLAN_CREATED not in [e.kind for e in k.events()]
-
-
-# ══ 12. action contract keys must reference declared variables ═══════════
-def test_action_contract_keys_must_exist():
-    k = _kernel((_var("x", 1, 2),))
-    bad_graph = WorkflowGraph(nodes=(
-        _action_node("a1", "ghost", 2),
-        _terminal("t", "a1")))
+    bad_graph = WorkflowGraph(nodes=(_action_node("a1", "ghost", 2),
+                                     _terminal("t", "a1")))
     with pytest.raises(ValidationError, match="unknown task variables"):
         k.set_plan(bad_graph)
     assert k.workflow().graph is None
     assert EventKind.PLAN_CREATED not in [e.kind for e in k.events()]
 
 
-# ══ 13. LocalPatch cannot retarget readonly/locked variables ═════════════
+# ══ 11. LocalPatch cannot retarget readonly/locked variables ══════════════
 def test_local_patch_rejects_readonly():
     k = _kernel((
         _var("ro", 1, 1, mutability=MUTABILITY_READONLY),
@@ -409,17 +409,3 @@ def test_local_patch_rejects_readonly():
     k.apply_local_patch(LocalPatch(
         patch_id="lp_ok", variable_updates=(VariableUpdate("ed", 5),)))
     assert k.task_state().variable("ed").desired == 5
-
-
-# ══ 14. LocalPatch is deterministic: duplicate targets rejected ══════════
-def test_local_patch_rejects_duplicate_variable_updates():
-    with pytest.raises(ValidationError, match="duplicate"):
-        LocalPatch(patch_id="lp_dup",
-                   variable_updates=(VariableUpdate("x", 1),
-                                     VariableUpdate("x", 2)))
-    # the v3 node-override channel is gone entirely (audit G4): there is
-    # exactly ONE way to retarget, and it is the variable update
-    with pytest.raises(TypeError):
-        LocalPatch(patch_id="lp_dup2",
-                   variable_updates=(VariableUpdate("x", 1),),
-                   node_overrides=())

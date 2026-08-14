@@ -65,6 +65,7 @@
 | **E24** | Wave-A 评审打回后 12 条全修：节点推进协议分立、observed/desired 双平面、ObservedValue 证据合同、patch 原子性、compensation 全量对账+spoof 面消除、recompose 结构入口、projection authoritative replace、stdlib 白名单 gate、SurfaceHandle 只留 handle_id、事件语义统一；66 全绿 | L2368-2404 |
 | **E25** | Wave-A.1 对抗硬化（v3）：handle 单次落地、compensation epoch 绑定+单次落地、checkpoint 升级 logical checkpoint、bounded loop 可执行协议、组合边界交叉校验、kernel facade 封装 | L2408-2440 |
 | **E26** | Wave-A.2 审计 13 组全修（v4 冻结）：GoalPatch 两阶段封闭（recompose 唯一闭环+split-brain guard）、LocalPatch 单一真源+确定性 retarget、补偿改已提交动作历史驱动（IRREVERSIBLE 诚实上报、拒绝逻辑删除）、frontier 确定性倒回、checkpoint 稳定边界+自包含、set_plan one-shot、三 primitive validator 锁死；对抗套件先红（29/30）后绿（113+37 全过） | L2444-2483 |
+| **E27** | Wave-A.5 Kernel 瘦身（v5）：内容校验全部下放 domain 构造器+typed result（TaskArchitecture/VerificationResult/CompensationResult/ObservationBatch、ID namespace、deepcopy 瘦身）；probe 实证并补齐 3 处 doc-vs-code 缺口（pending-comp gate、COMPLETE 截断、PARTIAL disposition）；145 全绿；≤600 行指标与冻结范围不兼容，诚实挂起并登记 RFC-001 | L2487-2543 |
 
 ---
 
@@ -82,4 +83,4 @@
 10. **内部信息零暴露**：entity_id / data-\* / get_state 产物 / 深链 URL / operator 黑话全禁进模型输入（E16/E21/E22）——泄露的总源头在渲染层，不能只在"最后一环"堵。
 
 ---
-*本文件最后更新：2026-08-14（Wave-A.2 审计 13 组修复后，kernel contract v4 冻结基线）。下一次更新时在此修改日期并在 Episode 表格追加新行。*
+*本文件最后更新：2026-08-14（Wave-A.5 / E27：Kernel 按 layered ownership 瘦身为 v5，内容校验下放 domain，3 处时序缺口补齐；kernel.py 行数指标缺口见 docs/contracts/kernel_rfc_backlog.md RFC-001）。下一次更新时在此修改日期并在 Episode 表格追加新行。*

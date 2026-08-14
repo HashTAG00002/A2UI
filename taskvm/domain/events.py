@@ -40,7 +40,8 @@ class EventKind(str, Enum):
     CONFLICT_RESOLVED = "conflict_resolved"
     # compensation
     COMPENSATION_REQUESTED = "compensation_requested"
-    COMPENSATION_APPLIED = "compensation_applied"
+    COMPENSATION_APPLIED = "compensation_applied"    # COMPLETE rollback
+    COMPENSATION_PARTIAL = "compensation_partial"    # PARTIAL: some entries stand
     COMPENSATION_FAILED = "compensation_failed"      # execution honestly failed
     COMPENSATION_DISCARDED = "compensation_discarded"  # stale epoch — NOT a failure
     # bounded loop protocol

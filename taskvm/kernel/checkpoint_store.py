@@ -79,3 +79,27 @@ class CheckpointStore:
     def latest(self) -> CheckpointRecord | None:
         with self._lock:
             return copy.deepcopy(self._records[-1]) if self._records else None
+
+    def truncate_after(self, checkpoint_id: str) -> list[str]:
+        """COMPLETE rollback: drop every record committed AFTER
+        ``checkpoint_id`` from the active timeline (their pinned futures
+        were rewound — they can never be rollback targets again).
+        Returns the removed ids, in commit order."""
+        with self._lock:
+            for i, r in enumerate(self._records):
+                if r.checkpoint_id == checkpoint_id:
+                    removed = [x.checkpoint_id for x in self._records[i + 1:]]
+                    del self._records[i + 1:]
+                    return removed
+        raise UnknownCheckpointError(
+            f"unknown checkpoint {checkpoint_id!r}")
+
+    def remove(self, checkpoint_id: str) -> bool:
+        """Drop one record (a re-armed CHECKPOINT node's stale boundary).
+        Returns True when a record was actually removed."""
+        with self._lock:
+            for i, r in enumerate(self._records):
+                if r.checkpoint_id == checkpoint_id:
+                    del self._records[i]
+                    return True
+        return False

@@ -6,17 +6,21 @@ client / requests / benchmark / evaluation / any concrete substrate
 (enforced by tests/architecture).
 
 Public surface (stable contract — see docs/contracts/kernel.md):
-    Intent & state:   TaskIntent, TaskVariable, TaskState,
-                      SurfaceHandle, SurfaceEvidence
+    Intent & state:   TaskIntent, TaskVariable, TaskState, ObservedValue,
+                      ObservationBatch, SurfaceHandle, SurfaceEvidence
     Projection:       ProjectionSchema, ProjectionData, ProjectionRevision,
                       ProjectionComponent
     Workflow:         WorkflowGraph, WorkflowNode, NodeKind, NodeStatus
+    Composition:      TaskArchitecture (variables + graph + schema coherence)
     Action contract:  ActionContract, Reversibility
     Patches:          Patch, LocalPatch, GoalPatch, CompensationPatch,
-                      VariableUpdate, NodeContractOverride, requires_replan
+                      VariableUpdate, requires_replan
+    Typed results:    VerificationResult, CompensationResult,
+                      CompensationEntryResult
     Events:           Event, EventKind
     Errors:           TaskVMError and subclasses
 """
+from taskvm.domain.architecture import TaskArchitecture
 from taskvm.domain.contract import ActionContract, Reversibility
 from taskvm.domain.errors import (
     CompensationMismatchError,
@@ -47,10 +51,16 @@ from taskvm.domain.projection import (
     ProjectionRevision,
     ProjectionSchema,
 )
+from taskvm.domain.results import (
+    CompensationEntryResult,
+    CompensationResult,
+    VerificationResult,
+)
 from taskvm.domain.state import (
     MUTABILITY_EDITABLE,
     MUTABILITY_LOCKED,
     MUTABILITY_READONLY,
+    ObservationBatch,
     ObservedValue,
     SurfaceEvidence,
     SurfaceHandle,
@@ -68,7 +78,7 @@ from taskvm.domain.workflow import (
 __all__ = [
     # intent & state
     "TaskIntent", "TaskVariable", "TaskState", "ObservedValue",
-    "SurfaceHandle", "SurfaceEvidence",
+    "ObservationBatch", "SurfaceHandle", "SurfaceEvidence",
     "MUTABILITY_EDITABLE", "MUTABILITY_READONLY", "MUTABILITY_LOCKED",
     # projection
     "ProjectionSchema", "ProjectionData", "ProjectionRevision",
@@ -76,12 +86,16 @@ __all__ = [
     # workflow
     "WorkflowGraph", "WorkflowNode", "NodeKind", "NodeStatus",
     "HISTORICAL_STATUSES",
+    # composition
+    "TaskArchitecture",
     # action contract
     "ActionContract", "Reversibility",
     # patches
     "Patch", "LocalPatch", "GoalPatch", "CompensationPatch",
     "CompensationEntry", "CompensationPlan", "UncompensatableAction",
     "VariableUpdate", "requires_replan",
+    # typed results
+    "VerificationResult", "CompensationResult", "CompensationEntryResult",
     # events
     "Event", "EventKind",
     # errors

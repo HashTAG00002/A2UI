@@ -96,6 +96,30 @@ class ObservedValue:
 
 
 @dataclass(frozen=True)
+class ObservationBatch:
+    """One atomic observation delivery.
+
+    A duplicate semantic key inside ONE batch is a CONTENT error (a silent
+    last-write-wins would eat a real conflict). It is rejected here, at
+    construction — the single owner of the rule (layered ownership
+    protocol §5); the kernel folds only validated batches and never
+    rescans for duplicates.
+    """
+
+    observations: tuple[ObservedValue, ...] = ()
+
+    def __post_init__(self) -> None:
+        obs = tuple(self.observations)
+        object.__setattr__(self, "observations", obs)
+        keys = [o.semantic_key for o in obs]
+        if len(set(keys)) != len(keys):
+            dups = sorted({k for k in keys if keys.count(k) > 1})
+            raise ValidationError(
+                f"duplicate semantic keys in one observation batch: {dups}; "
+                "aggregate or resolve the conflict upstream first")
+
+
+@dataclass(frozen=True)
 class TaskVariable:
     """One governable task quantity: identity + observed + desired.
 
