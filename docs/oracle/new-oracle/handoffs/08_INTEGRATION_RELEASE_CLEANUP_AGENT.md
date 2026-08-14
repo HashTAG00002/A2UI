@@ -58,7 +58,7 @@ docs/A2UI_开工大纲_v0_心智模型对齐版.md
 docs/A2UI_EE阶段开工目标.md
 docs/A2UI_GG阶段开工目标.md
 docs/DEMO_RUNBOOK_MobileGym.md
-docs/HANDOFF_E17.md
+# docs/HANDOFF_E17.md  (already deleted — no longer in tree)
 docs/HANDOFF_TaskVM.md
 ```
 

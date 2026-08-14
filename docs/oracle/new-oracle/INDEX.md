@@ -13,4 +13,4 @@
 - `08_INTEGRATION_RELEASE_CLEANUP_AGENT.md` — Coding Agent G：最终集成、启动可靠性、文档与历史包袱清理
 - `09_CROSS_DEVICE_BONUS_AGENT.md` — Optional Coding Agent H：跨设备统一投影 Bonus（OSWorld + MobileGym）
 - `10_AGENT_RULES_REPLACEMENT.md` — TaskVM Repository Agent Rules（建议替换根目录 `.mrules` 或 `AGENTS.md`）
-- `11_CURRENT_REPOSITORY_AUDIT.md` — `gg-phase` 当前仓库结构化审计矩阵
+- `11_CURRENT_REPOSITORY_AUDIT.md` — 当前仓库结构化审计矩阵

@@ -91,7 +91,7 @@ event_log 等内部模块禁止被 kernel 包外 import（gate 强制执行）�
 
 ### Checkpoint
 
-- `commit_checkpoint(name, label)` — 治理手势驱动的检查点，record id 为 `ckpt:<name>`。**稳定边界守卫**：存在 in-flight action / RUNNING 节点时拒绝。工作流 CHECKPOINT 节点走 `advance_control`
+- `commit_checkpoint(checkpoint_id, label, *, correlation_id="")` — 治理手势驱动的检查点，record id 为 `ckpt:<checkpoint_id>`。**稳定边界守卫**：存在 in-flight action / RUNNING 节点时拒绝。工作流 CHECKPOINT 节点走 `advance_control`
 
 ### 治理补丁（全部 atomic：先全量校验，后变更；被拒则 state/epoch/graph/events 完全不变）
 

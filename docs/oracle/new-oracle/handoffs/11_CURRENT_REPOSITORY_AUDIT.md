@@ -1,6 +1,6 @@
-# `gg-phase` 当前仓库结构化审计矩阵
+# 当前仓库结构化审计矩阵（main 分支；Agent A v5 已合并；审计方法论见 docs/contracts/audit_charter.md）
 
-> 审计对象：公开 GitHub `gg-phase` 分支当前版本。本文是静态代码审计，不等同于在用户本地环境完整启动真实模型、Playwright、MobileGym 与 OSWorld 后的动态复现。若存在尚未 push 的本地提交，集成 Agent 必须先重新运行本文列出的检查。
+> 审计对象：`main` 分支。Agent A v5 Kernel/domain 瘦身 + rollback closure 已合并；B/C/D/E 尚未启动，故本页缺陷清单对 02–09 owner 仍为待办 backlog。本文缺陷路由仍有效；审计方法论（一个性质一个 owner、不跨层重证）以 docs/contracts/audit_charter.md 为冻结权威。
 
 ---
 

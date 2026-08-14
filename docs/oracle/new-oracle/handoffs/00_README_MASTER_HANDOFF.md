@@ -1,6 +1,6 @@
 # TaskVM 最终重构总交接：Award-grade Prototype + Benchmark + User Frontend
 
-> **适用分支**：`gg-phase` 当前代码基础上创建新的重构分支。  
+> **适用分支**：`main`（Agent A v5 slim + rollback closure 已合并；此后所有工作走 `main`，不挂 commit 版本号）。  
 > **适用对象**：审计 Agent、规划 Agent、各模块 Coding Agent、最终集成 Agent。  
 > **唯一目标**：交付最终可运行的 TaskVM prototype、最终 benchmark 和稳定用户前端。  
 > **不再保留**：W1/W2/W3/GG/EE 等阶段叙事、kill-test 产物、API executor、hidden-ID runtime、fixture 驱动的生产工作流、临时 fallback UI。

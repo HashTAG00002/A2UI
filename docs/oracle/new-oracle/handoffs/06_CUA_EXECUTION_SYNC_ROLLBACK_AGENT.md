@@ -199,7 +199,7 @@ hidden ground truth 只在 final benchmark 进程中判卷，不得被 runtime i
 
 ## Compensation / Rollback
 
-内部名称可以继续用 Saga，但 UI 不显示术语。
+内部名称用 CompensationPlan/CompensationEntry（v5 无 Saga 类型）；UI 不显示术语。
 
 每个 committed action effect 记录：
 

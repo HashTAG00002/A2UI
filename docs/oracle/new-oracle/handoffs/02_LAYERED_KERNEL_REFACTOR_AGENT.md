@@ -1,6 +1,6 @@
 # Coding Agent A：层级骨架、TaskVM Domain 与 Kernel 重构
 
-> **分层协议（冻结）**：见 [docs/contracts/layered_ownership_protocol.md](../../contracts/layered_ownership_protocol.md)。**内容合法性由生产者负责；时序合法性由 Kernel 负责。** 你只保留 §4 的时序/状态不变量（epoch/lifecycle/atomicity/rewind/boundary/timeline）；**内容校验下放到 domain 构造器与 typed result**，不在 Kernel 重查。本 wave 的具体瘦身任务见 [12_KERNEL_SLIM_AGENT_A_v5.md](12_KERNEL_SLIM_AGENT_A_v5.md)（kernel.py 1194→≤600）。
+> **分层协议（冻结）**：见 [docs/contracts/layered_ownership_protocol.md](../../contracts/layered_ownership_protocol.md)。**内容合法性由生产者负责；时序合法性由 Kernel 负责。** 你只保留 §4 的时序/状态不变量（epoch/lifecycle/atomicity/rewind/boundary/timeline）；**内容校验下放到 domain 构造器与 typed result**，不在 Kernel 重查。
 
 ## 你的唯一任务
 

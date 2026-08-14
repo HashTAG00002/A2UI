@@ -38,7 +38,7 @@ B/C/E 现在还不存在——所以"下放"的落点是**现在就存在的 dom
 
 ## 4. Kernel 保留清单（时序 — 不得删，否则打回）
 
-由 runtime probe 验证（bf60e0c 确认 bug 存在、f154b4c 确认已修复），真实且 Kernel-owned：
+由 runtime probe 验证（确认 bug 存在、v5 slim 后已修复），真实且 Kernel-owned：
 
 1. revision 由 Kernel 分配、单调。
 2. epoch stale result discard（finish_action / record_compensation_result 都查 epoch）。
@@ -80,11 +80,11 @@ B/C/E 现在还不存在——所以"下放"的落点是**现在就存在的 dom
 | `record_verification(node, bool)` | **改签** → `land_verification(VerificationResult)`；Kernel 只查 action_id/epoch/lifecycle |
 | `record_compensation_result(plan, applied, observed_values=dict)` | **改签** → `record_compensation_result(plan_id, CompensationResult)`；typed，无 extra-key if |
 | universal deepcopy（request_action contract / store write） | **删多余** → frozen 公共类型 + 私有 state 隔离；仅保留真正 mutable private state 的隔离 |
-| GoalPatch two-phase（invalidate future + block until recompose） | **保留**（f154b4c 已实现，probe 确认）；slim 勿回归 |
-| `_TRANSITIONS` READY→FAILED（VERIFY only） | **保留**（f154b4c 已实现，probe 确认） |
-| workflow rewind after rollback（frontier/loop/timeline） | **保留**（f154b4c 已实现，probe 确认） |
-| CHECKPOINT self-in-snapshot + stable-boundary | **保留**（f154b4c 已实现，probe 确认） |
-| set_plan/init one-shot guard | **保留**（f154b4c 已实现，probe 确认） |
+| GoalPatch two-phase（invalidate future + block until recompose） | **保留**（已实现，probe 确认）；slim 勿回归 |
+| `_TRANSITIONS` READY→FAILED（VERIFY only） | **保留**（已实现，probe 确认） |
+| workflow rewind after rollback（frontier/loop/timeline） | **保留**（已实现，probe 确认） |
+| CHECKPOINT self-in-snapshot + stable-boundary | **保留**（已实现，probe 确认） |
+| set_plan/init one-shot guard | **保留**（已实现，probe 确认） |
 
 目标：kernel.py 1194 → ≤ 600 行。删除的每个检查必须在同改动里在 domain 构造器/contract test 补等价。
 

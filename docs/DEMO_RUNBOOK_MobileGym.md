@@ -27,8 +27,11 @@
 
 ## 1. Prerequisites / environment (verified 2026-08-10)
 
-- **Python**: the `senseact` conda env (3.10; taskvm requires ≥3.10). The
-  `codelab` env (3.8) will NOT work.
+- **Python**: the `taskvm` conda env (3.10; cloned from senseact 2026-08-12)
+  is canonical. The `senseact` env ALSO works (ships Playwright + chromium),
+  and the startup commands below use its absolute interpreter path on
+  purpose — `conda run -n senseact` MIS-RESOLVES to codelab on this box, so
+  use the absolute path directly. The `codelab` env (3.8) will NOT work.
   ```
   SENSEACT=/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/conda/envs/senseact/bin/python
   ```
@@ -120,8 +123,9 @@ top-3 summary text (`本月top3支出: 520, 168, 42。省着点。`). Click **ap
 **What happens (say this):**
 > TaskVM compiles the edit into a `send_message` PatchOp and dispatches it.
 > The bridge does NOT call `set_state` — it drives the app's OWN write
-> pipeline with real GUI gestures: `open_app(wechat)` → deep-link to the
-> 黄勇 chat → focus the composer → `type_text` → `Enter`. The sim's WeChat
+> pipeline with real GUI gestures: `open_app(wechat)` → tap the contact by
+> visible name (黄勇) in the chat list → focus the composer → `type_text` →
+> `Enter`. The sim's WeChat
 > `handleKeyDown → handleSend → sendMessage` store mutation appends the
 > message. The read-only zone re-syncs to show the message landed.
 
@@ -186,7 +190,7 @@ These live in the repo (not chat/memory) and are re-auditable by anyone:
 | Artifact | What it proves |
 |---|---|
 | `eval_results/mobilegym_killtest_<ts>.json` | round_trip=1.0 (write happened), honest-irreversibility 2/2 (fidelity=0.0, partial_failure, message-still-there), neg-control=0.3. The verdict string states "HONEST IRREVERSIBILITY, NOT reversible compensation." |
-| `eval_results/mobilegym_visual_<ts>/step_NN_<action>.png` | Per-gesture screenshots: open_app → deep-link → focus → type → enter → verify → undo-409-message-still-there. The "I can't see anything" deliverable. |
+| `eval_results/mobilegym_visual_<ts>/step_NN_<action>.png` | Per-gesture screenshots: open_app → tap-contact-by-name → focus → type → enter → verify → undo-409-message-still-there. The "I can't see anything" deliverable. |
 | `eval_results/mobilegym_timeline_<ts>.html` | The rendered honesty-based-rollback UI snapshot (the locked 🔒 segment + the honest message). |
 
 Re-run the gate anytime:
