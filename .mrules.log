@@ -2937,3 +2937,30 @@ Agent D/E：taskvm/projection + taskvm/runtime 接线到 workspace_ui 真实入�
 ### commit 范围（本轮）
 
 `taskvm/runtime/`（6 文件）、`taskvm/verifier/{__init__.py, visible.py}`、`docs/contracts/{runtime.md, runtime_rfc_backlog.md}`、`tests/runtime/`（conftest + 4 测试文件）、`tests/verifier/test_visible_verifier.py`、`tests/integration/test_runtime_trace.py`、`.mrules`、`.mrules.log`。`_debug_ft.py` / `_debug_rt.py` 为根目录临时调试脚本（前者 faulthandler 包单个 pytest 卡死用例、后者 LocalPatch retarget 手工复现），全仓零引用，不入库并从工作树删除。
+
+---
+
+## E38 · 远端审计 EVIDENCE HOLD 的 exact-SHA 取证闭环（2026-08-15，仓库宿主容器会话）
+
+**背景**：远端审计 agent（隔离容器无 GitHub DNS + web.run 网页抓取层）发现矛盾：GitHub main 网页的 `taskvm/architect/compiler.py` 显示 E36 之前的旧逻辑（`if changed or gone or new or lost:`，无 `_recovery`），而 E36 commit ledger 声称 C-F1 已修复；且 main/.mrules 网页快照停在 E32，exact commit `fca4ea4` 页面却已到 E37。审计 agent 自纠证据等级：C 从 PASS 撤回到 EVIDENCE HOLD，等待 exact SHA blob 或本地 checkout 直接验证。本会话在仓库宿主容器补齐该证据。
+
+**取证记录（命令与关键输出）**：
+
+1. `git rev-parse HEAD` → `fca4ea4c8fe86523157988b0ffd0b2b9bb1ac4d1`（与审计所指 exact SHA 逐字符一致）；`git remote -v` → origin = `https://github.com/HashTAG00002/A2UI.git`（同一远端仓库）；`git cat-file -t fca4ea4…` → `commit`。
+2. blob 交叉验证：`git rev-parse fca4ea4:taskvm/architect/compiler.py` = `git rev-parse 6a168c4:taskvm/architect/compiler.py` = `a1c7b911f3fda886e97bdd71c157a937a76fedb7`（fca4ea4 未触碰该文件、直接继承 parent，与审计推断一致）；`git log --oneline -- taskvm/architect/compiler.py` 最新条目 = `6a168c4 E36`（C-F1 修复即由该 commit 引入），此前为 467f929(E32)/ce52ecd(E31)/900c753(E29)。
+3. `git show fca4ea4:taskvm/architect/compiler.py | grep` → L242-246 `_recovery` 定义（docstring 明写 "C-F1"），L250-255 三态 `recovered/lost/ambiguous`（label 出现 0 次→lost、>1 次→ambiguous、恰 1 次→recovered），L292 `if gone or new or lost or ambiguous:`，L305-316 指纹变但全部 handle 可恢复 → `SlowPathReport(False, "…recovered deterministically (rebind); 0 model calls")`；旧逻辑 `if changed or gone or new or lost:` 在 exact blob 中不存在（grep 反证）。
+4. 工作树等价性：`git status --porcelain` 为空 + `git hash-object taskvm/architect/compiler.py` = 同一 blob `a1c7b911…` → 当前工作区与 fca4ea4 内容寻址等价，本地复跑 ≡ exact-SHA checkout 复跑（SHA-1 内容寻址，逐字节等价）。
+5. 独立复现 E36 验收命令（`/mnt/dolphinfs/.../conda/envs/taskvm/bin/python`）：`pytest -q tests/architect tests/governance tests/architecture` → **38 passed / 1 skipped**（exit 0）；`compileall taskvm/architect taskvm/governance` → exit 0；`pytest -q tests/substrate` → **34 passed / 1 skipped**（exit 0）；全量 `pytest tests/ -q` → **292 passed / 2 skipped**（exit 0）。四项与 E36/E37 ledger 零偏差。
+
+**判定**：
+- 审计 agent 的"情况 A"（真实代码已修复，web.run 的 main 页面是 E32-era 旧缓存）从 85-90% 概率推断升级为确定性结论（旁证链：main/.mrules 网页停 E32 vs exact commit 页面 E37 + 本地 exact blob 代码级命中 + 独立复跑零偏差）。
+- C 的 EVIDENCE HOLD **解除**：LOCK 条件在 exact SHA 上经 blob 级 + 独立复跑双重验证。B 结论不变（OWNER-COMPLETE / CODE-FROZEN / FORMAL LOCK PENDING T1,T2，与本次发现无关）。
+- 审计 agent 撤回 PASS 的操作本身是正确的证据等级纪律（ledger ≠ implementation ground truth），本次只是补齐其环境无法取得的最后一块证据，非返工。
+
+**证明了什么 / 没证明什么**（元原则 6）：
+- 证明了：fca4ea4 的 compiler.py 含完整 C-F1 实现；E36 记录的四个验收数字可独立复现；远端 main 网页视图确系过期缓存。
+- 没证明：本地 HEAD 与 GitHub 远端当前 ref 的实时一致性（容器无 GitHub DNS，未 fetch；以"本地 origin URL 一致 + HEAD SHA 与审计所指 commit 逐字符相同"为桥）；未做异机复现（同一容器族环境）。
+
+**纠错教训（候选元原则 11）**：审计证据链中"网页缓存视图"与"内容寻址对象库"不是同一证据等级——commit/blob SHA 是密码学指纹，`main` 网页是可过期快照；跨环境审计必须先固定 exact SHA 再取证；"无法 checkout"应先实际尝试再陈述为事实（审计 agent 已自我纠正此点）。
+
+**commit 范围（本轮）**：仅 `.mrules` + `.mrules.log`（多 agent 纪律：只 add 本会话文件）。证据 `eval_results/audit_fca4ea4_compiler_cf1_evidence.json` 及 `eval_results/audit_fca4ea4_*.txt` 落盘但按规则 3 不入 git。
