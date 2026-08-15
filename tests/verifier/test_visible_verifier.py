@@ -31,14 +31,15 @@ import pytest
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
-def _action_node(node_id="n1", desired=None, reversibility="reversible"):
+def _action_node(node_id="n1", desired=None, reversibility="reversible",
+                 completion=""):
     return WorkflowNode(
         node_id=node_id, kind=NodeKind.ACTION, label=node_id,
         contract=ActionContract(
             contract_id=f"c-{node_id}",
             semantic_goal=f"realise {node_id}",
             desired_state=dict(desired or {}),
-            completion_condition=f"{node_id} visibly done",
+            completion_condition=completion,
             reversibility=Reversibility(reversibility)))
 
 
@@ -248,3 +249,75 @@ def test_verification_result_is_frozen():
                             action_id="a1")
     with pytest.raises(Exception):
         vr.passed = False  # type: ignore
+
+
+# ── §6.8 completion_condition is actually checked (P0-2; RFC-003) ───────────
+def test_completion_condition_satisfied_when_value_matches():
+    """runtime.md §6: passed requires the completion_condition's visible
+    criterion to be satisfied — here it IS (key==value matches the fresh
+    observation), alongside the desired_state match."""
+    v = VisibleVerifier()
+    node = _action_node(desired={"x": "A"}, completion="x == A")
+    vr = v.verify(node=node, before_observed={"x": "x0"},
+                  after_observed={"x": "A"}, desired={"x": "A"},
+                  observation=_obs(), action_id="a1", epoch=1)
+    assert vr.passed
+    assert vr.detail == "ok"
+
+
+def test_completion_condition_not_satisfied_fails_even_if_desired_matches():
+    """The load-bearing P0-2 negative control (runtime.md §6): desired_state
+    is FULLY met, BUT the completion_condition's visible criterion is NOT
+    satisfied → passed MUST be False. Pre-fix the verifier checked only
+    desired_state and would have passed this (a doc-vs-code lie). CUA done ≠
+    verified survives: an independent completion criterion can still fail."""
+    v = VisibleVerifier()
+    # desired x=A is met (after x=A); completion demands x==Z, which is NOT
+    node = _action_node(desired={"x": "A"}, completion="x == Z")
+    vr = v.verify(node=node, before_observed={"x": "x0"},
+                  after_observed={"x": "A"}, desired={"x": "A"},
+                  observation=_obs(), action_id="a1", epoch=1)
+    assert not vr.passed
+    assert "completion" in vr.detail.lower()
+    assert "Z" in vr.detail
+
+
+def test_completion_condition_referencing_unobserved_key_fails():
+    """A completion_condition naming a key absent from the fresh observation
+    cannot be grounded → fail (never silently satisfied)."""
+    v = VisibleVerifier()
+    node = _action_node(desired={"x": "A"}, completion="y == B")
+    vr = v.verify(node=node, before_observed={"x": "x0"},
+                  after_observed={"x": "A"}, desired={"x": "A"},
+                  observation=_obs(), action_id="a1", epoch=1)
+    assert not vr.passed
+    assert "y" in vr.detail
+
+
+def test_non_conforming_completion_condition_fails_honestly():
+    """RFC-003: a non-empty completion_condition not in the minimal
+    'key == value' form CANNOT be deterministically verified → the verifier
+    fails honestly (passed=False) rather than silently passing. This is NOT
+    an NLP parser — composition must produce the minimal form (or leave it
+    empty). 'CUA done ≠ verified' includes 'cannot establish the criterion'."""
+    v = VisibleVerifier()
+    node = _action_node(desired={"x": "A"}, completion="inbox visibly shows sent")
+    vr = v.verify(node=node, before_observed={"x": "x0"},
+                  after_observed={"x": "A"}, desired={"x": "A"},
+                  observation=_obs(), action_id="a1", epoch=1)
+    assert not vr.passed
+    assert "RFC-003" in vr.detail or "deterministic" in vr.detail
+
+
+def test_empty_completion_condition_means_no_extra_criterion():
+    """Empty completion_condition = no additional visible criterion beyond
+    desired_state (RFC-003) — satisfied, NOT a silent skip. This is what the
+    shared _action_node helper now defaults to."""
+    v = VisibleVerifier()
+    node = _action_node(desired={"x": "A"}, completion="")
+    vr = v.verify(node=node, before_observed={"x": "x0"},
+                  after_observed={"x": "A"}, desired={"x": "A"},
+                  observation=_obs(), action_id="a1", epoch=1)
+    assert vr.passed
+    assert vr.detail == "ok"
+

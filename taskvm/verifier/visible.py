@@ -14,8 +14,11 @@ tests inject a ``VisibleVerifier`` instance; runtime never imports it.
 
 Default verification is deterministic and costs ZERO model calls:
 - ACTION node: ``passed`` iff every ``contract.desired_state`` key's freshly
-  observed value equals its target (the load-bearing ``CUA done ≠ verified``
-  check — the CUA may report done while the screen still shows the old value).
+  observed value equals its target AND ``completion_condition``'s visible
+  criterion is satisfied (runtime.md §6 — the load-bearing ``CUA done ≠
+  verified`` check: the CUA may report done while the screen still shows the
+  old value, OR while an independent completion criterion is unmet). See
+  ``_completion_satisfied`` / RFC-003 for the minimal deterministic form.
 - VERIFY node: ``passed`` iff the variables referenced by the node's
   ``verification`` predicate are observed at their desired values (or, when
   no variable is referenced, iff nothing is diverged).
@@ -60,26 +63,80 @@ class VisibleVerifier:
         return self._verify_control(node, after_observed, desired,
                                     evidence_ref, action_id, epoch)
 
-    # ── ACTION: desired_state must be met in the fresh observation ────────
+    # -- ACTION: desired_state + completion_condition in the fresh obs -------
     @staticmethod
     def _verify_action(node: WorkflowNode,
                        after_observed: Mapping[str, Any],
                        evidence_ref: str, action_id: str | None,
                        epoch: int) -> VerificationResult:
+        """runtime.md §6: passed iff desired_state matches AND
+        completion_condition's visible criterion is satisfied. Both are
+        checked against the FRESH after_observation; neither is silently
+        skipped (a pre-fix version checked only desired_state — a doc-vs-code
+        lie the module docstring once made)."""
         targets = node.contract.desired_state or {}
+        reasons: list[str] = []
         mismatched = [k for k in targets
-                      if after_observed.get(k) != targets[k]]
-        passed = not mismatched
+                     if after_observed.get(k) != targets[k]]
+        if mismatched:
+            reasons.append(f"unmet desired_state: {mismatched}")
+        cc_ok, cc_detail = VisibleVerifier._completion_satisfied(
+            node.contract.completion_condition, after_observed)
+        if not cc_ok and cc_detail:
+            reasons.append(cc_detail)
+        passed = not reasons
         return VerificationResult(
             node_id=node.node_id, epoch=epoch, passed=passed,
             action_id=action_id, evidence_ref=evidence_ref,
-            detail="ok" if passed else f"unmet desired_state: {mismatched}")
+            detail="ok" if passed else "; ".join(reasons))
 
-    # ── VERIFY: referenced variables must be at their desired values ──────
+    @staticmethod
+    def _completion_satisfied(completion_condition: str,
+                              after_observed: Mapping[str, Any]
+                              ) -> tuple[bool, str | None]:
+        """Evaluate ``completion_condition`` deterministically against the
+        fresh after-observation (RFC-003; runtime.md §6). ZERO model calls,
+        visible-only.
+
+        - empty / whitespace -> ``(True, None)`` — no extra visible criterion
+          (desired_state match is sufficient); NOT a silent skip, the contract
+          expressed no additional criterion.
+        - ``<key> == <value>`` (single clause, the same minimal parse form
+          runtime.md §11 freezes for loop ``termination_predicate``) ->
+          ``(str(after_observed[key]) == value, …)``. A key absent from the
+          fresh observation cannot be grounded -> fail.
+        - non-empty but not the minimal form -> ``(False, …)`` — the verifier
+          CANNOT establish the visible criterion, so it fails honestly rather
+          than silently passing (runtime.md §6: completion_condition MUST be
+          checked; never ignored). RFC-003 defines this minimal mechanism; it
+          is NOT a general predicate language / NLP parser.
+
+        Returns ``(satisfied, detail)``; ``detail`` is None when satisfied.
+        """
+        cond = (completion_condition or "").strip()
+        if not cond:
+            return True, None
+        if "==" in cond:
+            key, _, val = cond.partition("==")
+            key = key.strip()
+            val = val.strip().strip("'\"")
+            if not key:
+                return False, (f"completion_condition missing key "
+                               f"(RFC-003): {cond!r}")
+            got = after_observed.get(key)
+            if got is None:
+                return False, (f"completion_condition references unobserved "
+                               f"key {key!r} (RFC-003)")
+            ok = str(got).strip() == val
+            return (ok, None if ok
+                    else f"completion_condition unmet: {key}={got!r} != {val!r}")
+        return False, (f"completion_condition not in the deterministic "
+                       f"'key == value' form (RFC-003): {cond!r}")
+
+    # -- VERIFY: referenced variables must be at their desired values --------
     @staticmethod
     def _verify_control(node: WorkflowNode,
-                        after_observed: Mapping[str, Any],
-                        desired: Mapping[str, Any], evidence_ref: str,
+                        after_observed: Mapping[str, Any], desired: Mapping[str, Any], evidence_ref: str,
                         action_id: str | None, epoch: int) -> VerificationResult:
         pred = node.verification or ""
         referenced = VisibleVerifier._referenced_keys(pred, set(after_observed))

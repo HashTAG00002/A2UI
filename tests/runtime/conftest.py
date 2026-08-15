@@ -223,7 +223,7 @@ CLICK = CUADecision(kind=CUADecisionKind.ACT,
 # ── kernel / graph builders ────────────────────────────────────────────────
 def action_node(node_id: str, *, goal: str = "", desired: dict | None = None,
                 depends_on: tuple[str, ...] = (), parent_id: str | None = None,
-                reversibility="reversible") -> WorkflowNode:
+                reversibility="reversible", completion: str = "") -> WorkflowNode:
     from taskvm.domain.contract import Reversibility
     return WorkflowNode(
         node_id=node_id, kind=NodeKind.ACTION, label=node_id,
@@ -232,7 +232,7 @@ def action_node(node_id: str, *, goal: str = "", desired: dict | None = None,
             contract_id=f"c-{node_id}",
             semantic_goal=goal or f"realise {node_id}",
             desired_state=dict(desired or {}),
-            completion_condition=f"{node_id} visibly done",
+            completion_condition=completion,
             reversibility=Reversibility(reversibility)))
 
 
