@@ -19,7 +19,7 @@ from taskvm.domain.events import Event, EventKind
 #: Frozen SSE type vocabulary (contract §6). Frontend routes on ``sse_type``;
 #: the raw ``kind`` is kept in ``detail`` for inspection.
 KERNEL_EVENT_SSE: dict[EventKind, str] = {
-    EventKind.OBSERVATION_RECEIVED:    "observation",
+    EventKind.OBSERVATION_RECEIVED:    "observation.received",
     EventKind.STATE_UPDATED:           "state.updated",
     EventKind.PLAN_CREATED:            "plan.created",
     EventKind.PLAN_PATCHED:            "plan.patched",

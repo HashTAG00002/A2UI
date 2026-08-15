@@ -2994,3 +2994,53 @@ Agent D/E：taskvm/projection + taskvm/runtime 接线到 workspace_ui 真实入�
 **证明了什么 / 没证明什么**：证明了替换后跨文档引用零破坏、链接完整、D 合同行诚实；没证明远端审计 agent 已读到新版（需推送后由其自行确认）。本轮零代码改动，纯合同文档 + 登记更新。
 
 **commit 范围（本轮）**：`docs/contracts/audit_charter.md` + `.mrules` + `.mrules.log`（多 agent 纪律：只 add 本会话文件）。
+
+---
+
+## E40 — Agent D Projection Layer 落地（D1-D8 全完成）
+
+**日期**：2026-08-16
+**BASE SHA**：`58f0d0cffd70aa0bf4f26dabb0e2efb38d094242`
+
+### 交付物清单
+
+1. **D1 — projection 包骨架**：`taskvm/projection/__init__.py` + `store.py`（ProjectionSessionStore / ArtifactStore / SurfaceDecl / ProjectionSession）
+2. **D2 — Flask App 路由矩阵**：`taskvm/projection/app.py`（16 路由：10 GET + 6 POST，含 SSE 流 + artifact 二进制）
+3. **D3 — View Models（纯函数）**：`taskvm/projection/view_models.py`（snapshot_view / governance_view / variables_view / workflow_view / checkpoint_view / surface_cards / conflicts_view / projection_schema_data）
+4. **D4 — SSE 事件适配器**：`taskvm/projection/events.py`（KERNEL_EVENT_SSE 映射表 + format_sse / sse_envelope）
+5. **D5 — KernelGovernancePort**：`taskvm/projection/services/governance.py`（HTTP → Kernel 指令翻译：pause/resume/stop/local_patch/goal_patch/checkpoint/rollback/resolve_conflict）
+6. **D6 — Architecture Gates**：projection 导入 substrate = 零（静态分析 + 测试断言）；读路径零模型调用（ModelCallProbe 计数器断言）
+7. **D7 — 单元测试**：`tests/projection/`（5 文件 113 测试：test_store / test_view_models / test_events / test_route_matrix / test_model_call_regression）
+8. **D8 — E2E HTTP 测试**：`tests/e2e_ui/test_http_e2e.py`（22 测试：真实 TCP 服务器 + requests 客户端，覆盖全部路由 + SSE live delta + no-leak gate）+ `tests/e2e_ui/test_playwright_e2e.py`（4 浏览器测试，无 Playwright 环境时 skip）
+
+### 关键纠错
+
+- **SSE 类型映射修正**：`OBSERVATION_RECEIVED` 映射从 `"observation"` 修正为 `"observation.received"`，与其他类型一致使用点号命名空间
+- **test_rollback 400 根因**：模块级 fixture 共享同一 Kernel 实例，`test_goal_patch` 在 s1 上设置了 `_pending_recompose`，导致后续 `commit_checkpoint` 的 `_require_executable_locked()` 校验失败；修复方案：注册独立 session s2 供 rollback 测试，避免 GoalPatch 副作用污染
+- **WorkflowSnapshot API 对齐**：测试中修正了多余的 `revision`/`epoch` 参数、`begin_loop_iteration` 返回值迭代等签名不匹配问题
+
+### 验证结果
+
+- `tests/projection/` + `tests/e2e_ui/`：**135 passed / 4 skipped**（Playwright 浏览器测试因环境缺少 skip）
+- 全量回归：**428 passed / 5 skipped / 0 failed**（零回归）
+- Architecture gate：`projection` 零导入 `substrate`（grep 验证）
+- No-leak gate：E2E 断言 API 响应中无 `entity_id` / `data-*`
+
+### 证明了什么 / 没证明什么
+
+**证明了**：
+- 投影层 16 路由在真实 HTTP 环境下全部可用（200/404/400 正确返回）
+- SSE 流能推送 live delta（governance 命令后订阅者收到 `governance.applied`）
+- 读路径零模型调用（ModelCallProbe 断言 N≥20 连续读 = 0 calls）
+- 投影层不导入 substrate（架构隔离）
+- API 响应不含内部 ID（no-leak gate）
+
+**没证明**：
+- 浏览器端 E2E（Playwright 浏览器未安装，4 测试 skip）
+- 前端 workspace_ui 与 projection API 的端到端集成
+- 高并发 SSE 推送的可靠性（单线程测试）
+- `projection.md` 合同文档尚未冻结（T2 anchor_lookup 债务待拆）
+
+### commit 范围（本轮）
+
+`taskvm/projection/events.py` + `tests/projection/` + `tests/e2e_ui/` + `.mrules` + `.mrules.log`（多 agent 纪律：只 add 本会话文件，不 add Agent F 的 benchmark/evaluation 产物）。
