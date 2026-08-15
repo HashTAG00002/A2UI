@@ -298,6 +298,56 @@ def test_scenario_7_architect_leak_repair_message_stays_clean():
                             what="task-architect prompt as sent")
 
 
+def test_scenario_7_domain_error_repair_note_never_carries_internal_ids():
+    """C-4 counterexample (Oracle audit, E32): a NORMAL model mistake — a
+    fan-out lane waiting on a sibling lane — makes the domain validator
+    reject the topology in terms of TaskVM-internal node ids (n001/n002/…).
+    The repair note built from that error must carry ONLY a business-level
+    category: no internal id may reach the second model message, and the
+    gate must agree. The bounded repair can still succeed."""
+    sibling_dep = {
+        "variables": ARCHITECTURE_JSON["variables"],
+        "workflow": {"nodes": [
+            {"kind": "action", "label": "改发布日期",
+             "semantic_goal": "推迟发布会议",
+             "sets": {"release_date": "2026-08-18"},
+             "completion": "日历卡片显示 2026-08-18",
+             "reversibility": "reversible", "risk": "",
+             "target_evidence": ["发布会议"]},
+            {"kind": "fan_out", "label": "同步依赖", "after": ["改发布日期"]},
+            # INVALID on purpose: lane 同步文案 waits for sibling lane 同步测试
+            {"kind": "action", "label": "同步文案", "container": "同步依赖",
+             "after": ["同步测试"],
+             "semantic_goal": "文案截止同步",
+             "sets": {"copy_deadline": "2026-08-18"},
+             "completion": "任务板显示新截止", "reversibility": "reversible",
+             "risk": "", "target_evidence": ["项目文案"]},
+            {"kind": "action", "label": "同步测试", "container": "同步依赖",
+             "semantic_goal": "测试截止同步",
+             "sets": {"qa_deadline": "2026-08-18"},
+             "completion": "任务板显示新截止", "reversibility": "reversible",
+             "risk": "", "target_evidence": ["测试任务"]},
+            {"kind": "barrier", "label": "汇合校验", "after": ["同步依赖"]},
+            {"kind": "terminal", "label": "完成", "after": ["汇合校验"]},
+        ]},
+    }
+    port = FakePort(sibling_dep, ARCHITECTURE_JSON)
+    arch = TaskArchitect(port, max_repairs=1).compose(INTENT, OBSERVED_VARS)
+
+    assert len(port.calls) == 2, "the invalid topology consumed one repair"
+    second = port.calls[1]["system"] + "\n" + port.calls[1]["user"]
+    # the raw domain error quoted internal node ids (n001..n006 from the
+    # deterministic next_id minting) — NONE may reach the model, and the
+    # no-leak gate must agree on the exact second message as sent
+    for tok in ("n001", "n002", "n003", "n004", "n005", "n006"):
+        assert tok not in second, f"repair note leaked internal id {tok!r}"
+    assert_prompt_clean(second, what="repair message as sent")
+    # guidance is still USEFUL: the category (independent lanes) is stated
+    assert "independent" in second
+    # and the bounded repair landed a valid plan
+    assert arch.graph.terminal_nodes()
+
+
 def test_http_port_one_provider_request_per_ledger_record(monkeypatch):
     """C-2 counterexample (Oracle audit): provider requests == ledger
     records across an invalid-JSON first reply and a successful repair —
@@ -325,6 +375,46 @@ def test_http_port_one_provider_request_per_ledger_record(monkeypatch):
     assert [r.is_repair for r in ledger.records] == [False, True]
     # C-1: the repair message built from the parse-failure note is clean
     assert_prompt_clean(provider_messages[1], what="repair message as sent")
+
+
+def test_http_port_carries_provider_usage_into_ledger(monkeypatch):
+    """C-5 counterexample (Oracle audit, E32): the provider's usage block
+    (prompt_tokens/completion_tokens) must survive into ModelReply and the
+    ledger record — token accounting is the ledger's frozen contract; the
+    port reading usage and then dropping it reports None cost for every
+    real call, silently breaking the benchmark's true-overhead metric."""
+    import io
+
+    import taskvm.architect.http_port as hp
+
+    payload = {
+        "choices": [{"message": {"content": json.dumps(
+            COMPILER_JSON, ensure_ascii=False)}}],
+        "usage": {"prompt_tokens": 123, "completion_tokens": 45},
+    }
+
+    class _FakeResp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        return _FakeResp(json.dumps(payload).encode("utf-8"))
+
+    monkeypatch.setattr(hp.urllib.request, "urlopen", fake_urlopen)
+    port = hp.HttpModelPort(api_key="test-key")
+    ledger = ModelCallLedger()
+    result = StateCompiler(port, ledger).compile(VIEW_V1, INTENT)
+
+    assert result.variables[0].semantic_key == "release_date"
+    rec = ledger.records[0]
+    assert rec.prompt_tokens == 123, (
+        "usage.prompt_tokens must reach the ledger through ModelReply")
+    assert rec.completion_tokens == 45, (
+        "usage.completion_tokens must reach the ledger through ModelReply")
+    assert port.last_usage == (123, 45)
 
 
 # ── scenario 8: bounded repair, honest failure, NO GT fallback ─────────────

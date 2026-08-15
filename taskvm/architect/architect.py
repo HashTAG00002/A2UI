@@ -35,6 +35,7 @@ the carried frontier. Nothing is re-executed from scratch.
 """
 from __future__ import annotations
 
+import logging
 import re
 import time
 from dataclasses import dataclass, replace
@@ -42,7 +43,8 @@ from typing import Iterable
 
 from taskvm.architect.compiler import CompilerResult
 from taskvm.architect.noleak import (
-    LEAK_REPAIR_GUIDANCE, assert_prompt_clean, scan_json_values,
+    LEAK_REPAIR_GUIDANCE, assert_prompt_clean, repair_guidance,
+    scan_json_values,
 )
 from taskvm.architect.port import (
     MODEL_ROLE_TASK_ARCHITECT, ModelCallLedger, ModelPort,
@@ -65,6 +67,7 @@ _REVERSIBILITY = {r.value: r for r in Reversibility}
 _NODE_KINDS = {k.value: k for k in NodeKind}
 _MUTABILITY = {MUTABILITY_EDITABLE, MUTABILITY_READONLY, MUTABILITY_LOCKED}
 _KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """\
 You are the Task Architect of a Task Virtual Machine. Given the human goal \
@@ -365,8 +368,14 @@ class TaskArchitect:
 
     @staticmethod
     def _repair_note(err: Exception) -> str:
-        return (f"\n\nYour previous output was rejected: {err}\nFix exactly "
-                f"that and output the corrected JSON object only.")
+        # C-4 (Oracle audit, E32): the raw error text may quote internal
+        # ids minted by the assembly (n001/c001/…) — only the business-level
+        # category goes back to the model; the detail stays in the log and
+        # in the exception for the honest-failure path.
+        logger.debug("task-architect repair: %s: %s", type(err).__name__, err)
+        return ("\n\nYour previous output was rejected: "
+                + repair_guidance(err)
+                + " Fix that and output the corrected JSON object only.")
 
     @staticmethod
     def _max_numeric_suffix(nodes: tuple[WorkflowNode, ...]) -> int:

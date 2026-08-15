@@ -68,7 +68,14 @@ class HttpModelPort:
         mdl = model or self.default_model
         raw = self._chat(system, user, mdl, max_tokens, temperature,
                          image_data_url)
-        return ModelReply(parsed=_extract_json(raw), raw=raw, model=mdl)
+        # C-5 (Oracle audit, E32): the provider's usage block IS the token
+        # accounting the ledger contract requires. _chat already parsed it
+        # off the response — carry it into the ModelReply so every ledger
+        # record reports the true cost of its one real provider request.
+        # Never fabricated: absent usage stays None (honest absence).
+        pt, ct = self.last_usage
+        return ModelReply(parsed=_extract_json(raw), raw=raw, model=mdl,
+                          prompt_tokens=pt, completion_tokens=ct)
 
     # ── internals ──────────────────────────────────────────────────────
     def _chat(self, system: str, user: str, model: str, max_tokens: int,

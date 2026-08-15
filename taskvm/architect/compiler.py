@@ -21,13 +21,15 @@ Task Architect's plane. Output keys are scanned for internal-id echoes
 """
 from __future__ import annotations
 
+import logging
 import re
 import time
 from dataclasses import dataclass
 from typing import Any
 
 from taskvm.architect.noleak import (
-    LEAK_REPAIR_GUIDANCE, assert_prompt_clean, scan_json_values,
+    LEAK_REPAIR_GUIDANCE, assert_prompt_clean, repair_guidance,
+    scan_json_values,
 )
 from taskvm.architect.observation import (
     CompilerObservationView, HandleEvidence, VisibleRegion,
@@ -72,6 +74,9 @@ relevant to the goal, not the whole screen.
 cannot see. If the goal cannot be grounded in what is visible, say so in \
 ambiguities and set needs_clarification=true.
 - Output ONLY the JSON object."""
+
+
+logger = logging.getLogger(__name__)
 
 
 class CompilerOutputError(ValidationError):
@@ -320,8 +325,14 @@ class StateCompiler:
 
     @staticmethod
     def _repair_note(err: Exception) -> str:
-        return (f"\n\nYour previous output was rejected: {err}. Fix it and "
-                f"output the corrected JSON object only.")
+        # C-4 (Oracle audit, E32), compiler side: same hole, same fix — the
+        # raw error text (which may quote handle ids ha001… minted by the
+        # assembly) never goes back to the model; only the classified
+        # business-level category does. Detail stays in log + exception.
+        logger.debug("state-compiler repair: %s: %s", type(err).__name__, err)
+        return ("\n\nYour previous output was rejected: "
+                + repair_guidance(err)
+                + " Fix that and output the corrected JSON object only.")
 
     def _assemble(self, parsed: dict, view: CompilerObservationView,
                   revision: int) -> CompilerResult:

@@ -2723,3 +2723,38 @@ Agent D/E：taskvm/projection + taskvm/runtime 接线到 workspace_ui 真实入�
 ### commit 范围纪律（用户指令）
 
 并行 agent 正在改其他文件（taskvm/runtime 等）。本轮 commit **仅包含 Agent C fix round 的文件**：`taskvm/architect/{compiler,architect,http_port,port,noleak}.py`、`docs/contracts/architect.md`、`tests/architect/test_scenarios.py`、`.mrules`、`.mrules.log`——不含任何并行 agent 的改动。
+
+
+---
+
+## E32 · Oracle 复审 fix round：repair-note 内部 ID 零回传（C-4）+ provider token 记账闭环（C-5）
+
+时间：2026-08-15。范围：taskvm/architect/{noleak,architect,compiler,http_port}.py + tests/architect/test_scenarios.py。触发：Oracle 对 E31 的复审裁决（18 项 PASS + 2 BLOCKER；revision=0 语义模糊与 legacy governance debt 依 audit charter 克制原则不立项，路由 D/E/F/G）。
+
+### BLOCKER 1（C-4）：domain 校验错误的 repair note 原样回传内部 node id
+
+- 根因链：模型产出非法拓扑（fan-out lane 依赖 sibling，handoff 明确要求支持的正 常 repair 场景）→ `_assemble` 用 `next_id()` 铸出 n001/n002/… → Agent A 的 WorkflowGraph validator 用内部 id 报错（合法）→ 旧 `_repair_note(err)` 把 `f"{err}"` 原文拼进第二轮 prompt → `_DB_ID_RE` 认不出裸 `n001` 格式 → 真实发送。完全无需恶意模型，正常分支即触发。
+- 修法（Oracle 指定方向，源头根治不扩 regex）：repair note **永不携带原始错误文本**。noleak.py 新增 `repair_guidance(err)`：13 条 (regex, 业务级 guidance) 分类表 + generic fallback；architect/compiler 两侧 `_repair_note` 统一改用它，原文降级为 `logger.debug`（留日志/异常路径，不进 prompt）。与 C-1 的 LEAK_REPAIR_GUIDANCE 同一哲学：类别进 prompt，detail 留日志。
+- 元原则 9 应用：被报的是 Task Architect 侧，主动排查发现 **StateCompiler._repair_note 有同一漏洞**（可能回传 ha001 句柄 id）——同步修复，共用同一分类器。
+- 测试（先红后绿）：`test_scenario_7_domain_error_repair_note_never_carries_internal_ids`——首轮 reply 构造 lane "同步文案" after sibling "同步测试"，断言第二轮实际发送消息中 n001..n006 全部缺席 + `assert_prompt_clean` 通过 + guidance 仍含 "independent" 类别词 + 修复后落得合法 plan。红因：原文含 n002/n003/n004。
+
+### BLOCKER 2（C-5）：HttpModelPort 读到 usage 却在 complete_json 丢弃
+
+- 根因链：`_chat` 已解析 `usage` 存 `self._last_usage=(1834,721)`，但 `complete_json` 构造 `ModelReply` 时未填 `prompt_tokens/completion_tokens` → Ledger 严格信 ModelReply → 全部记 None。调用次数诚实（E31 C-2）而 token 开销失真——直接削弱 paper benchmark 的"模型开销"对比指标（frozen contract：ledger 是计量真源）。
+- 修法（Oracle 给的几行）：`pt, ct = self.last_usage` 填入 ModelReply；usage 缺席时诚实保持 None（不伪造）。
+- 测试（先红后绿）：`test_http_port_carries_provider_usage_into_ledger`——monkeypatch `urllib.request.urlopen` 返回带 `usage:{123,45}` 的完整 OpenAI payload（走完整 HTTP→usage→ModelReply→Ledger 链路而非 mock _chat），断言 ledger record `prompt_tokens==123 / completion_tokens==45` 且 `port.last_usage==(123,45)`。红因：`assert None == 123`。
+
+### 验证数字（可复核）
+
+- `pytest tests/ --ignore=tests/runtime --ignore=tests/substrate`：**215 passed / 1 skipped**（E31 基线 213 + 新增 2）；`tests/architect` 单独 15 passed。
+- 全量 `pytest tests/` 当前 7 failed 全部位于 **untracked 在制品目录**（`?? tests/substrate/`、`?? tests/runtime/`、`?? taskvm/runtime/`——Agent B/G/E 并行波次）：依赖 grep 证明无一 import 本轮改动文件；失败断言内容（visible.py 的 wx_123 scrub 泄漏、runtime 节点 failed≠committed）与 C-4/C-5 零交集；且这些测试从未在主线通过（无"回归"可言）。各自 agent 自行收敛。
+
+### 证明了什么 / 没证明什么
+
+证明：模型输入的 repair 分支在 architect+compiler 两侧对"domain 校验错误"这一类也不再回传内部词汇（测试锁定实际发送文本）；真实 HTTP 链路的 token usage 现在完整落 ledger。
+没证明：13 条分类 guidance 对真实模型的修复成功率提升（无真实模型 A/B）；`_REPAIR_GUIDANCE` 表对全部 domain 错误类别的覆盖率（generic fallback 兜底，漏网类别退化为通用指引而非泄漏——fail-safe 方向）。
+
+### 遗留路由（Oracle 裁决确认）
+
+- revision=0：contract 已注明 0=n/a，不立项；benchmark 真需要时先走 RFC 改 contract。
+- legacy governance exports / architecture gate 缺 governance 项：D/E/F 迁走消费者 → G integration cleanup 删导出 → governance 纳入 gate。均不阻塞 C freeze。

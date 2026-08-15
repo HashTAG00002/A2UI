@@ -39,6 +39,76 @@ LEAK_REPAIR_GUIDANCE = (
 )
 
 
+# C-4 (Oracle audit, E32): the SAME hole via a different, entirely normal
+# branch — domain validators legitimately report failures in terms of the
+# ids the assembly minted (workflow node ids n001…, contract ids c001…,
+# projection ids p001…, handle ids ha001…), which _DB_ID_RE above
+# deliberately does NOT enumerate (chasing every id shape is a losing
+# game). So the SOURCE is fixed instead: a repair note NEVER carries the
+# raw exception text. The message is classified here into a short
+# business-level guidance snippet; the full detail stays in the exception
+# and the log for the honest-failure path. Same philosophy as C-1.
+_REPAIR_GUIDANCE: tuple[tuple[re.Pattern, str], ...] = (
+    (re.compile(r"not a JSON object", re.I),
+     "your reply was not a JSON object with the required keys — output "
+     "ONLY the JSON object, no prose"),
+    (re.compile(r"depends on sibling", re.I),
+     "in a fan-out, lanes must be independent — remove any lane-to-lane "
+     "'after' ordering; lanes re-join only at the barrier"),
+    (re.compile(r"single ordered chain|found a fork", re.I),
+     "inside a sequence, steps run in the listed order — exactly one step "
+     "may be next at any point (no forking inside a sequence)"),
+    (re.compile(r"fan[- ]?in|barrier", re.I),
+     "a barrier must re-join exactly one fan-out: give it 'after' the "
+     "fan-out container (or all of its lanes)"),
+    (re.compile(r"exactly one TERMINAL|must be a sink", re.I),
+     "the plan needs EXACTLY ONE terminal node and nothing may come "
+     "after it"),
+    (re.compile(r"can never reach the TERMINAL|orphan", re.I),
+     "every step must lead (directly or through its container) to the "
+     "terminal — reconnect or drop work that can never finish"),
+    (re.compile(r"references unknown task variables|binds unknown", re.I),
+     "every 'sets' key and every projection binding must be one of the "
+     "declared variables' semantic keys"),
+    (re.compile(r"multiple final writers|split-brain", re.I),
+     "for each variable, order the writers so the LAST one targets the "
+     "variable's desired value; two unordered final writers must agree"),
+    (re.compile(r"duplicate", re.I),
+     "labels and semantic keys must be unique within the output"),
+    (re.compile(r"termination predicate|max_iterations", re.I),
+     "a bounded loop needs BOTH a termination predicate and "
+     "max_iterations >= 1"),
+    (re.compile(r"cycle|circular", re.I),
+     "remove circular 'after' dependencies — the workflow must be "
+     "acyclic"),
+    (re.compile(r"non-empty 'sets'|needs a 'condition'|needs a contract|"
+                r"non-empty label|needs a label|not a container", re.I),
+     "fill in every required field of that node kind (label, action "
+     "'sets', verify 'condition', a valid container reference)"),
+)
+
+GENERIC_REPAIR_GUIDANCE = (
+    "your previous output violated the required structure — rebuild it "
+    "using only the business labels from your previous output"
+)
+
+
+def repair_guidance(err: BaseException) -> str:
+    """Business-level guidance for a rejected model output (C-4).
+
+    The raw error text is NEVER returned or embedded: domain errors
+    legitimately quote internal ids (n001/ha001/…), and repeating them
+    to the model would push them into a model input — the exact
+    violation the gate exists to stop. Callers log the exception
+    themselves; this returns only the classified category text.
+    """
+    text = str(err)
+    for pattern, guidance in _REPAIR_GUIDANCE:
+        if pattern.search(text):
+            return guidance
+    return GENERIC_REPAIR_GUIDANCE
+
+
 # DB-primary-key-shaped tokens: standalone E1 / T2 / wxid_* / C3 used as an
 # ADDRESS (not inside prose). Word-boundary anchored so ordinary English
 # words survive.
