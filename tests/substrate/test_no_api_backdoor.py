@@ -21,17 +21,24 @@ It locks, mechanically and forever:
      class can never regress).
   5. UPPER-LAYER SUBSTRATE KNOWLEDGE IS QUARANTINED — the transitional
      platform knowledge in the legacy execution layer (gui_driver) and
-     the oracle-derived anchor lookup in workspace_ui are FROZEN DEBT:
-     enumerated here, owned by Agent E (deletion) / D-E-G (integration),
-     and the gate fails on ANY NEW violation outside this list.
+     the oracle-derived anchor lookup in workspace_ui are REGISTERED
+     VIOLATIONS of §6, enumerated in the Transitional Debt Register
+     (docs/contracts/substrate.md §8) and mirrored here as
+     TRANSITIONAL_DEBT_REGISTER. The quarantine test only enforces
+     NO GROWTH during the transition — it is NOT a contract-satisfaction
+     check and may not be cited as one (audit B-F1). Formal LOCK is a
+     separate, explicit audit: TASKVM_SUBSTRATE_LOCK_AUDIT=1.
 
 Run: ``python -m pytest tests/substrate -q``.
 """
 from __future__ import annotations
 
 import ast
+import os
 import re
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SUBSTRATE = REPO_ROOT / "taskvm" / "substrate"
@@ -198,26 +205,24 @@ def test_no_executor_api_backdoor_knob_anywhere():
         "GUI-only; there is no 'api' executor, no CLI selector for it.")
 
 
-# ── 5. upper-layer substrate knowledge is quarantined (frozen debt) ─────────
+# ── 5. transitional debt register (mirror of substrate.md §8) ──────────
 
-#: KNOWN TRANSITIONAL DEBT — each entry: file → substrate-knowledge patterns
-#: that exist there TODAY and are scheduled for removal:
+#: TRANSITIONAL DEBT REGISTER — mechanical mirror of the authoritative
+#: table in ``docs/contracts/substrate.md`` §8 (audit B-F1: an allowlist
+#: invented by a test must not silently amend the frozen contract, so the
+#: contract doc is authoritative and this constant must mirror it 1:1).
+#: Every entry is a STILL-STANDING §6 VIOLATION scheduled for DELETION:
 #:
-#:   * ``taskvm/execution/gui_driver.py`` — the whole file is Agent E's
-#:     deletion target (ActionContract → CUA → GuiAction →
-#:     SubstrateSession.act replaces the legacy task adapters and their
-#:     platform tables). Owner: E.
-#:   * ``taskvm/workspace_ui/server.py`` — the oracle-derived
-#:     ``_make_anchor_lookup`` feeds the runtime VM's locator from
-#:     ``env.oracle_state``; the contract requires Substrate.observe() →
-#:     visible evidence → State Compiler → SurfaceHandle instead. B must
-#:     NOT rewrite the UI (one-owner rule): the gate CATCHES it, the
-#:     integration lands with D/E/G. Owner: D/E/G.
+#:   * T1 ``taskvm/execution/gui_driver.py`` — Owner: Agent E. Exit:
+#:     file deleted (runtime consumes SubstrateSession + CUA→GuiAction).
+#:   * T2 ``taskvm/workspace_ui/server.py`` — Owner: Agent D (E/G). Exit:
+#:     oracle-derived _make_anchor_lookup deleted; targeting goes
+#:     Observation → State Compiler → SurfaceHandle.
 #:
-#: The gate fails on any NEW violation outside this list, so the debt can
-#: shrink but never grow. When an entry is resolved, DELETE it here (the
-#: gate prints resolved-entry hints on pass).
-FROZEN_UPPER_LAYER_DEBT: dict[str, tuple[str, ...]] = {
+#: The quarantine test below only enforces NO GROWTH while these are
+#: pending — it is NOT a satisfaction check. The FORMAL LOCK audit
+#: (TASKVM_SUBSTRATE_LOCK_AUDIT=1) fails until this register is {}.
+TRANSITIONAL_DEBT_REGISTER: dict[str, tuple[str, ...]] = {
     "taskvm/execution/gui_driver.py": (
         r"from taskvm\.substrate\.(?:builtin_web|mobilegym|osworld)",
         r"\b_OP_FIELD\b",
@@ -263,25 +268,62 @@ def _upper_violations() -> dict[str, set[str]]:
                 out.setdefault(rel, set()).update(found)
     return out
 
-def test_upper_layer_substrate_knowledge_is_quarantined():
+def test_transitional_debt_register_may_not_grow():
+    """QUARANTINE ONLY — NOT a contract-satisfaction check (audit B-F1).
+
+    Every register entry is a STILL-STANDING §6 violation pending its
+    owner's deletion (see docs/contracts/substrate.md §8). This test
+    merely keeps the transition honest: no NEW upper-layer substrate
+    knowledge may appear anywhere outside the registered entries. It
+    MUST NOT be cited as "the substrate contract gate is green, ergo
+    §6 is satisfied" — that verdict belongs exclusively to
+    ``test_formal_lock_audit`` below, which fails while any registered
+    violation remains."""
     violations = _upper_violations()
     new: list[str] = []
     for rel, found in sorted(violations.items()):
-        allowed = set(FROZEN_UPPER_LAYER_DEBT.get(rel, ()))
+        allowed = set(TRANSITIONAL_DEBT_REGISTER.get(rel, ()))
         for pattern in sorted(found - allowed):
             new.append(f"{rel}: /{pattern}/")
     assert not new, (
-        "NEW upper-layer substrate knowledge (contract: all Web/MobileGym/"
+        "NEW upper-layer substrate knowledge (contract §6: all Web/MobileGym/"
         f"OSWorld differences live ONLY in taskvm/substrate/): {new}. "
-        "Transitional debt is frozen in FROZEN_UPPER_LAYER_DEBT — do not "
-        "add files to that pattern; route new work through the port.")
-    # resolved-entry hints (non-failing): keep the debt list honest
-    for rel, patterns in FROZEN_UPPER_LAYER_DEBT.items():
+        "Transitional debt is registered in docs/contracts/substrate.md §8 "
+        "— adding entries requires an accepted RFC, and new code must route "
+        "through the port.")
+    # resolved-entry hints (non-failing): keep the register mirroring §8
+    for rel, patterns in TRANSITIONAL_DEBT_REGISTER.items():
         live = violations.get(rel, set())
         resolved = [p for p in patterns if p not in live]
         if resolved or not (REPO_ROOT / rel).exists():
             print(f"[debt] {rel}: entry resolved ({resolved or 'file gone'}) "
-                  "— shrink FROZEN_UPPER_LAYER_DEBT")
+                  "— shrink TRANSITIONAL_DEBT_REGISTER (and §8)")
+
+
+def test_formal_lock_audit():
+    """FORMAL LOCK gate (audit B-F1) — the mechanical stamp.
+
+    Run explicitly before claiming the substrate contract is formally
+    LOCKED:
+
+        TASKVM_SUBSTRATE_LOCK_AUDIT=1 pytest tests/substrate -q
+
+    FAILS while any registered transitional violation remains (register
+    != {}). Default CI skips it so in-flight parallel waves (E/D) are not
+    blocked by debt they already own; the skip reason is visible in the
+    pytest summary — presence of registered debt is never silent."""
+    if not os.environ.get("TASKVM_SUBSTRATE_LOCK_AUDIT"):
+        pending = sorted(TRANSITIONAL_DEBT_REGISTER)
+        pytest.skip(
+            "substrate FORMAL LOCK audit not requested; registered "
+            f"transitional debt still pending: {pending or 'none'} "
+            "(run with TASKVM_SUBSTRATE_LOCK_AUDIT=1 to audit)")
+    assert not TRANSITIONAL_DEBT_REGISTER, (
+        "FORMAL LOCK PENDING — registered §6 violations remain: "
+        f"{sorted(TRANSITIONAL_DEBT_REGISTER)}. Shrink the register as "
+        "T1/T2 exit criteria land (docs/contracts/substrate.md §8); the "
+        "substrate contract cannot be stamped formally LOCKED while any "
+        "entry remains.")
 
 
 # ── 6. substrate sources are portable (no machine-specific paths) ──────────

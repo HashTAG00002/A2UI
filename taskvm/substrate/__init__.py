@@ -12,8 +12,10 @@ the root previously ALSO exported ``builtin_web_app_url`` /
 fake port surface while the semantic leak stayed; both are deleted. URL /
 port / launch knowledge lives ONLY in the provider config; transitional
 consumers (``execution/gui_driver.py``, scheduled for Agent E's deletion)
-import the implementations directly and are quarantined in the debt list
-of ``tests/substrate/test_no_api_backdoor.py``).
+import the implementations directly and are registered in the Transitional
+Debt Register (docs/contracts/substrate.md §8, mirrored shrink-only in
+``tests/substrate/test_no_api_backdoor.py``; the formal LOCK audit fails
+while the register is non-empty).
 
 What changed vs. the legacy package (E17-C → Agent B rework):
   * ``substrate/base.py`` (StateAdapter + 7 app adapters + executor

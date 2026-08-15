@@ -38,8 +38,10 @@ from taskvm.substrate import (
 # Until then the URL knowledge below imports the substrate IMPLEMENTATIONS
 # directly (the substrate root facade exports Protocol/DTO/Registry only —
 # hiding these imports behind fake port helpers was ruled worse than the
-# honest debt). Quarantined in tests/substrate/test_no_api_backdoor.py's
-# frozen debt list: DO NOT add new files to this pattern.
+# honest debt). Registered as §6 violation T1 in the Transitional Debt
+# Register (docs/contracts/substrate.md §8), mirrored in
+# tests/substrate/test_no_api_backdoor.py's TRANSITIONAL_DEBT_REGISTER
+# (shrink-only; formal LOCK audit fails while it is non-empty).
 from taskvm.substrate.builtin_web.launcher import app_url as _builtin_app_url
 from taskvm.substrate.mobilegym.evaluation import (
     DEFAULT_BRIDGE_PORT as _MG_DEFAULT_BRIDGE_PORT,

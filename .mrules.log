@@ -2826,3 +2826,46 @@ Agent D/E：taskvm/projection + taskvm/runtime 接线到 workspace_ui 真实入�
 ### commit 范围纪律（用户指令 + memory）
 
 并行 agent 在途文件（taskvm/verifier/__init__.py、tests/runtime/*、taskvm/runtime/、docs/contracts/runtime*.md、_debug_*.py 等）一律不 add。本轮 commit 仅含：`taskvm/substrate/{__init__,port}.py`、`taskvm/substrate/mobilegym/bridge.py`、`taskvm/execution/gui_driver.py`、`taskvm/workspace_ui/server.py`、`tests/test_imports.py`、`tests/substrate/`（6 新文件）、`.mrules`、`.mrules.log`。
+
+
+---
+
+## E36 · Oracle 终审 fix round：C-F1（recoverable rebind 快路径 + 错误测试 oracle）+ B-F1（债务登记合同化 + 显式 LOCK 审计）
+
+时间：2026-08-16。背景：bounded re-audit 终审只保留两个 BLOCKER——C-F1（State Compiler 把可恢复的结构变化错误升级为 model slow path，且测试 oracle 把错误行为锁成"正确"）与 B-F1（test_no_api_backdoor 用自发明的 FROZEN_UPPER_LAYER_DEBT allowlist 事实上私改冻结合同含义）。裁决同时明确：B 本体 owner-complete/code-frozen 不再返工 substrate；C 修完这一刀即 LOCK。用户授权本轮 B 会话代交付 C 项并合并提交。
+
+### C-F1（BLOCKER，代 Agent C 交付）— needs_slow_path 接入 deterministic rebind 出口
+
+- **红证据（裁决书原文给的确定性反例）**：fp-A→fp-B 但 handle 的 visible_label "发布会议" 仍在 region.visible_text——`rebind()` 能保留 handle，但 `needs_slow_path()` 因 `changed` 无条件 `SlowPathReport(True)`，调用方按 public routing verdict 走 incremental State Compiler = 合同禁止的额外模型调用。旧 `test_scenario_2_value_change_fast_path_zero_calls` 的 view3 恰为此反例却断言 `report3.needed`（test-oracle 锁死 bug 行为，audit_charter §3.5）。
+- **修复（`taskvm/architect/compiler.py`，严格最小刀）**：
+  1. 新增共享确定性谓词 `_recovery(view, handle) -> "recovered"|"lost"|"ambiguous"`：region 缺失或 label 计数 0→lost；计数 >1→ambiguous（同名歧义，子串匹配无法区分实例，诚实上报而非绑到猜测实例）；计数恰 1→recovered；
+  2. `rebind()` 改用该谓词（歧义按 lost 上报，需慢路径）；
+  3. `needs_slow_path()` 重写为 handoff-04 四级阶梯：指纹未变→值抽取快路径；指纹变→rebind 尝试，全部 handle 可恢复→`needed=False`（reason 明示 "recovered deterministically (rebind); 0 model calls"，changed_surfaces 携带漂移面供调用方刷新指纹）；handle 丢失/同名歧义/surface 消失/新 surface 出现→慢路径；
+  4. 模块 docstring 同步阶梯语义。不改 Kernel、不加 defensive validation、不碰 D/E、不重设计 State Compiler（裁决 scope 纪律）。
+- **测试 oracle 纠正（`tests/architect/test_scenarios.py::test_scenario_2`）**：view3 改断言 `not report3.needed` + rebind 全保留 + extract 仍可重读；新增 view3b（指纹变+label 消失→needed True "lost"）与 view3c（同名两次→needed True "ambiguous"）；view4 补 `needs_slow_path` 断言。
+- **验收（handoff 指定命令，本会话真实 checkout 实跑）**：`pytest -q tests/architect tests/governance tests/architecture` → **38 passed / 1 skipped**；`python -m compileall -q taskvm/architect taskvm/governance` → exit 0。
+
+### B-F1（BLOCKER）— 测试 allowlist 私改合同 → 合同级债务登记 + 显式 LOCK 审计
+
+- **裁决要点**：E34 的 `FROZEN_UPPER_LAYER_DEBT` 让"合同禁止的跨层泄漏"在 allowlist 里测试就绿——工程上合理的过渡期 debt monitor，但不能被解释为"frozen contract 已满足"；合同从未加入此例外，测试不能自己发明 allowlist 修改合同含义。两条路径：E/D 清债缩表→机械 LOCK，或明确 RFC 修合同。选前者（清债路线），但把登记升到合同层。
+- **修复**：
+  1. `docs/contracts/substrate.md` 新增 **§8 Transitional Debt Register**：显式声明"本节不修合同、§6 原样冻结；每一条都是今天仍成立的 §6 违规、删除前一直是违规"；T1（gui_driver 平台表+impl import+task-level transport，Owner E，退出判据=文件删除+killtest 写路径迁移或随 F 删除）、T2（workspace_ui `_make_anchor_lookup` 消费 oracle_state，Owner D，退出判据=Observation→State Compiler→SurfaceHandle）；加项必须走被接受的 RFC；给出机械 LOCK 程序（缩表→`TASKVM_SUBSTRATE_LOCK_AUDIT=1 pytest tests/substrate -q` 全绿）；写明 B 状态 OWNER-COMPLETE / CODE-FROZEN / FORMAL LOCK WAITING ON E+G；
+  2. `tests/substrate/test_no_api_backdoor.py`：`FROZEN_UPPER_LAYER_DEBT`→`TRANSITIONAL_DEBT_REGISTER`（注明是 §8 的机械镜像、合同文档为权威源）；隔离测试改名 `test_transitional_debt_register_may_not_grow`，docstring 明示"QUARANTINE ONLY — NOT a contract-satisfaction check"；新增 `test_formal_lock_audit`：默认 CI skip（skip reason 可见于 pytest summary，PENDING 不沉默），`TASKVM_SUBSTRATE_LOCK_AUDIT=1` 时登记非空→诚实失败 "FORMAL LOCK PENDING"；
+  3. 引用同步：gui_driver/substrate `__init__`/test_imports 的旧措辞全部改指 §8 登记表；
+  4. handoff 落 owner 任务：`05_PROJECTION_FRONTEND_AGENT.md` 追加"T2 债务拆除"节（D：删 anchor_lookup + bootstrap 与 E 协调 + 缩表）；`06_CUA_EXECUTION_SYNC_ROLLBACK_AGENT.md` 追加"T1 债务拆除"节（E：删 gui_driver 全文件 + workspace_ui 保持可编译 + killtest 写路径去向 + 完成后缩表/触发 LOCK 审计）。Agent F 无需改动（killtest 清理已在其既有 brief，B-F1/C-F1 均不依赖 F）。
+- **验证**：`pytest tests/substrate -q` → **34 passed / 1 skipped**（skip 即可见 PENDING）；`TASKVM_SUBSTRATE_LOCK_AUDIT=1 pytest tests/substrate/test_no_api_backdoor.py::test_formal_lock_audit -q` → **诚实失败（FORMAL LOCK PENDING，登记表 T1/T2 非空）**——这正是审计要求的机械事实；`compileall`（architect/substrate/gui_driver）exit 0。
+
+### 验证数字汇总（本会话 checkout 实跑）
+
+- C 验收双命令：38 passed / 1 skipped + compileall exit 0；
+- tests/substrate：34 passed / 1 skipped；LOCK 审计显式跑=1 failed（预期的诚实 PENDING）；
+- 全量 `pytest tests/ -q` → **292 passed / 2 skipped**（较 E35 多出的第 2 个 skip 正是 test_formal_lock_audit 的可见 PENDING；pass 数与 E35 持平=零回归；Agent E 的在途 runtime 波次在本树全绿）。
+- 备注：`.mrules.log` 目前缺 Agent E 的 E35 详录章节（`.mrules` 表行引用了 L2830-2870 但该区间实为本 E36 章节）——E35 详录是 Agent E 的强制规则 1 债务，应由 E 自行补写，本会话不代写他人工作细节。
+
+### 证明了什么 / 没证明什么
+
+证明：可恢复结构变化（指纹漂移+全部 handle label 恰一次在屏）确定性走 0-model rebind 快路径、不可恢复/同名歧义/新面/surface 消失走慢路径（测试锁定四 case）；substrate 合同的过渡债务现在登记在合同文档 §8（加项需 RFC），测试只镜像不定义，正式 LOCK 有了机械判据（显式审计命令+登记表为空）。没证明：T1/T2 的实际拆除（归 E/D，退出判据在 §8）；LOCK 审计全绿（当前诚实红=PENDING，这是事实而非缺陷）；runtime 侧对 needs_slow_path 新语义的消费（runtime 接线归 E，签名未变向后兼容）。
+
+### commit 范围纪律（用户指令：本轮授权 C 文件并入同一提交）
+
+本轮 commit 含：`taskvm/architect/compiler.py`、`tests/architect/test_scenarios.py`（以上为 C-F1，用户授权代交付）、`docs/contracts/substrate.md`、`tests/substrate/test_no_api_backdoor.py`、`taskvm/substrate/__init__.py`、`taskvm/execution/gui_driver.py`、`tests/test_imports.py`（以上为 B-F1 及引用同步）、`docs/oracle/new-oracle/handoffs/05_/06_`（owner 任务落 handoff）、`.mrules`、`.mrules.log`。注意：`.mrules` 同时含 Agent E 已写入未提交的 E35 行（共享 changelog 文件的既有内容，非本轮篡改，一并入库）。E 在途文件（taskvm/runtime/、tests/runtime/、taskvm/verifier/*、docs/contracts/runtime*、_debug_*.py）不 add。

@@ -98,3 +98,37 @@ web visibility scrubbing, API-backdoor static gate, handle-cache
 fingerprint invalidation, MobileGym honest-irreversibility (no cua loop →
 501, never a hidden restore), portable browser paths (no user absolute
 paths in repo), OSWorld contract. Gate file: `tests/substrate/test_no_api_backdoor.py`.
+
+## 8. Transitional Debt Register — FORMAL LOCK PENDING (audit B-F1)
+
+> **This section does NOT amend the contract.** §6 stays frozen exactly as
+> written. This register records KNOWN, STILL-STANDING §6 violations that
+> predate the freeze and are scheduled for DELETION (not for permission).
+> Every entry below is a violation today, remains a violation until its
+> exit criterion lands, and no test may interpret its presence here as
+> contract satisfaction. Adding an entry requires an explicit RFC accepted
+> by the governance owner — a test allowlist may not silently amend this
+> contract (Oracle audit B-F1, 2026-08-16).
+
+| # | Violation (file) | What violates §6 | Owner | Exit criterion |
+|---|---|---|---|---|
+| T1 | `taskvm/execution/gui_driver.py` | upper layer imports concrete substrate impls; keeps `_WEB_APPS`/`_MOBILEGYM_APPS`/`_OP_FIELD`/`_ENTITY_KIND` platform tables; legacy task-level `POST /api/{app}/{sid}/{entity_id}` transport | Agent E | file DELETED; runtime consumes `SubstrateSession` + ActionContract→CUA→GuiAction; killtest write paths migrated or the scripts deleted (F) |
+| T2 | `taskvm/workspace_ui/server.py::_make_anchor_lookup` | runtime decision chain consumes `env.oracle_state(sid)` (hidden entity_id → visible title → GUI target anchor) | Agent D (E/G integration) | lookup deleted; runtime targeting is Observation → State Compiler → SurfaceHandle |
+
+**Formal LOCK procedure** (mechanical, no judgment call):
+
+```bash
+# 1. shrink the register in tests/substrate/test_no_api_backdoor.py
+#    (TRANSITIONAL_DEBT_REGISTER) to {} as T1/T2 land
+# 2. run the explicit lock audit — must be ALL GREEN before anyone stamps
+#    the substrate contract as formally LOCKED:
+TASKVM_SUBSTRATE_LOCK_AUDIT=1 pytest tests/substrate -q
+```
+
+The lock-audit test FAILS while any register entry remains (default CI
+skips it so parallel waves are not blocked; skipping is visibility, not
+silence — the register itself is asserted to mirror this table).
+
+Agent B status per audit: **OWNER-COMPLETE / CODE-FROZEN / FORMAL LOCK
+WAITING ON E + G cleanup**. B does not reopen substrate scope; the LOCK
+stamps mechanically when the register is empty.

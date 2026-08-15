@@ -250,6 +250,30 @@ POST /api/sessions/<sid>/conflicts/<id>/resolve
 
 ---
 
+## T2 债务拆除（Oracle audit B-F1 指派给 D；2026-08-16 追加）
+
+`docs/contracts/substrate.md` §8 Transitional Debt Register 的 **T2** 归你：
+`taskvm/workspace_ui/server.py::_make_anchor_lookup` 当前让 runtime decision chain
+间接消费 `env.oracle_state(sid)`（hidden entity_id → visible title → GUI 目标
+anchor），违反 substrate 合同"runtime 不得消费 oracle"。拆除路径：
+
+1. 删除 `_make_anchor_lookup` 及其注入点（含 rollback path 上的注入）；
+2. runtime 寻址改为：`SubstrateSession.observe()` → visible evidence →
+   State Compiler（fast path: `extract_observed`/`rebind`；slow path:
+   `compile`）→ `SurfaceHandle`——注意 C-F1 修复后 `needs_slow_path` 的阶梯
+   语义（指纹变化但 handle 可恢复 = 0 model call）；
+3. 与 Agent E 协调 `workspace_ui` 的 runtime bootstrap（E 删除
+   `execution/gui_driver.py` 时会移除 `mobilegym_bridge_url` 过渡 helper，
+   你需要改为从 provider config / bootstrap 显式接线，不要重新发明
+   facade helper）；
+4. 完成后同步收缩 `tests/substrate/test_no_api_backdoor.py` 的
+   `TRANSITIONAL_DEBT_REGISTER`（T2 条目删除）并跑
+   `pytest tests/substrate -q`（默认 CI 不得出现 NEW violation）。
+
+不要顺手重写 substrate 或 runtime（one-owner）；你只拆 UI 侧的 oracle 依赖。
+
+---
+
 ## 验收
 
 ```bash

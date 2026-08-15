@@ -179,20 +179,56 @@ def test_scenario_2_value_change_fast_path_zero_calls():
     assert ov.confidence == 1.0, "deterministic re-read is certain"
     # the architect never hears about a value delta: no schema touch, no call
 
-    # a STRUCTURE change does route to the slow path (deterministic verdict)
+    # C-F1 (Oracle audit): a RECOVERABLE structure change — fingerprint
+    # drifted fp-A→fp-B but the handle's visible label is still present
+    # exactly once — must NOT trigger the slow path. The deterministic
+    # rebind answers it with 0 model calls (handoff-04 ladder level 2).
+    # The old test oracle asserted `report3.needed` here, locking the
+    # buggy unconditional-fingerprint-slow-path as correct behavior.
     view3 = CompilerObservationView(revision=3, regions=(
         VisibleRegion(surface_label="Calendar",
                       visible_text="发布会议 2026-08-18\n评审人：王工",
                       structure_fingerprint="fp-B"),))
     report3 = compiler.needs_slow_path(view3, VIEW_V1.fingerprints(),
                                        result.handle_evidence)
-    assert report3.needed and "structure changed" in report3.reason
+    assert not report3.needed, (
+        "recoverable structural change must stay on the deterministic "
+        "rebind fast path (0 model calls), not route to the slow path")
+    assert "recovered" in report3.reason and report3.changed_surfaces
+    kept3, lost3 = compiler.rebind(view3, result.handle_evidence)
+    assert kept3 == result.handle_evidence and lost3 == ()
+    ov3 = compiler.extract_observed(view3, handle)
+    assert ov3 is not None and ov3.value == "2026-08-18"
+
+    # an UNRECOVERABLE structure change — fingerprint drifted AND the
+    # handle's label vanished — does route to the slow path (ladder 3).
+    view3b = CompilerObservationView(revision=3, regions=(
+        VisibleRegion(surface_label="Calendar",
+                      visible_text="（会议被删除）\n评审人：王工",
+                      structure_fingerprint="fp-B"),))
+    report3b = compiler.needs_slow_path(view3b, VIEW_V1.fingerprints(),
+                                        result.handle_evidence)
+    assert report3b.needed and "lost" in report3b.reason
+
+    # same-name AMBIGUITY is also unrecoverable deterministically: the
+    # substring match cannot tell two instances apart, so it must route
+    # to the slow path rather than bind to a guessed instance.
+    view3c = CompilerObservationView(revision=3, regions=(
+        VisibleRegion(surface_label="Calendar",
+                      visible_text="发布会议 2026-08-18\n发布会议 2026-08-20",
+                      structure_fingerprint="fp-B"),))
+    report3c = compiler.needs_slow_path(view3c, VIEW_V1.fingerprints(),
+                                        result.handle_evidence)
+    assert report3c.needed and "ambiguous" in report3c.reason
 
     # a lost handle routes too — the fast path must not guess
     view4 = CompilerObservationView(revision=4, regions=(
         VisibleRegion(surface_label="Calendar",
                       visible_text="（会议被删除）\n评审人：王工",
                       structure_fingerprint="fp-A"),))
+    report4 = compiler.needs_slow_path(view4, VIEW_V1.fingerprints(),
+                                       result.handle_evidence)
+    assert report4.needed and "lost" in report4.reason
     kept, lost = compiler.rebind(view4, result.handle_evidence)
     assert kept == () and lost == ("release_date",)
     assert compiler.extract_observed(view4, handle) is None, (

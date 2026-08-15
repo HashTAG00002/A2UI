@@ -7,10 +7,14 @@ kernel will govern. Fast/slow path discipline (handoff 04):
 - **fast path, 0 model calls** — :meth:`StateCompiler.extract_observed`
   re-reads a known quantity by applying the deterministic ``value_pattern``
   minted at compile time; :meth:`StateCompiler.rebind` restores a handle by
-  visible-label match after a local structural change.
-- **slow path, 1 model call (+ ≤1 repair)** — a region's structure
-  fingerprint changed, a handle's visible label vanished, or new task-
-  relevant structure appeared. :meth:`StateCompiler.needs_slow_path` makes
+  visible-label match after a local structural change. A fingerprint change
+  alone is NOT a slow-path trigger (C-F1, Oracle audit): if every known
+  handle is still recoverable — label present exactly once on its surface —
+  the deterministic rebind answers it with zero model calls.
+- **slow path, 1 model call (+ ≤1 repair)** — a handle's visible label
+  vanished or became same-name ambiguous, a surface disappeared, a NEW
+  surface appeared, or drift left a handle unrecoverable (new task-
+  relevant structure included). :meth:`StateCompiler.needs_slow_path` makes
   the routing decision deterministically; the CALLER decides to recompile.
 
 Honesty rules: ``observed`` values only ever come from observation (the
@@ -220,17 +224,35 @@ class StateCompiler:
                handles: tuple[HandleEvidence, ...],
                ) -> tuple[tuple[HandleEvidence, ...], tuple[str, ...]]:
         """Deterministic rebind after a local structural change: keep every
-        handle whose ``visible_label`` still occurs on its surface; report
-        the lost ones (they need the slow path)."""
+        handle whose ``visible_label`` still occurs EXACTLY ONCE on its
+        surface; report the rest as lost (they need the slow path). A label
+        that now occurs multiple times is same-name AMBIGUOUS — the substring
+        match cannot tell the instances apart, so it is honestly reported
+        lost rather than bound to a guessed instance (handoff 04 ladder)."""
         kept: list[HandleEvidence] = []
         lost: list[str] = []
         for h in handles:
-            region = view.region(h.surface_label)
-            if region is not None and h.visible_label in region.visible_text:
+            if StateCompiler._recovery(view, h) == "recovered":
                 kept.append(h)
             else:
                 lost.append(h.semantic_key)
         return tuple(kept), tuple(lost)
+
+    @staticmethod
+    def _recovery(view: CompilerObservationView,
+                  handle: HandleEvidence) -> str:
+        """"recovered" | "lost" | "ambiguous" for one handle against the
+        current view — the single deterministic predicate shared by
+        :meth:`rebind` and :meth:`needs_slow_path` (C-F1)."""
+        region = view.region(handle.surface_label)
+        if region is None:
+            return "lost"
+        n = region.visible_text.count(handle.visible_label)
+        if n == 0:
+            return "lost"
+        if n > 1:
+            return "ambiguous"
+        return "recovered"
 
     @staticmethod
     def needs_slow_path(
@@ -240,9 +262,16 @@ class StateCompiler:
     ) -> SlowPathReport:
         """Fast/slow routing — deterministic, no model, no guessing.
 
-        Slow path is required when: a known surface's fingerprint changed,
-        a surface disappeared, a NEW surface appeared, or any handle's
-        visible label can no longer be found on its surface.
+        The handoff-04 ladder (C-F1, Oracle audit — a fingerprint change is
+        NOT unconditionally slow):
+
+          1. fingerprint unchanged → value-extraction fast path (caller
+             re-reads via :meth:`extract_observed`, 0 model calls);
+          2. fingerprint changed → deterministic rebind attempt: every
+             known handle still recoverable (label present exactly once on
+             its surface) → 0 model calls, ``needed=False``;
+          3. handle lost / same-name ambiguous / surface gone / NEW
+             surface (potentially task-relevant structure) → slow path.
         """
         current = view.fingerprints()
         changed = tuple(sorted(
@@ -253,21 +282,38 @@ class StateCompiler:
         new = tuple(sorted(
             s for s in current if s not in previous_fingerprints))
         lost: list[str] = []
+        ambiguous: list[str] = []
         for h in handles:
-            region = view.region(h.surface_label)
-            if region is None or h.visible_label not in region.visible_text:
+            status = StateCompiler._recovery(view, h)
+            if status == "lost":
                 lost.append(h.semantic_key)
-        if changed or gone or new or lost:
+            elif status == "ambiguous":
+                ambiguous.append(h.semantic_key)
+        if gone or new or lost or ambiguous:
             reasons = []
-            if changed:
-                reasons.append(f"structure changed on {list(changed)}")
             if gone:
                 reasons.append(f"surface(s) gone: {list(gone)}")
             if new:
                 reasons.append(f"new surface(s): {list(new)}")
             if lost:
                 reasons.append(f"handle(s) lost: {sorted(set(lost))}")
-            return SlowPathReport(True, "; ".join(reasons), changed, tuple(lost))
+            if ambiguous:
+                reasons.append(
+                    f"handle(s) same-name ambiguous: {sorted(set(ambiguous))}")
+            return SlowPathReport(True, "; ".join(reasons), changed,
+                                  tuple(lost + ambiguous))
+        if changed:
+            # C-F1: recoverable local structural change — every known
+            # handle re-binds deterministically to the current visible
+            # evidence, so the incremental State Compiler model call is
+            # NOT justified. The caller refreshes fingerprints from this
+            # view and continues on the fast path.
+            return SlowPathReport(
+                False,
+                reason=("structure changed on "
+                        f"{list(changed)} but every handle recovered "
+                        "deterministically (rebind); 0 model calls"),
+                changed_surfaces=changed)
         return SlowPathReport(False)
 
     # ── internals ───────────────────────────────────────────────────────

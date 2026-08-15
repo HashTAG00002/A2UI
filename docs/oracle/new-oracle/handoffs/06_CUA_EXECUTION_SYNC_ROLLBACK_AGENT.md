@@ -276,6 +276,35 @@ Compensation instruction 可由 ActionContract 确定性形成，不额外调用
 
 ---
 
+## T1 债务拆除（Oracle audit B-F1 指派给 E；2026-08-16 追加）
+
+`docs/contracts/substrate.md` §8 Transitional Debt Register 的 **T1** 归你：
+删除 `taskvm/execution/gui_driver.py` 整个文件（GUITaskAdapter /
+MobileGymTaskAdapter / `make_task_adapters` / `_OP_FIELD` / `_ENTITY_KIND` /
+`_WEB_APPS` / `_MOBILEGYM_APPS` / 过渡 `mobilegym_bridge_url`）。runtime 直接
+消费 `SubstrateSession` + ActionContract→CUA→GuiAction。约束：
+
+1. **保持 `workspace_ui` 可编译**：`server.py` 目前 import
+   `make_task_adapters` 与过渡 `mobilegym_bridge_url`（B-2 显式债务）。你删
+   文件的同时要么把 workspace bootstrap 接到真实 runtime（你的既有里程碑），
+   要么与 Agent D 协调接线；不得让 main 分支编译断掉。
+2. **三个 MobileGym killtest 脚本**（`run_mg_vm_killtest.py` 等）的写路径目前
+   经 `MobileGymTaskAdapter.mutate_raw`：迁移到 bridge 的 CUA 路由或
+   `MobileGymSubstrateSession`，或交给 Agent F 随 killtest 清理一起删除——
+   不要为它们保留适配器。
+3. 记住 bridge B-1 语义：runtime 路由（observe/act/mutate）要求评测面先激活
+   sid（`POST /api/reset/<sid>`），mismatch 诚实 409。
+4. 完成后同步收缩 `tests/substrate/test_no_api_backdoor.py` 的
+   `TRANSITIONAL_DEBT_REGISTER`（T1 条目删除）+ `tests/test_imports.py` 中
+   gui_driver smoke 测试一并删除；T2（workspace_ui anchor_lookup）归 D，
+   若 D 已先完成，直接跑正式 LOCK 审计：
+   `TASKVM_SUBSTRATE_LOCK_AUDIT=1 pytest tests/substrate -q` 全绿即 mechanical
+   LOCK（登记表为空）。
+
+不要重构 substrate 内部（B 已 owner-complete/code-frozen）；你只删上层旧路径。
+
+---
+
 ## 验收
 
 ```bash

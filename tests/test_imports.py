@@ -45,8 +45,10 @@ def test_gui_driver_write_plane():
     MobileGymTaskAdapter). Locking that shape endorsed the transitional
     architecture the contract requires deleting (upper layer knowing "this
     is web, that is mobilegym"). The platform tables in gui_driver.py are
-    quarantined in tests/substrate/test_no_api_backdoor.py's frozen debt
-    list; Agent E's runtime wave deletes the whole file."""
+    registered §6 violations (Transitional Debt Register, contract §8),
+    mirrored shrink-only in tests/substrate/test_no_api_backdoor.py;
+    Agent E's runtime wave deletes the whole file (formal substrate LOCK
+    fails while the register is non-empty — TASKVM_SUBSTRATE_LOCK_AUDIT=1)."""
     import inspect
     from taskvm.execution import gui_driver
     assert callable(gui_driver.make_task_adapters)
@@ -62,8 +64,9 @@ def test_gui_driver_operator_tables():
     operator tables (_OP_FIELD/_ENTITY_KIND) and platform tuples
     (_WEB_APPS/_MOBILEGYM_APPS) in the execution layer are KNOWN DEBT,
     not correct architecture — the frozen contract bans app-specific
-    operator dispatch above the substrate. They are enumerated (and
-    frozen against growth) in tests/substrate/test_no_api_backdoor.py;
+    operator dispatch above the substrate. They are enumerated shrink-only
+    in the Transitional Debt Register (tests/substrate/
+    test_no_api_backdoor.py mirrors docs/contracts/substrate.md §8);
     Agent E's runtime wave deletes them with the whole file. This test
     only locks what must stay true in ANY architecture: no port table
     and no executor knob in the execution layer."""
