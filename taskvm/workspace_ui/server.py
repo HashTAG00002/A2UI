@@ -46,8 +46,11 @@ from taskvm.execution.action_dispatcher import dispatch
 from taskvm.execution.patch_compiler import compile_patch
 from taskvm.execution.rollback import RollbackLog, SagaResult
 from taskvm.harness import replay_engine as replay
-from taskvm.execution.gui_driver import make_task_adapters
-from taskvm.substrate import evaluation_registry, mobilegym_bridge_url
+from taskvm.execution.gui_driver import (
+    make_task_adapters,
+    mobilegym_bridge_url,   # TRANSITIONAL (B-2): moves/deletes with gui_driver (Agent E)
+)
+from taskvm.substrate import evaluation_registry
 from taskvm.task_state.entity_binding import TaskBinding
 from taskvm.workspace_ui.editable_components import (
     checkpoint_button_html, conflict_row_html, editable_field_html,

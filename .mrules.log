@@ -2771,3 +2771,58 @@ Agent D/E：taskvm/projection + taskvm/runtime 接线到 workspace_ui 真实入�
 - 验证（Oracle 指定命令原文执行）：`pytest -q tests/architect tests/governance tests/architecture` → **38 passed / 1 skipped**；`python -m compileall -q taskvm/architect taskvm/governance` → exit 0。新测试单跑 PASSED（一次成型：实现本就支持，此为补缺失锚点而非修 defect，故无先红期待）。skip 2→1 系 Agent E 的 untracked `taskvm/runtime` 在制品出现解除占位，与本轮无关。
 - 证明了什么：三 primitive 的 producer anchor 齐了，§9 冻结要求闭合；TaskArchitect 对 SEQUENCE 的 listed-order 确定性连链被测试锁定。没证明什么：无新增（本条不扩任何验证面）。
 - Agent C 冻结退出主开发路径。
+
+
+---
+
+## E34 · Oracle 裁决 B 波次三 BLOCKER 全修（B-1 bridge 现实切换 / B-2 facade 泄漏 / B-3 测试合同缺口）
+
+时间：2026-08-15。背景：Oracle 对 Agent B（substrate isolation）裁决三条 BLOCKER——骨架正确不返工，但（1）bridge 的 `_activate` 在 runtime observe/act 下仍经 get_state/set_state/reset 切换现实（实测 probe：`reset, get_state, get_state, reset, get_state, get_state, set_state(deep=False)`）；（2）substrate 根 facade 的 URL helper 藏 import 泄漏而语义泄漏仍在，上层 gui_driver 仍持平台知识表；（3）合同点名的 `tests/substrate/`（含 `test_no_api_backdoor.py`）根本不存在，且现有测试把过渡架构锁成"正确"。本轮全部落地。
+
+### B-1（BLOCKER）— runtime 永不切换现实：bridge 单活跃会话绑定
+
+- **红证据**：Oracle 定向 probe（fake env 注入 + 三次 `_activate` 切换）实测上述调用序列；"session CONTEXT SWITCHING"的 docstring 自辩（"不违反 boundary 因为不算业务写"）被裁决驳回——冻结合同写的是 `set_state reachable only via EvaluationEnvironment`，没有例外条款。
+- **修复**（`taskvm/substrate/mobilegym/bridge.py`）：
+  1. 新增 `_require_active(sid)` 守卫：`_active_sid != sid` → 诚实 409（"session mismatch: active=..., requested=...；runtime 永不切换现实，请先经评测面激活"），**零 env 调用**；
+  2. runtime 面 4 方法（observe / act_primitive / mutate_wechat / mutate_x）全部改用守卫；`act_primitive` 的守卫移到 bench_env lazy import **之前**（mismatch 无需任何环境依赖即报）；
+  3. `_activate` 收归评测/设置面（调用点剩 inject_task / read_resource / x_state / session_state 四处，全部 exam-room 权力）；docstring 重写删除自辩叙事；
+  4. 多路复用（跨 sid 热切换 save/load）按裁决删除——不做复杂 session manager，实验原型只绑一个活跃会话。
+- **行为锁定**（`tests/substrate/test_mobilegym_runtime_purity.py`）：FakeEnv 记录调用注入（不启 bench_env）——mismatch 时 `env.calls == []`（连 get_state 都没有）；Oracle probe 场景（s1 active 后请求 s2）同样零调用；setup reset 激活后 runtime observe 只读 page、act 恰好一次 `env.step`；wechat 回滚失败 → 409 且无 set_state 后门恢复；无 cua → 501 无 fallback。
+
+### B-2（BLOCKER）— substrate 根 facade 纯净：删 URL helper，过渡债务显式化
+
+- **裁决要点**："import leak 被隐藏了，semantic leak 还在"——E30 把 `builtin_web_app_url`/`mobilegym_bridge_url` 放进根 facade 躲过了字面 import gate，但上层照样知道平台选型。
+- **修复**：
+  1. `taskvm/substrate/__init__.py`：删两个 helper（函数 + `__all__` 条目），根只 export Protocol/DTO/Registry（18 名冻结进 `FROZEN_FACADE_EXPORTS` gate）；
+  2. `taskvm/execution/gui_driver.py`：**显式**直接 impl import（`builtin_web.launcher.app_url` + `mobilegym.evaluation.DEFAULT_BRIDGE_PORT`）+ 本地过渡 `mobilegym_bridge_url`，全部打 TRANSITIONAL DEBT 标记指向 E 的删除波次——诚实的债比假端口面好；
+  3. `taskvm/workspace_ui/server.py`：仅一行机械 import 修复（B 自身 facade 变更导致的编译需要；anchor_lookup 逻辑未碰——one-owner，归 D/E/G）；
+  4. gui_driver 的平台表/旧适配器**不**由 B 重写（避免与 E 双写）：E 删文件，B 提供防复发 gate。
+
+### B-3（BLOCKER）— tests/substrate/ 六文件 34 测试 + test-oracle 自我纠错
+
+- **缺口实证**：合同要求 `tests/substrate/`（port contract / visibility scrubbing / API-backdoor gate / handle cache / MobileGym honest irreversibility / portable path / OSWorld contract）——6382ef5 树中不存在（GitHub 404）；`port.py` 注释承诺的 `test_gui_action_vocabulary_is_gestures` 与 `osworld/session.py` docstring 承诺的 `test_osworld_contract.py` 均为空头支票。
+- **新套件**（34 tests 全绿）：
+  - `test_no_api_backdoor.py`（合同点名）：facade 纯净（`__all__`+hasattr 冻结）；runtime session 无 setup 权力（AST 方法扫描）；bridge runtime 面无 `_activate`/`env.reset`/`env.set_state`（AST 源段扫描）；executor 旋钮全域扫描（**AST 字符串常量**——# 注释里写 "--executor 已删除" 不误伤，argparse 字面量仍会被抓，E30 教训固化）；**冻结债务门**（`FROZEN_UPPER_LAYER_DEBT`：gui_driver 五模式→E 删、server `_make_anchor_lookup`→D/E/G 拆；只可缩不可涨，resolved 打印提示）；portable path（AST，机器路径字面量为零）；
+  - `test_port_contract.py`：协议方法面冻结、手势词表（承诺名）、非手势 kind 构造即 ValueError、双 registry 物理分离、未知底座诚实失败、SurfaceHandle 冻结值对象；
+  - `test_visibility_scrubbing.py`：全部 VISIBLE_ID_PATTERNS 家族 + 幂等 + 可见文本不动；
+  - `test_mobilegym_runtime_purity.py`（见 B-1）；
+  - `test_osworld_contract.py`（承诺名补上）：fake transport 合同 + DeadRuntime 诚实 SubstrateUnavailable + 真 HTTP transport 假端点 alive=False；
+  - `test_builtin_web_handles.py`：FakeBrowser 注入——结构变更→指纹变更→handles 重建携带新指纹/新 revision（过期句柄可检测不复用）、handle_id 不透明 token（h\d+）、可见文本已 scrub。
+- **test-oracle 纠错**（audit_charter §3.5）：`tests/test_imports.py` 两个测试删除 isinstance 平台分派断言与 `_OP_FIELD`/`_ENTITY_KIND`/facade helper 正确性断言（它们在保护合同要求删除的过渡架构）——改写为 TRANSITIONAL smoke + 指向债务门。
+- **顺带修的 port 缺口**：`scrub_hidden_ids` 连属性值一并 redact（`data-chat-id="wx_123"` 整体→`data-[redacted]`；旧版只改名，主键值仍在观察里——E21 类）；`_load` 未知名字 KeyError→SubstrateUnavailable（port 自己的异常合同）。
+
+### 验证数字（可复核）
+
+- `pytest tests/substrate -q` → **34 passed**；
+- `pytest tests/test_imports.py tests/architecture tests/substrate -q` → **91 passed / 1 skipped**（B 责任面全绿）；
+- `pytest tests/ -q` → **276 passed / 1 skipped / 1 failed**；唯一 failed = `tests/runtime/test_compensation.py::test_rollback_runs_real_gui_compensation_actions`（Agent E 在途：`taskvm/runtime` 与 `tests/runtime/conftest.py` 未提交 257 行在制品；导入面 grep 与 B 改动零交集，one-owner 不越界修）；
+- `python -m compileall -q taskvm/substrate taskvm/execution/gui_driver.py taskvm/workspace_ui/server.py` → exit 0；
+- 验收 grep：facade 中 helper 名仅存于 docstring 历史说明；bridge `_activate` 剩 4 调用点全在评测面，`_require_active` 4 调用点全在 runtime 面。
+
+### 证明了什么 / 没证明什么
+
+证明：runtime 面（observe/act/legacy mutate 路由）在 sid 不匹配时零 env 副作用诚实 409（行为级，FakeEnv 注入）；substrate 根 facade 只含 Protocol/DTO/Registry（gate 冻结）；上层平台知识被冻结债务门锁定不可增长；六类合同测试存在且绿。没证明：真实 MobileGym 进程下的端到端（bridge 行为测试用 fake env；真机 killtest 属 operator 实跑）；workspace_ui anchor_lookup 的拆除（B 的 gate 只负责"发现"，拆除归 D/E/G）；gui_driver 的删除（归 E，届时同步缩 FROZEN_UPPER_LAYER_DEBT）。
+
+### commit 范围纪律（用户指令 + memory）
+
+并行 agent 在途文件（taskvm/verifier/__init__.py、tests/runtime/*、taskvm/runtime/、docs/contracts/runtime*.md、_debug_*.py 等）一律不 add。本轮 commit 仅含：`taskvm/substrate/{__init__,port}.py`、`taskvm/substrate/mobilegym/bridge.py`、`taskvm/execution/gui_driver.py`、`taskvm/workspace_ui/server.py`、`tests/test_imports.py`、`tests/substrate/`（6 新文件）、`.mrules`、`.mrules.log`。

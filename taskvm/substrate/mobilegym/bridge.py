@@ -47,14 +47,22 @@ fully removed; see the in-method comment).
 Routes (mirror the Drive app's contract, app-namespaced):
     GET  /health                              → {"status":"ok","site":"mobilegym"}
     GET  /<sid>                               → minimal HTML view (data-chat-id DOM)
-    POST /api/reset/<sid>                     → env.reset(app_ids=[wechat,alipay,x])
+    POST /api/reset/<sid>                     → env.reset(app_ids=[wechat,alipay,x]) [SETUP]
     POST /api/inject_task/<sid>               → env.set_state(seed, deep=True) [SETUP-ONLY]
+    GET  /api/observe/<sid>                   → screenshot+visible text (RUNTIME; requires active sid)
+    POST /api/act/<sid>                       → env.step(real gesture) (RUNTIME; requires active sid)
     GET  /api/session_state/<sid>             → summary only (n_chats, n_tx) — never GT
     GET  /api/wechat_chats/<sid>              → flattened wechat chats (entities)
     GET  /api/alipay_transactions/<sid>       → flattened alipay transferRecords
     GET  /api/x_state/<sid>                   → X toggle lists (liked/retweeted/bookmarked ids) [verifier read]
     POST /api/wechat/<sid>/<eid>              → send_message via gui_write_async (real gestures) OR msg:<id> rollback (gui_write_async undo → 409 if irreversible)
     POST /api/x/<sid>/<eid>                   → toggle_like/retweet/bookmark via gui_act_async (pure-vision CUA, E16-complete)
+
+B-1 (Oracle audit 2026-08-15): ONE active experimental session at a time.
+The evaluation/setup plane (reset/inject_task/oracle reads) activates a
+sid; the runtime plane (observe/act/mutate routes) REQUIRES the active sid
+and honestly refuses a mismatch (409 session mismatch) — the runtime never
+switches reality via env.reset/get_state/set_state underneath the caller.
 """
 from __future__ import annotations
 
@@ -176,8 +184,14 @@ class MobileGymBridge:
     async def observe(self, sid: str) -> dict:
         """Screenshot + scrubbed visible text + visible-structure
         fingerprint of the live sim page (zero-exposure: only what a real
-        user can see on the rendered screen)."""
-        await self._activate(sid)
+        user can see on the rendered screen).
+
+        B-1 (Oracle audit): the runtime plane NEVER switches reality. The
+        live sim is bound to ONE active experimental session, established
+        by the evaluation/setup plane (reset/inject_task). A mismatched sid
+        is an honest error — no ``reset``/``get_state``/``set_state`` from
+        here, ever."""
+        await self._require_active(sid)
         page = self.env.page
         png = await page.screenshot(type="png")
         import base64
@@ -200,9 +214,14 @@ class MobileGymBridge:
     async def act_primitive(self, sid: str, action: dict) -> dict:
         """One REAL gesture on the live sim (tap/type/swipe/key/open). Uses
         MobileGym's own ``env.step(Action...)`` norm_0_1000 calibration —
-        identical pipeline to the grounding loop's gestures."""
+        identical pipeline to the grounding loop's gestures.
+
+        B-1: runtime plane — requires the evaluation plane to have made
+        ``sid`` the active session first; never context-switches. The
+        guard runs BEFORE the bench_env import so a session mismatch is
+        answered with zero environment side effects."""
+        await self._require_active(sid)
         from bench_env.env.base import Action, ActionType
-        await self._activate(sid)
         kind = action.get("kind")
         coord = action.get("coordinate") or [500, 500]
         if kind in ("click", "tap"):
@@ -238,16 +257,30 @@ class MobileGymBridge:
             return {"status": "ok", "detail": f"open({target})"}
         return {"status": "failed", "detail": f"unsupported kind {kind!r}"}
 
-    # ── sid switching (session context, NOT write/rollback) ─────────────────
+    # ── session activation (B-1: EVALUATION/SETUP plane only) ───────────────
+    async def _require_active(self, sid: str) -> None:
+        """Runtime-plane guard (B-1, Oracle audit): ``observe`` / ``act`` /
+        task-level mutate routes must NEVER switch reality. The browser
+        holds ONE live experimental session, established by the evaluation
+        plane (``reset`` / ``inject_task`` — the exam-room powers). A
+        mismatched sid is an honest session-mismatch error; there is no
+        transparent ``set_state`` teleport underneath the runtime."""
+        if self._active_sid != sid:
+            raise web.HTTPConflict(text=(
+                f"session mismatch: active={self._active_sid!r}, "
+                f"requested={sid!r}. The runtime plane never switches "
+                f"reality; activate this sid via the evaluation setup "
+                f"(POST /api/reset/<sid> + /api/inject_task/<sid>) first."))
+
     async def _activate(self, sid: str) -> None:
-        """Make ``sid`` the live browser state. The browser holds ONE app
-        state at a time, so switching between concurrent sids (e.g. a
-        workspace-UI demo sid vs a kill-test sid) saves the current state and
-        loads the target sid's cached state. This is session CONTEXT
-        SWITCHING via ``set_state`` — a state-loading use (like
-        ``inject_task``/seed), NOT a write or rollback of a business
-        operation, so it does not violate the non-invasive write/rollback
-        boundary (that boundary governs ``mutate`` + undo only)."""
+        """Make ``sid`` the live browser state — EVALUATION/SETUP PLANE ONLY
+        (``reset`` / ``inject_task`` / oracle reads). The runtime plane
+        (``observe`` / ``act_primitive`` / mutate routes) uses
+        ``_require_active`` instead and honestly refuses a mismatched sid.
+
+        Contract (docs/contracts/substrate.md, frozen): ``set_state`` is
+        reachable ONLY via the EvaluationEnvironment plane. There is no
+        "session context switching" exception for runtime calls."""
         async with self._lock:
             if self._active_sid == sid:
                 return
@@ -495,7 +528,9 @@ class MobileGymBridge:
     # ── write path: send_message via REAL GUI gestures (no set_state) ───────
     async def mutate_wechat(self, sid: str, eid: str, operator: str,
                             value: Any) -> dict:
-        await self._activate(sid)
+        # B-1: runtime write path — requires the active session; never
+        # context-switches reality underneath the CUA loop.
+        await self._require_active(sid)
         async with self._lock:
             if operator != "send_message":
                 raise web.HTTPBadRequest(
@@ -609,7 +644,9 @@ class MobileGymBridge:
     async def mutate_x(self, sid: str, eid: str, operator: str,
                        value: Any, *, verify_mode: str = "specific",
                        instruction_override: str | None = None) -> dict:
-        await self._activate(sid)
+        # B-1: runtime write path — requires the active session; never
+        # context-switches reality underneath the CUA loop.
+        await self._require_active(sid)
         async with self._lock:
             if operator not in ("toggle_like", "toggle_retweet",
                                 "toggle_bookmark"):

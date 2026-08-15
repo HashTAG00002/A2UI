@@ -95,7 +95,11 @@ VISIBLE_ID_PATTERNS: tuple[str, ...] = (
 
 _HIDDEN_ID_RE = re.compile(
     r"data-(?:[a-z0-9]+-)*?(?:event|task|file|post|chat|transaction|"
-    r"appointment|mail|action(?:-params)?)[a-z0-9-]*",
+    r"appointment|mail|action(?:-params)?)[a-z0-9-]*"
+    # B-3: consume the attribute VALUE too — the value IS the internal
+    # id (E16/E21 leak class); redacting only the attribute name kept
+    # the primary key itself in the observation.
+    r"(?:\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+))?",
     re.IGNORECASE,
 )
 
@@ -251,7 +255,10 @@ class _BaseRegistry:
             return self._cache[name]
         spec = self._entrypoints.get(name)
         if spec is None:
-            raise KeyError(
+            # B-3 (Oracle audit): an unknown substrate is honest
+            # unavailability — the port's own exception contract — never a
+            # raw KeyError leaking to upper layers.
+            raise SubstrateUnavailable(
                 f"unknown substrate {name!r}; registered: {self.names}")
         module_name, _, attr = spec.partition(":")
         import importlib

@@ -39,39 +39,40 @@ def test_harness_mobilegym_bridge_deleted():
 
 # ── Agent B: the two successor planes ───────────────────────────────────────
 def test_gui_driver_write_plane():
-    """make_task_adapters is the GUI-only successor of make_adapters: web apps
-    get GUITaskAdapter, mobilegym apps get MobileGymTaskAdapter, and there is
-    NO executor parameter (the API write path is deleted from the runtime)."""
+    """TRANSITIONAL smoke (B-3, Oracle audit 2026-08-15): make_task_adapters
+    still exists — the evaluation killtest scripts use it — but this test no
+    longer ASSERTS the per-platform dispatch shape (GUITaskAdapter vs
+    MobileGymTaskAdapter). Locking that shape endorsed the transitional
+    architecture the contract requires deleting (upper layer knowing "this
+    is web, that is mobilegym"). The platform tables in gui_driver.py are
+    quarantined in tests/substrate/test_no_api_backdoor.py's frozen debt
+    list; Agent E's runtime wave deletes the whole file."""
     import inspect
-    from taskvm.execution.gui_driver import (make_task_adapters, GUITaskAdapter,
-                                             MobileGymTaskAdapter)
-    assert callable(make_task_adapters)
-    assert "executor" not in inspect.signature(make_task_adapters).parameters, (
+    from taskvm.execution import gui_driver
+    assert callable(gui_driver.make_task_adapters)
+    assert "executor" not in inspect.signature(
+        gui_driver.make_task_adapters).parameters, (
         "the executor knob (API-write backdoor selector) must not exist")
-    a = make_task_adapters(apps=["calendar"], host="localhost")
-    assert isinstance(a["calendar"], GUITaskAdapter)
-    m = make_task_adapters(apps=["wechat"], host="localhost")
-    assert isinstance(m["wechat"], MobileGymTaskAdapter)
+    a = gui_driver.make_task_adapters(apps=["calendar"], host="localhost")
+    assert set(a) == {"calendar"}      # smoke only — no isinstance locks
 
 
 def test_gui_driver_operator_tables():
-    """The per-app operator tables migrated from legacy substrate/base.py.
-
-    Agent B (substrate isolation): ``DEFAULT_PORTS`` no longer lives in the
-    execution layer — URL/port resolution is name-routed through the
-    substrate port (``builtin_web_app_url`` / ``mobilegym_bridge_url``),
-    so upper layers never learn ports."""
-    from taskvm.execution.gui_driver import _OP_FIELD, _ENTITY_KIND
-    assert set(_OP_FIELD) == {"calendar", "taskboard", "drive", "mail",
-                              "outlook_cal"}
-    assert _OP_FIELD["taskboard"]["set_assignee"] == "assignee"
-    assert _ENTITY_KIND["calendar"] == "event"
+    """TRANSITIONAL debt acknowledgment (B-3, Oracle audit): the per-app
+    operator tables (_OP_FIELD/_ENTITY_KIND) and platform tuples
+    (_WEB_APPS/_MOBILEGYM_APPS) in the execution layer are KNOWN DEBT,
+    not correct architecture — the frozen contract bans app-specific
+    operator dispatch above the substrate. They are enumerated (and
+    frozen against growth) in tests/substrate/test_no_api_backdoor.py;
+    Agent E's runtime wave deletes them with the whole file. This test
+    only locks what must stay true in ANY architecture: no port table
+    and no executor knob in the execution layer."""
     import taskvm.execution.gui_driver as gd
     assert not hasattr(gd, "DEFAULT_PORTS"), \
-        "port table must not live in the execution layer (port routes by name)"
-    from taskvm.substrate import builtin_web_app_url, mobilegym_bridge_url
-    assert builtin_web_app_url("calendar") == "http://localhost:3013"
-    assert mobilegym_bridge_url() == "http://localhost:3019"
+        "port table must not live in the execution layer"
+    import inspect
+    assert "executor" not in inspect.signature(
+        gd.make_task_adapters).parameters
 
 
 def test_evaluation_environments_read_plane():

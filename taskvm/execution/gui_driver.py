@@ -29,9 +29,20 @@ from typing import Any, Callable
 from taskvm.substrate import (
     GuiAction,
     SubstrateSession,
-    builtin_web_app_url,
-    mobilegym_bridge_url,
     substrate_registry,
+)
+# TRANSITIONAL DEBT (B-2, Oracle audit 2026-08-15) — this whole file is
+# scheduled for DELETION by Agent E's runtime wave (ActionContract → CUA →
+# GuiAction → SubstrateSession.act replaces GUITaskAdapter /
+# MobileGymTaskAdapter / make_task_adapters and their platform tables).
+# Until then the URL knowledge below imports the substrate IMPLEMENTATIONS
+# directly (the substrate root facade exports Protocol/DTO/Registry only —
+# hiding these imports behind fake port helpers was ruled worse than the
+# honest debt). Quarantined in tests/substrate/test_no_api_backdoor.py's
+# frozen debt list: DO NOT add new files to this pattern.
+from taskvm.substrate.builtin_web.launcher import app_url as _builtin_app_url
+from taskvm.substrate.mobilegym.evaluation import (
+    DEFAULT_BRIDGE_PORT as _MG_DEFAULT_BRIDGE_PORT,
 )
 
 logger = logging.getLogger(__name__)
@@ -213,6 +224,17 @@ _ENTITY_KIND: dict[str, str] = {
 _WEB_APPS = ("calendar", "taskboard", "drive", "mail", "outlook_cal")
 _MOBILEGYM_APPS = ("wechat", "alipay", "x")
 
+
+def mobilegym_bridge_url(host: str = "localhost") -> str:
+    """TRANSITIONAL (B-2): bridge URL for the legacy task adapters. Lives
+    HERE (not in the substrate root facade) because this file is Agent E's
+    deletion target; the env override mirrors the mobilegym provider's
+    config precedence. Deleted together with make_task_adapters."""
+    import os
+    env = os.environ.get("TASKVM_MOBILEGYM_PORT")
+    port = int(env) if env and env.isdigit() else _MG_DEFAULT_BRIDGE_PORT
+    return f"http://{host}:{port}"
+
 def make_task_adapters(apps: list[str] | None = None, *,
                        host: str = "localhost",
                        screenshot_dir: str | None = None,
@@ -229,7 +251,7 @@ def make_task_adapters(apps: list[str] | None = None, *,
     for a in apps:
         if a in _WEB_APPS:
             out[a] = GUITaskAdapter(
-                app=a, base_url=builtin_web_app_url(a, host=host),
+                app=a, base_url=_builtin_app_url(a, host=host),
                 screenshot_dir=screenshot_dir,
                 grounding_backend=grounding_backend,
                 anchor_lookup=anchor_lookup)
