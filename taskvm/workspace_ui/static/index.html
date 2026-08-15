@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TaskVM — Task Control Surface</title>
+  <link rel="stylesheet" href="/static/css/taskvm.css">
+</head>
+<body>
+  <div id="app">
+    <!-- ── session selector ──────────────────────────────── -->
+    <header class="topbar">
+      <div class="brand">TaskVM</div>
+      <select id="session-select" class="session-select">
+        <option value="">— select session —</option>
+      </select>
+      <div id="autonomy-badge" class="badge badge-idle">idle</div>
+      <div id="epoch-badge" class="badge">epoch 0</div>
+      <div id="model-calls" class="badge badge-ok">model: —</div>
+    </header>
+
+    <!-- ── governance bar ────────────────────────────────── -->
+    <section id="governance-bar" class="governance-bar hidden">
+      <div class="goal-display">
+        <span class="label">Goal:</span>
+        <span id="goal-text" class="goal-text"></span>
+      </div>
+      <div class="controls">
+        <button id="btn-pause" class="btn btn-warn">Pause</button>
+        <button id="btn-resume" class="btn btn-ok hidden">Resume</button>
+        <button id="btn-stop" class="btn btn-danger">Stop</button>
+        <button id="btn-checkpoint" class="btn btn-default">Checkpoint</button>
+      </div>
+    </section>
+
+    <main class="main-grid">
+      <!-- ── left: workflow map ───────────────────────────── -->
+      <section class="panel workflow-panel">
+        <h2>Workflow</h2>
+        <div id="workflow-map" class="workflow-map">
+          <p class="placeholder">No session selected.</p>
+        </div>
+      </section>
+
+      <!-- ── center: variables ─────────────────────────────── -->
+      <section class="panel variables-panel">
+        <h2>Task Variables</h2>
+        <div id="variables-list" class="variables-list">
+          <p class="placeholder">No variables.</p>
+        </div>
+      </section>
+
+      <!-- ── right: surfaces + checkpoints ─────────────────── -->
+      <aside class="panel sidebar">
+        <section>
+          <h2>Surfaces</h2>
+          <div id="surface-cards" class="surface-cards">
+            <p class="placeholder">No surfaces.</p>
+          </div>
+        </section>
+        <section>
+          <h2>Checkpoints</h2>
+          <div id="checkpoint-timeline" class="checkpoint-timeline">
+            <p class="placeholder">No checkpoints.</p>
+          </div>
+        </section>
+        <section>
+          <h2>Conflicts</h2>
+          <div id="conflicts-list" class="conflicts-list">
+            <p class="placeholder">No conflicts.</p>
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <!-- ── goal patch modal ─────────────────────────────── -->
+    <div id="goal-modal" class="modal hidden">
+      <div class="modal-content">
+        <h3>Recompose Goal</h3>
+        <label>Goal<textarea id="gp-goal" rows="2"></textarea></label>
+        <label>Constraints (one per line)
+          <textarea id="gp-constraints" rows="3"></textarea></label>
+        <label>Rationale<input id="gp-rationale" type="text"></label>
+        <div class="modal-actions">
+          <button id="gp-submit" class="btn btn-ok">Apply GoalPatch</button>
+          <button id="gp-cancel" class="btn btn-default">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="/static/js/taskvm.js"></script>
+</body>
+</html>
