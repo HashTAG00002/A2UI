@@ -173,9 +173,21 @@ class CallLedger(Protocol):
 class RuntimeEventKind(str, Enum):
     """Typed signals the runtime publishes for projection/evaluation. These
     are NOT kernel mutations (the kernel owns STATE/TIME/HISTORY); they are
-    the runtime's own observation/sync/compensation artifacts (runtime.md §3)."""
+    the runtime's own observation/sync/compensation artifacts (runtime.md §3,
+    §8). Per runtime.md §8, EACH atomic GUI action folds a fresh observation
+    into the kernel's OBSERVED plane AND emits a runtime event + visual
+    artifact — that is ``ACTION_OBSERVED`` (the per-gesture signal D consumes
+    for a live, fold-by-fold view of the active surface). ``ACTION_LANDED``
+    is the node-level verdict landing (verified / verify-failed), carrying the
+    verifier's evidence artifact."""
 
-    ACTION_LANDED = "action_landed"            # a GUI action + fresh observation
+    ACTION_OBSERVED = "action_observed"        # one atomic gesture + fresh
+                                               # observation folded into the
+                                               # kernel (runtime.md §8 active
+                                               # surface sync — NOT a heartbeat)
+    ACTION_LANDED = "action_landed"            # an ACTION node's verdict landing
+                                               # (verified / verify-failed) +
+                                               # the verifier's evidence artifact
     STRUCTURE_INVALIDATED = "structure_invalidated"  # binding can't be recovered
     SURFACE_CONFLICT = "surface_conflict"      # external drift vs pending desired
     COMPENSATION_ENTRY = "compensation_entry"   # one rollback GUI step + fresh obs

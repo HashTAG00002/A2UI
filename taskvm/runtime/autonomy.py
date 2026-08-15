@@ -259,7 +259,14 @@ class AutonomyRuntime:
         """One request → predict → act → finish → verify pass over the CURRENT
         visible world. Returns ``(outcome, detail)`` — outcome is
         ``"verify_failed"`` when the verdict failed and repair may still fix
-        it; anything else ends the pass for this node."""
+        it; anything else ends the pass for this node.
+
+        Per runtime.md §8 (active-surface sync), EACH atomic GUI action folds
+        a fresh observation into the kernel's OBSERVED plane and emits an
+        ``ACTION_OBSERVED`` event + visual artifact — reality is folded back
+        into the VM per gesture, not only at the final DONE. Per §3/§6 the
+        ``before`` the verifier (and the action history) sees comes from a
+        FRESH pre-action observation, not a stale kernel cache."""
         try:
             handle = self._kernel.request_action(node.node_id)
         except ValidationError:
@@ -276,7 +283,18 @@ class AutonomyRuntime:
             goal = (f"{goal}\n[repair] a previous attempt was made and "
                     f"verification failed: {repair_note}. Continue from the "
                     "CURRENT visible state; do not restart from scratch.")
-        before = self._kernel.task_state().observed_values()
+        # FRESH-BEFORE (runtime.md §3/§8): observe → extract → fold BEFORE
+        # the first gesture, so start_action records the real visible world
+        # as the action's `before` (not a stale cache). The same observation
+        # feeds the first CUA prediction.
+        before, latest_obs, latest_values = self._observe_and_fold(
+            node, surface)
+        if latest_obs is None:
+            # structure invalidated at fresh-before — the visible anchor is
+            # already gone; an honest fail (composition routes the event to C)
+            self._land_fail(node, action_id, False,
+                            "structure invalidated before action")
+            return "stopped", ""
         started = False
         actions = 0
         invalid = 0
@@ -288,14 +306,15 @@ class AutonomyRuntime:
             if not self._budgets.within_model_budget(self._model_calls):
                 self._safe_pause(BUDGET_EXHAUSTED)
                 return "stopped", ""
-            # one CUA prediction — invalid replies (timeout / invalid JSON /
-            # unparseable) are model calls but NEVER GUI actions and are
-            # bounded by a small per-contract ceiling (runtime.md §5)
+            # one CUA prediction over the LATEST fresh observation (the
+            # post-action world from the previous gesture, or the fresh-before
+            # observation for the first turn). Invalid replies (timeout /
+            # invalid JSON / unparseable) are model calls but NEVER GUI
+            # actions and are bounded by a small per-contract ceiling (§5).
             try:
                 decision = self._cua.predict_action(
-                    goal=goal, observation=self._sync.observe_active(surface),
-                    labels=labels, attempt=actions + invalid + 1,
-                    model=self._model)
+                    goal=goal, observation=latest_obs, labels=labels,
+                    attempt=actions + invalid + 1, model=self._model)
             except Exception as e:            # provider/parse failure
                 invalid += 1
                 self._model_calls += 1
@@ -317,7 +336,8 @@ class AutonomyRuntime:
                 return "stopped", ""
             if decision.kind is CUADecisionKind.DONE:
                 detail = self._finish_and_verify(
-                    node, action_id, started, before, surface)
+                    node, action_id, started, before, surface,
+                    latest_obs, latest_values)
                 if detail:
                     # repair context carries the discrepancy AND the actions
                     # already taken (runtime.md §5)
@@ -345,39 +365,85 @@ class AutonomyRuntime:
             acts.append(decision.action.description
                         or decision.action.kind)
             actions += 1
-            self._sync.observe_active(surface)   # fresh post-action world
+            # PER-GESTURE FOLD (runtime.md §8): act → fresh observe → extract
+            # → fold into the OBSERVED plane → runtime event + visual
+            # artifact. The next CUA prediction sees this folded world.
+            _, latest_obs, latest_values = self._observe_and_fold(
+                node, surface, gesture=decision.action)
+            if latest_obs is None:
+                # structure invalidated mid-contract — not repairable by
+                # re-acting; land an honest fail and let composition route C
+                self._land_fail(node, action_id, started,
+                                "structure invalidated mid-contract")
+                return "stopped", ""
         # action budget exhausted without DONE — safe stop, no blind rerun
         self._safe_pause(BUDGET_EXHAUSTED)
         return "stopped", ""
 
-    def _finish_and_verify(self, node: WorkflowNode, action_id: str,
-                           started: bool, before: Mapping[str, Any],
-                           surface: str) -> str:
-        """finish + verify. Returns '' when committed (or stale-discarded);
-        otherwise the verification discrepancy for the repair path."""
-        if not started:
-            started = self._kernel.start_action(action_id)
-            if not started:
-                return ""    # stale discard — nothing to repair
+    def _observe_and_fold(self, node: WorkflowNode, surface: str,
+                          *, gesture: "object | None" = None
+                          ) -> tuple[Any, Any, tuple]:
+        """Fresh observe → deterministic extract → fold into the kernel's
+        OBSERVED plane (runtime.md §8 active-surface sync — NOT a heartbeat:
+        the active surface is driven by the CUA's own act→re-observe).
+
+        Returns ``(observed_values, observation, extracted_values)`` —
+        ``observed_values`` is the kernel's observed plane AFTER the fold
+        (the truthful current world). Returns ``(None, None, ())`` if the
+        extractor raised ``StructureInvalidation`` (the runtime publishes the
+        typed event and the caller lands an honest fail).
+
+        With ``gesture`` set this is a post-action fold: it ALSO publishes an
+        ``ACTION_OBSERVED`` event carrying the captured screenshot artifact
+        (the per-gesture signal D consumes). Without ``gesture`` it is the
+        fresh-before fold (silent — the per-gesture events begin with the
+        first act)."""
         obs = self._sync.observe_active(surface)
-        after_values: tuple = ()
         try:
-            after_values = self._ext.extract(obs, self._variables())
+            values = self._ext.extract(obs, self._variables())
         except StructureInvalidation as e:
             self._publish(RuntimeEventKind.STRUCTURE_INVALIDATED,
                           node_id=node.node_id, surface_id=surface,
                           detail=str(e))
-            self._land_fail(node, action_id, True,
-                            f"structure invalidated: {e}")
-            return ""    # honest fail — structural drift is not repairable
-                         # by re-acting; composition routes the event to C
+            return None, None, ()
+        self._sync.fold_action_observation(list(values))
+        if gesture is not None:
+            self._publish(RuntimeEventKind.ACTION_OBSERVED,
+                          node_id=node.node_id, surface_id=surface,
+                          artifact_ref=self._artifact_ref(obs),
+                          detail=getattr(gesture, "description", None)
+                          or getattr(gesture, "kind", "act"))
+        return self._kernel.task_state().observed_values(), obs, values
+
+    @staticmethod
+    def _artifact_ref(observation: Any) -> str:
+        """The captured screenshot the substrate handed back — the visual
+        artifact for an ACTION_OBSERVED event (never an internal id)."""
+        return getattr(observation, "screenshot_ref", "") or ""
+
+    def _finish_and_verify(self, node: WorkflowNode, action_id: str,
+                           started: bool, before: Mapping[str, Any],
+                           surface: str, latest_obs: Any,
+                           latest_values: tuple) -> str:
+        """finish + verify. Returns '' when committed (or stale-discarded);
+        otherwise the verification discrepancy for the repair path.
+
+        The last per-gesture fold already brought the OBSERVED plane current;
+        the CUA said DONE over ``latest_obs`` (the post-action world). So the
+        verifier checks that same fresh observation — no extra observe, and
+        the ``after`` is genuinely the visible world the CUA judged (§6)."""
+        if not started:
+            started = self._kernel.start_action(action_id)
+            if not started:
+                return ""    # stale discard — nothing to repair
+        after_values = latest_values
         if not self._kernel.finish_action(action_id, observations=after_values):
             return ""    # stale discard
         state = self._kernel.task_state()
         vr = self._verifier.verify(
             node=node, before_observed=before,
             after_observed=state.observed_values(),
-            desired=state.desired_values(), observation=obs,
+            desired=state.desired_values(), observation=latest_obs,
             action_id=action_id, epoch=self._kernel.epoch)
         self._kernel.land_verification(vr)
         self._publish(RuntimeEventKind.ACTION_LANDED, node_id=node.node_id,
