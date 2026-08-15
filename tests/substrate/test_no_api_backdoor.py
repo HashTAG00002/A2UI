@@ -215,9 +215,10 @@ def test_no_executor_api_backdoor_knob_anywhere():
 #:
 #:   * T1 ``taskvm/execution/gui_driver.py`` — Owner: Agent E. Exit:
 #:     file deleted (runtime consumes SubstrateSession + CUA→GuiAction).
-#:   * T2 ``taskvm/workspace_ui/server.py`` — Owner: Agent D (E/G). Exit:
-#:     oracle-derived _make_anchor_lookup deleted; targeting goes
-#:     Observation → State Compiler → SurfaceHandle.
+#:   * T2 (RESOLVED 2026-08-16 by Agent D) ``taskvm/workspace_ui/server.py``
+#:     — _make_anchor_lookup deleted; anchor_lookup=None (VMStateSnapshot
+#:     optional field); targeting routes through Observation → State Compiler
+#:     → SurfaceHandle per projection contract.
 #:
 #: The quarantine test below only enforces NO GROWTH while these are
 #: pending — it is NOT a satisfaction check. The FORMAL LOCK audit
@@ -229,9 +230,6 @@ TRANSITIONAL_DEBT_REGISTER: dict[str, tuple[str, ...]] = {
         r"\b_ENTITY_KIND\b",
         r"\b_WEB_APPS\b",
         r"\b_MOBILEGYM_APPS\b",
-    ),
-    "taskvm/workspace_ui/server.py": (
-        r"\b_make_anchor_lookup\b",
     ),
 }
 

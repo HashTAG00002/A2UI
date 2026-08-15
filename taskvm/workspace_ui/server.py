@@ -539,25 +539,6 @@ def _gt_binding(fixture) -> TaskBinding:
     return TaskBinding(task_id=fixture.task_id, variables=list(var_groups.values()))
 
 
-def _make_anchor_lookup(oracle: dict, sid: str):
-    """Visible-anchor lookup for GG.3 instructions (Agent B): title IS
-    screen-visible, so translating entity→title through the evaluation
-    env is the registered transitional source (Agent C/E replace it with
-    the SurfaceHandle cache from session.observe())."""
-    from taskvm.governance.translate import TITLE_FIELD
-
-    def lookup(app: str, entity_id: str):
-        env = (oracle or {}).get(app)
-        if env is None or not entity_id:
-            return None
-        try:
-            ent = (env.oracle_state(sid).get("entities")
-                   or {}).get(entity_id) or {}
-        except Exception:
-            return None
-        return ent.get(TITLE_FIELD.get(app, "title"))
-    return lookup
-
 
 def seed_session(fixture, adapters: dict, oracle: dict | None = None,
                  host: str = "localhost") -> WorkspaceSession:
@@ -1063,7 +1044,6 @@ def rollback_to(sid: str):
     # build a VMStateSnapshot to resolve sagas_after_checkpoint
     from taskvm.governance import VMStateSnapshot
     vm = VMStateSnapshot(sid=sid, binding=sess.binding, adapters=sess.adapters,
-                         anchor_lookup=_make_anchor_lookup(sess.oracle, sid),
                          rollback_log=sess.rollback_log, checkpoints=sess.task_milestones,
                          checkpoint_saga_map=sess.checkpoint_saga_map)
     try:

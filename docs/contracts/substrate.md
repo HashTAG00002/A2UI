@@ -113,13 +113,12 @@ paths in repo), OSWorld contract. Gate file: `tests/substrate/test_no_api_backdo
 | # | Violation (file) | What violates §6 | Owner | Exit criterion |
 |---|---|---|---|---|
 | T1 | `taskvm/execution/gui_driver.py` | upper layer imports concrete substrate impls; keeps `_WEB_APPS`/`_MOBILEGYM_APPS`/`_OP_FIELD`/`_ENTITY_KIND` platform tables; legacy task-level `POST /api/{app}/{sid}/{entity_id}` transport | Agent E | file DELETED; runtime consumes `SubstrateSession` + ActionContract→CUA→GuiAction; killtest write paths migrated or the scripts deleted (F) |
-| T2 | `taskvm/workspace_ui/server.py::_make_anchor_lookup` | runtime decision chain consumes `env.oracle_state(sid)` (hidden entity_id → visible title → GUI target anchor) | Agent D (E/G integration) | lookup deleted; runtime targeting is Observation → State Compiler → SurfaceHandle |
 
 **Formal LOCK procedure** (mechanical, no judgment call):
 
 ```bash
 # 1. shrink the register in tests/substrate/test_no_api_backdoor.py
-#    (TRANSITIONAL_DEBT_REGISTER) to {} as T1/T2 land
+#    (TRANSITIONAL_DEBT_REGISTER) to {} as T1 lands
 # 2. run the explicit lock audit — must be ALL GREEN before anyone stamps
 #    the substrate contract as formally LOCKED:
 TASKVM_SUBSTRATE_LOCK_AUDIT=1 pytest tests/substrate -q
