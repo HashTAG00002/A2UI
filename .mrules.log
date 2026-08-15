@@ -2869,3 +2869,71 @@ Agent D/E：taskvm/projection + taskvm/runtime 接线到 workspace_ui 真实入�
 ### commit 范围纪律（用户指令：本轮授权 C 文件并入同一提交）
 
 本轮 commit 含：`taskvm/architect/compiler.py`、`tests/architect/test_scenarios.py`（以上为 C-F1，用户授权代交付）、`docs/contracts/substrate.md`、`tests/substrate/test_no_api_backdoor.py`、`taskvm/substrate/__init__.py`、`taskvm/execution/gui_driver.py`、`tests/test_imports.py`（以上为 B-F1 及引用同步）、`docs/oracle/new-oracle/handoffs/05_/06_`（owner 任务落 handoff）、`.mrules`、`.mrules.log`。注意：`.mrules` 同时含 Agent E 已写入未提交的 E35 行（共享 changelog 文件的既有内容，非本轮篡改，一并入库）。E 在途文件（taskvm/runtime/、tests/runtime/、taskvm/verifier/*、docs/contracts/runtime*、_debug_*.py）不 add。
+
+---
+
+## E35 · Agent E runtime operationalization（回补章节，规则 1 补账）
+
+时间：工作发生在 2026-08-15，本节 2026-08-16 回补落盘。背景：GLM 5.2→5.3 交接——上一任只留下草案级代码，本轮按冻结的分层所有权 spec 把 runtime 真正运行起来并测试锁定。E36 会话已点名此债（".mrules.log 目前缺 Agent E 的 E35 详录章节……应由 E 自行补写"），本节按当时工作树与 E36 基线复核回写；`.mrules` 表行的旧索引 L2830-2870 指向的是 E36 章节，已随本次提交一并修正为真实行号。
+
+### 交付物（全部为本轮新增，此前从未入库）
+
+- `taskvm/runtime/`（新包，stdlib-only 纯 Python）：`autonomy.py`（AutonomyRuntime facade——执行时钟 observe→think→act→verify→commit/recover）、`compensation.py`（CompensationExecutor——真实 GUI 补偿执行器）、`sync.py`（SurfaceSync——观察驱动同步 + StructureInvalidation 结构漂移信号）、`ports.py`（CUAModel / CUAGoalSerializer / ObservationExtractor / Verifier / CallLedger 五个注入 Protocol 端口 + CUADecision / ModelCallRecord / RuntimeEvent DTO）、`config.py`（RuntimeBudgets / DEFAULT_BUDGETS）、`__init__.py`（冻结公开面）。
+- `taskvm/verifier/visible.py`（新）：VisibleVerifier——runtime-visible 验证的内容合法性唯一 owner（新鲜可见观察 vs ActionContract.desired_state 确定性判定；绝不读隐藏 DB / fixture / oracle）。`taskvm/verifier/__init__.py` 改为导出它，并诚实标注旧 canonical_state / non_interference / round_trip_checks 等为评测面 oracle（属 evaluation/，F 迁移前原地保留，不在 runtime 路径上）。
+- `docs/contracts/runtime.md`（280 行 16 节，冻结）：执行时钟定位 §0、依赖规则 §1（runtime→domain + kernel facade + substrate PORT 根；禁 architect/evaluation/concrete substrate；verifier 经注入）、领域类型 §2、AutonomyRuntime 服务 §3、hot governance §4（中断边界=原子 GUI action，epoch 变化丢弃在途 CUA 响应）、autonomy budget §5（消灭三级放大重试）、visible verifier §6、真实补偿 §7、观察驱动同步 §8、CUA 原子性 §9、fan-out/barrier §10、bounded loop §11、不负责清单 §12、物理删除 §13、合同测试 §14、已知边界 §15。`runtime_rfc_backlog.md`：RFC-001——runtime 自有 ModelCallRecord 与 architect 版逐字段相同，同一 ledger 实例同时记账 state_compiler / task_architect / cua 三角色，benchmark 报告的 CUA call count 即真实 provider request count。
+- 测试：`tests/runtime/conftest.py`（五个 fake：FakeSubstrate——最小可见世界、真实手势 GuiAction 才能改、act 全落 act_log；ScriptedCUA——确定性决策脚本 + on_predict 钩子可中途注入治理事件即热治理竞态；FakeExtractor——k=v 抽取 + StructureInvalidation；FakeLedger / FakeSerializer）+ `test_autonomy.py` 10 + `test_compensation.py` 4 + `test_hot_governance.py` 8 + `test_sync.py` 5；`tests/verifier/test_visible_verifier.py` 14（CUA done≠verified / evidence_ref 必填 / irreversible / multi-key / frozen dataclass）；`tests/integration/test_runtime_trace.py` 1（端到端：autonomy→checkpoint→hot LocalPatch→stale discard→retargeted execution→compensation）。
+
+### 修复的 GLM 5.2 遗留 critical bug（autonomy.py 五处 + compensation.py 四处）
+
+- autonomy：① pending_compensation 死循环（kernel 挂起补偿时 forward 拉取永远撞墙却不停止）→ 诚实 BLOCKED 返回；② repair loop 缺失（验证失败直接放弃）→ context-preserving repair（kernel.requeue FAILED→READY + 带 discrepancy 上下文重问，max_repairs_per_contract 有界）；③ invalid prediction 无预算（provider 故障可无限烧钱）→ max_invalid_predictions_per_contract 小 ceiling + BUDGET_EXHAUSTED safe pause；④ BUDGET_EXHAUSTED 语义滥用（把不可恢复失败也叫这个名）→ safe pause 与 ESCALATED 升级分立；⑤ surface=None 崩溃 → escalate 诚实停（无 fallback 路径）。
+- compensation：① 任务级预算缺失（补偿模型调用不进总账）→ model_calls_base 传入 AutonomyRuntime 的已用额度；② CUA 引用失同步（测试/组合层 swap rt._cua 后 executor 仍持旧引用）→ execute_compensation 前重绑；③ is_repair 记账缺失；④ 异常吞噬范围过宽（吞掉应上抛的合同违规）。
+- 关键纠错：compensation executor 持有的 CUA 引用在测试 swap 后失效——该教训在 E37 已从"调用侧重绑"升格为"facade 内重绑"（见 E37 第 8 条）。
+
+### 验证（当时全量，taskvm conda 实跑）
+
+`pytest tests/ -q` → **292 passed / 1 skipped**。
+
+### 证明了什么 / 没证明什么
+
+证明：冻结的 runtime 合同有一套可运行、测试锁定的 stdlib-only 实现（runtime/verifier/integration 合同测试全绿、全量 292 绿）；kernel 的 epoch/start_action 门控能在 runtime 层丢弃过时 CUA 响应（热治理竞态有测试锁定）。没证明：真实 provider / Playwright / 移动桥接下的端到端行为（Port 注入面只被 fake 覆盖，组合层接线归 G）；runtime 在 workspace_ui 的引导接入；旧 execution 适配器删除（T1 债务）。
+
+---
+
+## E37 · Agent E runtime 硬化收尾：kernel-gate 拒绝的类型化传播 + 外部 pause 闭环 + 补偿侧无效预测记账 + 三处测试 oracle 纠正
+
+时间：2026-08-15～16。性质：E35 交付后的对抗性自查修正轮（改动全部在工作树完成，随本轮与 E35 交付物一并首次入库）。
+
+### autonomy.py（8 处）
+
+1. 类型化停止原因 `_stop_reason`：PAUSED 不再是裸布尔——safe pause 带 BUDGET_EXHAUSTED、escalate 带 ESCALATED，`run()` 的返回原因可区分"为什么停"；`request_resume` 一并清除。
+2. 外部 pause 闭环 `_governance_says_paused()`：组合层直接打在 kernel 上的 pause（不经过 runtime.request_pause）也必须停住 runtime——读 kernel 事件日志最后一条 governance 动作（只读 facade），否则 epoch 已弹、runtime 却继续空转（runtime.md §4 闭环）。
+3. kernel 门控拒绝全面类型化：`_complete_loops` 的 ValidationError → BLOCKED；非 ACTION 节点 `_advance` 的 ValidationError → `_blocked(node)` + False；`_run_contract_once` 改返回 `(outcome, detail)` 元组，`"blocked"` 逐层上传到 `run()`——三路（loop 收口 / 非 ACTION 推进 / ACTION request_action）都收敛为类型化安全停止，任何一处都不是热重试循环（runtime.md §7：pending compensation 时 kernel 可执行门会拒绝推进）。
+4. repair 上下文携带 `actions_taken` 溯源（§5）：verify_failed 的 detail 附上本轮已执行的动作清单，重问时模型知道已经做过什么。
+5. `_land_fail` 全生命周期：CUA FAIL 且尚未 start 的 handle 也走 start→finish→failed verdict——"CUA 说做不到"也是一次尝试，节点必须离开 READY，否则永远自旋烧预算。
+6. no-surface 从裸 publish 升级为 escalate（pause + 类型事件）——runtime 推不动的节点不留在大循环里。
+7. 删除 `_Outcome` 哨兵类 / `_VERIFY_FAILED` 字符串前缀编码 → 朴素元组（字符串拼 detail 是伪类型安全，解析脆弱）。
+8. `execute_compensation` 在 facade 内重绑 `_comp._cua = _cua`——E35 的教训从"调用侧/测试侧修"升格为"实现侧修"，组合层 swap CUA 后补偿执行器不再可能持旧引用。
+
+### compensation.py（1 处）
+
+补偿循环的无效预测记账：`predict_action` 抛异常（provider / parse 失败）→ 记 `ok=False` 的 ledger 记录 + `max_invalid_predictions_per_contract` ceiling 触顶 break——与正向循环同一套诚实会计（runtime.md §5），不再静默崩溃也不再无界重试。
+
+### 测试 oracle 纠正（三处错的是测试不是实现）
+
+1. `test_hot_governance.py`：LocalPatch 用了不存在的 `desired=` 字段（正确字段 `new_value=`）——patch 此前静默带错值构造；纠正后补锁两条硬断言：世界只出现 A2（旧 epoch 的 stale 手势从未写入）+ kernel 事件流含 ACTION_DISCARDED。
+2. `test_compensation.py`：回退范围 oracle 纠正——kernel 回退域从 checkpoint 边界起算，只有边界之后提交的动作进 `plan.entries`（a1 在边界前、不在域内、不被补偿，世界保持 x=A）；irreversible 用例重构为"cp 之后才 send"（旧用例把 irreversible 放在 cp 前，断言的其实不是回退域语义）。
+3. `test_sync.py`：心跳快路径 oracle 纠正——第一次心跳建立基线指纹，第二次（指纹未变）才是零成本快路径；旧断言把首跳当快路径，语义读错。
+4. 另：`test_autonomy.py` 引入 `_single_graph()`（显式 SEQUENCE root + a1 + TERMINAL）用于 oracle 相关用例 + 无效预测用例显式注入 RuntimeBudgets；conftest `type_kv` 死代码清理（`if False else` 残留）。
+
+### 验证（本轮全量，taskvm conda 实跑）
+
+- `pytest tests/ -q` → **292 passed / 2 skipped**（第 2 个 skip = tests/substrate LOCK 审计的可见 PENDING，E36 引入，非本轮回归；pass 数与 E36 基线持平）；
+- `pytest tests/runtime tests/verifier tests/integration -q` → **42 passed**（runtime 合同面 100%：10+4+8+5+14+1）。
+
+### 证明了什么 / 没证明什么
+
+证明：kernel 门控在 runtime 每一类推进路径上的拒绝都收敛为类型化 BLOCKED（无热重试，有测试锁定）；外部 pause 与 runtime 内 pause 语义闭环；补偿循环与正向循环同预算同会计；CUA FAIL/无 surface 等"推不动"情形都让节点离开 READY 而非自旋。没证明：真实底座下的端到端行为（同 E35 边界）；workspace_ui 接入真实 runtime bootstrap 与 T1（gui_driver 删除）——下一里程碑。
+
+### commit 范围（本轮）
+
+`taskvm/runtime/`（6 文件）、`taskvm/verifier/{__init__.py, visible.py}`、`docs/contracts/{runtime.md, runtime_rfc_backlog.md}`、`tests/runtime/`（conftest + 4 测试文件）、`tests/verifier/test_visible_verifier.py`、`tests/integration/test_runtime_trace.py`、`.mrules`、`.mrules.log`。`_debug_ft.py` / `_debug_rt.py` 为根目录临时调试脚本（前者 faulthandler 包单个 pytest 卡死用例、后者 LocalPatch retarget 手工复现），全仓零引用，不入库并从工作树删除。
