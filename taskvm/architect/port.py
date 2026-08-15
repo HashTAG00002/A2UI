@@ -10,7 +10,9 @@ environment conventions (``OPENAI_BASE_URL`` / ``OPENAI_API_KEY`` /
 Why the ledger exists (master handoff §6 + architect contract §5): the
 benchmark must be able to distinguish **compiler calls / architect calls /
 CUA calls** so the paper can honestly report the harness's model-call
-overhead. Nothing in this layer may call a model without landing a record.
+overhead. Nothing in this layer may call a model without landing a record,
+and no port may retry internally: **one ``complete_json`` = one provider
+request = one ledger record** (C-2).
 """
 from __future__ import annotations
 
@@ -43,16 +45,18 @@ class ModelPort(Protocol):
     """The port L4 consumes. ``complete_json`` returns a JSON-decoded reply.
 
     ``image_data_url`` (optional): a base64 data-URL screenshot — the vision
-    path. ``repair_retries``: how many bounded re-asks the PORT may perform
-    on unparseable output (the LAYER-level semantic repair loop is separate
-    and also bounded).
+    path. There is NO port-level retry (C-2, Oracle audit): one call = one
+    provider request = one ledger record, so the benchmark's reported
+    model-call overhead is the true one. An unparseable reply returns
+    ``parsed=None``; the L4 semantic repair loop is the single repair
+    owner (each of ITS attempts lands its own ledger record with
+    ``is_repair``).
     """
 
     def complete_json(self, *, system: str, user: str,
                       model: str | None = None, max_tokens: int = 3072,
                       temperature: float | None = None,
-                      image_data_url: str | None = None,
-                      repair_retries: int = 1) -> ModelReply: ...
+                      image_data_url: str | None = None) -> ModelReply: ...
 
 
 @dataclass(frozen=True)

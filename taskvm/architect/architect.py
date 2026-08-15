@@ -41,7 +41,9 @@ from dataclasses import dataclass, replace
 from typing import Iterable
 
 from taskvm.architect.compiler import CompilerResult
-from taskvm.architect.noleak import assert_prompt_clean, scan_json_values
+from taskvm.architect.noleak import (
+    LEAK_REPAIR_GUIDANCE, assert_prompt_clean, scan_json_values,
+)
 from taskvm.architect.port import (
     MODEL_ROLE_TASK_ARCHITECT, ModelCallLedger, ModelPort,
 )
@@ -257,13 +259,19 @@ class TaskArchitect:
                              id_offset: int,
                              exempt_ids: frozenset[str],
                              purpose: str) -> TaskArchitecture:
-        assert_prompt_clean(_SYSTEM_PROMPT + "\n" + user,
-                            what="task-architect prompt")
         repair_note = ""
         last_err: Exception | None = None
         for attempt in range(1 + self._max_repairs):
             is_repair = attempt > 0
-            reply = self._call_model(user + repair_note, purpose=purpose,
+            exact_user = user + repair_note
+            # C-1 (Oracle audit): EVERY message actually sent — the initial
+            # one AND each repair round — passes the no-leak gate on the
+            # exact text about to go out. The leak repair note is token-free
+            # (LEAK_REPAIR_GUIDANCE); any other note that unexpectedly
+            # carries internal vocabulary fails honestly at this line.
+            assert_prompt_clean(_SYSTEM_PROMPT + "\n" + exact_user,
+                                what="task-architect prompt")
+            reply = self._call_model(exact_user, purpose=purpose,
                                      is_repair=is_repair)
             parsed = reply.parsed
             if not isinstance(parsed, dict) or "workflow" not in parsed:
@@ -273,10 +281,12 @@ class TaskArchitect:
                 continue
             leaks = scan_json_values(parsed)
             if leaks:
+                # the offending tokens go into the error (honest failure
+                # detail) but NEVER back into the model prompt (C-1).
                 last_err = ArchitectOutputError(
                     "architect output echoes internal vocabulary: "
                     f"{sorted(set(leaks))}")
-                repair_note = self._repair_note(last_err)
+                repair_note = LEAK_REPAIR_GUIDANCE
                 continue
             try:
                 return self._assemble(parsed, base_vars, carried, id_offset,

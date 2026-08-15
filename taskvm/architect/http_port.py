@@ -10,8 +10,11 @@ Environment conventions are IDENTICAL to the legacy
 - ``TASKVM_MODEL`` (default ``gpt-5.6-sol``)
 
 JSON extraction mirrors the legacy client: strip ``<think>`` blocks and code
-fences, then parse the first balanced ``{...}`` / ``[...]``. Bounded
-``repair_retries`` re-asks on parse failure (default 1) — never unbounded.
+fences, then parse the first balanced ``{...}`` / ``[...]``. There is NO
+port-level retry (C-2, Oracle audit): one ``complete_json`` call issues
+exactly ONE provider request, so ledger records always equal real provider
+calls — an unparseable reply returns ``parsed=None`` and the L4 semantic
+repair loop (the single repair owner) decides whether to re-ask.
 """
 from __future__ import annotations
 
@@ -53,18 +56,19 @@ class HttpModelPort:
     def complete_json(self, *, system: str, user: str,
                       model: str | None = None, max_tokens: int = 3072,
                       temperature: float | None = None,
-                      image_data_url: str | None = None,
-                      repair_retries: int = 1) -> ModelReply:
+                      image_data_url: str | None = None) -> ModelReply:
+        """ONE provider request per call — no hidden retry (C-2).
+
+        The ledger records one call per ``complete_json``; an internal
+        parse-retry would make real provider calls exceed ledger records
+        and under-report the benchmark's true model overhead. A parse
+        failure returns ``parsed=None`` — the L4 semantic repair loop is
+        the single repair owner.
+        """
         mdl = model or self.default_model
-        last_raw = ""
-        for attempt in range(1 + max(0, repair_retries)):
-            raw = self._chat(system, user, mdl, max_tokens, temperature,
-                             image_data_url)
-            last_raw = raw
-            parsed = _extract_json(raw)
-            if parsed is not None:
-                return ModelReply(parsed=parsed, raw=raw, model=mdl)
-        return ModelReply(parsed=None, raw=last_raw, model=mdl)
+        raw = self._chat(system, user, mdl, max_tokens, temperature,
+                         image_data_url)
+        return ModelReply(parsed=_extract_json(raw), raw=raw, model=mdl)
 
     # ── internals ──────────────────────────────────────────────────────
     def _chat(self, system: str, user: str, model: str, max_tokens: int,

@@ -45,8 +45,7 @@ class FakePort:
         self.calls: list[dict] = []
 
     def complete_json(self, *, system, user, model=None, max_tokens=3072,
-                      temperature=None, image_data_url=None,
-                      repair_retries=1):
+                      temperature=None, image_data_url=None):
         self.calls.append({"system": system, "user": user,
                            "image_data_url": image_data_url})
         if not self.replies:
@@ -268,10 +267,64 @@ def test_scenario_7_model_output_echo_is_repairable_failure():
     result = compiler.compile(VIEW_V1, INTENT)
     assert len(port.calls) == 2, "one repair round was consumed"
     assert result.variables[0].semantic_key == "release_date"
+    # C-1 (Oracle audit): the repair message actually sent must ALSO pass
+    # the no-leak gate — the offending tokens are never repeated to the
+    # model, not even to tell it what went wrong.
+    for call in port.calls:
+        assert_prompt_clean(call["system"] + "\n" + call["user"],
+                            what="state-compiler prompt as sent")
 
     port2 = FakePort(echo, echo)
     with pytest.raises(CompilerOutputError, match="internal vocabulary"):
         StateCompiler(port2, max_repairs=1).compile(VIEW_V1, INTENT)
+    for call in port2.calls:
+        assert_prompt_clean(call["system"] + "\n" + call["user"],
+                            what="state-compiler prompt as sent")
+
+
+def test_scenario_7_architect_leak_repair_message_stays_clean():
+    """C-1 counterexample (Oracle audit), architect side: after the model
+    leaks internal vocabulary, the REPAIR message sent back still passes
+    the no-leak gate; the bounded repair can then succeed."""
+    leak_echo = dict(ARCHITECTURE_JSON,
+                     variables=[{"semantic_key": "entity_id",
+                                 "desired": "E1"}])
+    port = FakePort(leak_echo, ARCHITECTURE_JSON)
+    arch = TaskArchitect(port, max_repairs=1).compose(INTENT, OBSERVED_VARS)
+    assert len(port.calls) == 2, "one bounded repair round was consumed"
+    assert arch.graph.terminal_nodes(), "the repair landed a valid plan"
+    for call in port.calls:
+        assert_prompt_clean(call["system"] + "\n" + call["user"],
+                            what="task-architect prompt as sent")
+
+
+def test_http_port_one_provider_request_per_ledger_record(monkeypatch):
+    """C-2 counterexample (Oracle audit): provider requests == ledger
+    records across an invalid-JSON first reply and a successful repair —
+    no hidden port-level retry may under-report the true call count."""
+    from taskvm.architect.http_port import HttpModelPort
+    provider_raw = iter([
+        "sorry, plain prose with no JSON object at all",   # invalid reply
+        json.dumps(COMPILER_JSON, ensure_ascii=False),     # valid on repair
+    ])
+    provider_messages: list[str] = []
+
+    def fake_chat(self, system, user, model, max_tokens, temperature,
+                  image_data_url):
+        provider_messages.append(system + "\n" + user)
+        return next(provider_raw)
+
+    monkeypatch.setattr(HttpModelPort, "_chat", fake_chat)
+    ledger = ModelCallLedger()
+    compiler = StateCompiler(HttpModelPort(), ledger, max_repairs=1)
+    result = compiler.compile(VIEW_V1, INTENT)
+
+    assert result.variables[0].semantic_key == "release_date"
+    assert len(provider_messages) == 2, "initial + repair, ONE request each"
+    assert ledger.total() == 2, "ledger sees every real provider request"
+    assert [r.is_repair for r in ledger.records] == [False, True]
+    # C-1: the repair message built from the parse-failure note is clean
+    assert_prompt_clean(provider_messages[1], what="repair message as sent")
 
 
 # ── scenario 8: bounded repair, honest failure, NO GT fallback ─────────────

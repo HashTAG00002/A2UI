@@ -26,7 +26,9 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from taskvm.architect.noleak import assert_prompt_clean, scan_json_values
+from taskvm.architect.noleak import (
+    LEAK_REPAIR_GUIDANCE, assert_prompt_clean, scan_json_values,
+)
 from taskvm.architect.observation import (
     CompilerObservationView, HandleEvidence, VisibleRegion,
 )
@@ -125,13 +127,20 @@ class StateCompiler:
         from the new visible text.
         """
         user = self._build_user_prompt(view, intent, prior_state)
-        assert_prompt_clean(_SYSTEM_PROMPT + "\n" + user,
-                            what="state-compiler prompt")
         repair_note = ""
         last_err: Exception | None = None
         for attempt in range(1 + self._max_repairs):
             is_repair = attempt > 0
-            reply = self._call_model(user + repair_note,
+            exact_user = user + repair_note
+            # C-1 (Oracle audit): EVERY message actually sent — the initial
+            # one AND each repair round — passes the no-leak gate on the
+            # exact text about to go out. The leak repair note itself is
+            # token-free (LEAK_REPAIR_GUIDANCE) so it can never trip here;
+            # any other repair note that unexpectedly carries internal
+            # vocabulary fails honestly at this line instead of shipping.
+            assert_prompt_clean(_SYSTEM_PROMPT + "\n" + exact_user,
+                                what="state-compiler prompt")
+            reply = self._call_model(exact_user,
                                      purpose=purpose,
                                      is_repair=is_repair,
                                      revision=revision,
@@ -145,10 +154,12 @@ class StateCompiler:
                 continue
             leaks = scan_json_values(parsed.get("variables"))
             if leaks:
+                # the offending tokens go into the error (honest failure
+                # detail) but NEVER back into the model prompt (C-1).
                 last_err = CompilerOutputError(
                     f"state-compiler output echoes internal vocabulary: "
                     f"{sorted(set(leaks))}")
-                repair_note = self._repair_note(last_err)
+                repair_note = LEAK_REPAIR_GUIDANCE
                 continue
             try:
                 return self._assemble(parsed, view, revision)

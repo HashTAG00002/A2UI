@@ -19,7 +19,7 @@ CompilerObservationView / VisibleRegion / HandleEvidence   输入 DTO（唯一�
 StateCompiler.compile(...) -> CompilerResult               可见世界 → 任务变量 + 证据
 StateCompiler.needs_slow_path(...) / extract_observed(...) 确定性 fast path（0 次调用）
 TaskArchitect.compose(...)  -> taskvm.domain.TaskArchitecture   一次调用 → 完整架构
-TaskArchitect.recompose_future(...) -> TaskArchitecture     GoalPatch 后只重构受影响未来
+TaskArchitect.recompose_future(...) -> RecomposeProposal   GoalPatch 后只重构受影响未来；proposal 携带历史闭包，最终经 kernel.recompose() 原子安装
 ActionContractSerializer.cua_goal(...) / compensation_goal(...) / patchop_cua_goal(...)
 ModelPort (Protocol) / HttpModelPort                        模型端口 + stdlib HTTP 适配器
 ModelCallLedger / ModelCallRecord / MODEL_ROLE_*            调用计量（见 §5）
@@ -56,11 +56,11 @@ C **复用** `TaskArchitecture` validating 构造器（A 的单一校验真源�
 | Rollback (CompensationPatch) | 0 | 0 |
 | 结构性 binding 失效（slow path） | 1 增量 | 视变量/拓扑影响 0–1 |
 
-每条记录含 role / purpose / model / tokens / latency / revision / is_repair / ok。CUA 调用由 E 的 runtime 记账（同 ledger 接口；runtime→architect 的 import gate 由 E 走 RFC，不在本 wave）。**生产路径无 `mock=True/False` 分叉**：Fake 只存在于 `tests/fakes/`。
+每条记录含 role / purpose / model / tokens / latency / revision / is_repair / ok。**HttpModelPort 无内部 retry（C-2）**：一次 `complete_json` = 一次真实 provider request = 一条 ledger record；JSON parse 失败返回 `parsed=None`，由 L4 semantic repair loop 作为唯一 repair owner 决定是否重问（其每次尝试各自落账，`is_repair=True`）。CUA 调用由 E 的 runtime 记账（同 ledger 接口；runtime→architect 的 import gate 由 E 走 RFC，不在本 wave）。**生产路径无 `mock=True/False` 分叉**：Fake 只存在于 `tests/fakes/`。
 
 ## 6. Prompt no-leak gate（GG 红线 §0 的 L4 执行）
 
-所有进入模型的 message（compiler 与 architect，system+user）构造后、发送前经 `noleak.scan()`：禁止 `entity_id`、DB key（`E1/T1/wxid_*` 型 token）、内部 operator 词表、`data-*-id`、深链内部路径。命中即 `PromptLeakError`（诚实失败，非静默剔除）。模型**输出**中的 semantic_key 同样过扫描（防模型回声内部 id）。测试读**实际构建的 message**，不是模板 grep。
+所有进入模型的 message（compiler 与 architect，system+user）构造后、发送前经 `noleak.scan()`：**包括每个 repair 轮次的完整 message（C-1）**；禁止 `entity_id`、DB key（`E1/T1/wxid_*` 型 token）、内部 operator 词表、`data-*-id`、深链内部路径。命中即 `PromptLeakError`（诚实失败，非静默剔除）。模型**输出**中的 semantic_key 同样过扫描（防模型回声内部 id）；leak 类错误的 repair note 只陈述错误类别，**绝不向模型复述 offending token**（`noleak.LEAK_REPAIR_GUIDANCE`）。测试读**实际构建的 message**（含 repair 轮次），不是模板 grep。
 
 ## 7. 治理事件 → kernel 映射（三类 mutation 的最终边界）
 

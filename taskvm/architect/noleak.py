@@ -25,6 +25,20 @@ class PromptLeakError(Exception):
     """A model-facing message carried internal, non-visible vocabulary."""
 
 
+# C-1 (Oracle audit): when a model OUTPUT leaks internal vocabulary, the
+# repair note sent BACK to the model states the error CLASS only — repeating
+# the offending tokens would re-leak them into a model input (the very
+# violation the gate exists to stop). Error detail with the tokens stays in
+# the exception for the honest failure path; it never enters a prompt.
+LEAK_REPAIR_GUIDANCE = (
+    "\n\nYour previous output was rejected: it contained forbidden internal "
+    "vocabulary (an internal id or an operator name). Rebuild the output "
+    "from visible task semantics ONLY — business-meaning keys and strings a "
+    "real user could read on the rendered screen. Output the corrected JSON "
+    "object only."
+)
+
+
 # DB-primary-key-shaped tokens: standalone E1 / T2 / wxid_* / C3 used as an
 # ADDRESS (not inside prose). Word-boundary anchored so ordinary English
 # words survive.

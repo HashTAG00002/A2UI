@@ -2675,3 +2675,51 @@ E29 提交（3197a03）后残留三块：(1) 三个 MobileGym killtest 脚本仍
 ### 六、下一里程碑
 
 Agent D/E：taskvm/projection + taskvm/runtime 接线到 workspace_ui 真实入口（/start 的 honest-fail → 真 bootstrap）；Agent F：legacy oracle verifier 从 taskvm/verifier 迁 evaluation/；本波 grep 验收固化为守护测试（防 AC1 类假阴性复发）。
+
+
+---
+
+## E31 · Agent C fix round（Oracle 裁决 C-1/C-2/C-3 全修）：repair-path no-leak + ledger 真实性 + 合同对齐
+
+时间：2026-08-15。背景：Oracle 对 Agent C 的裁决为 NEAR-FROZEN / NOT YET APPROVED——主体架构合格，不返工，只修三个违反自身冻结合同的小洞。本轮全部落地，全量收敛 **213 passed / 1 skipped**。
+
+### Finding C-1（BLOCKER）— repair prompt 把模型泄漏的 internal token 再送回模型
+
+**红证据（Oracle 定向 probe，非静态推断）**：模型第一轮输出 `semantic_key="entity_id", observed="E1"` → `scan_json_values` 正确拒绝 → 但 `_repair_note` 把错误文本（含 `['E1', 'entity_id']`）原样拼进第二轮 user prompt 发送 → noleak 复扫命中 `repair_hits = ['E1', 'entity_id']`。违反冻结合同 §6"所有进入模型的 message 构造后、发送前必须过 no-leak scan"——旧代码只在循环外扫了初始 prompt，repair 轮次从未被扫。
+
+**测试缺口（test-oracle defect，同案犯）**：`test_scenario_7_model_output_echo_is_repairable_failure` 已构造完美反例（echo→good，断言 2 次调用），却只数了 call 数，没检查第二条实际 message——最需要 scan 的路径恰好没锁。
+
+**修复（最小修法，零重构）**：
+1. `noleak.py` 新增 `LEAK_REPAIR_GUIDANCE` 常量——leak 类错误的 repair note 只陈述错误类别（"contained forbidden internal vocabulary"），绝不复述 offending token；
+2. `compiler.py` / `architect.py` 的 repair loop：`assert_prompt_clean(system + "\n" + exact_user)` 移入循环内——**每一轮实际发送的 message（初始 + 全部 repair）都过 gate**；leak 分支 `repair_note = LEAK_REPAIR_GUIDANCE`（offending tokens 只留在异常里走诚实失败路径，永不进模型输入）；其它分支的 repair note 若意外携带 internal vocab 会在发送前 `PromptLeakError` 诚实失败（gate 是最后防线，不做静默剔除——与 noleak 语义一致）；
+3. 回归测试：老 echo 测试补 Oracle 给的原句 `for call in port.calls: assert_prompt_clean(...)`（成功路径 + 双败路径都查）；新增 `test_scenario_7_architect_leak_repair_message_stays_clean`（architect 侧 counterexample）。
+
+### Finding C-2（BLOCKER）— ModelCallLedger 低报真实 provider calls
+
+**红证据（Oracle 定向 probe）**：`HttpModelPort.complete_json` 默认 `repair_retries=1` 内部重问 → provider 2 次 / ledger 1 条；外层 semantic repair 再触发时最高 provider 4 次 / ledger 2 条。直接冲击论文核心主张（真实模型调用开销），违反 port.py 自己的注释"Nothing in this layer may call a model without landing a record"。
+
+**修复（单一 repair owner）**：
+1. `http_port.py`：删除内部 retry 循环与 `repair_retries` 参数——一次 `complete_json` = 恰好一次 `_chat` = 一条 ledger record；parse 失败诚实返回 `parsed=None`；
+2. `port.py`：`ModelPort` Protocol 签名同步（去 `repair_retries`），docstring 写明不变式 **one call = one provider request = one ledger record**，L4 semantic repair loop 是唯一 repair owner（其每次尝试各自落账并标 `is_repair`）；
+3. `tests/fakes` 与 `test_scenarios.FakePort` 签名同步（legacy `benchmark/model_client.py` 的同名参数属 B/F wave，不动）；
+4. 回归测试 `test_http_port_one_provider_request_per_ledger_record`：monkeypatch 真 `HttpModelPort._chat`（第一轮 invalid JSON prose → 第二轮 valid），断言 `provider_requests == ledger.total() == 2` 且 `[is_repair] == [False, True]`，顺带断言 repair message 过 no-leak gate（C-1 交叉验证）。
+
+### Finding C-3（doc-vs-code）— 冻结合同 public signature 与实现不一致
+
+`architect.md` §2 写 `recompose_future(...) -> TaskArchitecture`，实现实为 `-> RecomposeProposal`（后者更合理——GoalPatch 语义本就是"携带历史闭包的 proposal，经 kernel.recompose() 原子安装"）。按裁决不改代码只修文档：§2 签名改为真实类型并注明安装路径；同步把 C-1/C-2 修复后的行为写进 §5（provider==ledger 不变式）与 §6（repair 轮次全量 scan + leak note 不复述 token）——属 doc-vs-code 对齐，非新增功能。
+
+### 验证数字（可复核）
+
+- `pytest tests/`：**213 passed / 1 skipped**（上一轮 210+2：+2 为本轮 counterexample；+1/-1 为并行 Agent-E 落盘 `taskvm/runtime` 使一个占位 skip 转正，非本轮改动）；
+- `pytest tests/architect tests/governance tests/architecture`：35 passed / 1 skipped（`taskvm/projection` 仍为合法未来波次占位）；
+- `python -m compileall -q taskvm/architect/`：通过；修改文件 0 lint 错误。
+- 先红后绿说明：红证据采用 Oracle 裁决书内的定向 probe 结果（repair_hits 与 provider_chat_calls=2/parsed ok 均为实测），本轮以 counterexample 测试锁绿。
+
+### 证明了什么 / 没证明什么
+
+证明：repair 轮次的实际 message 被测试锁定为 no-leak（含 leak-echo 后的修复路径）；provider 请求数与 ledger 记录数在 invalid-JSON→repair 场景下严格相等；冻结合同三处 doc-vs-code 缺口关闭。
+没证明：真实模型端点的行为（HttpModelPort._chat 在 CI 中被 monkeypatch；真机调用属 operator 实跑）；CUA 侧记账（Agent E 的 runtime 接线，合同 §5 明确路由给 E）。
+
+### commit 范围纪律（用户指令）
+
+并行 agent 正在改其他文件（taskvm/runtime 等）。本轮 commit **仅包含 Agent C fix round 的文件**：`taskvm/architect/{compiler,architect,http_port,port,noleak}.py`、`docs/contracts/architect.md`、`tests/architect/test_scenarios.py`、`.mrules`、`.mrules.log`——不含任何并行 agent 的改动。
