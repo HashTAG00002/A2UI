@@ -57,7 +57,34 @@ __all__ = [
     "SurfaceHandle",
     "SurfaceInfo",
     "VisualArtifact",
+    "builtin_web_app_url",
     "evaluation_registry",
+    "mobilegym_bridge_url",
     "scrub_hidden_ids",
     "substrate_registry",
 ]
+
+
+# ── name-routed composition helpers (Agent B) ─────────────────────────────
+# The port routes BY NAME so upper layers never import an implementation
+# subtree (gui_driver's ``from taskvm.substrate.builtin_web.launcher import
+# app_url`` was the last such leak — AC3 of the substrate-isolation brief).
+# Both helpers are lazy: the implementation import happens at call time,
+# inside THIS package (the substrate may import itself).
+
+
+def builtin_web_app_url(app: str, host: str = "localhost") -> str:
+    """Resolve a builtin web app surface to its URL (ports/env overrides
+    live ONLY in the builtin provider config — contract §5)."""
+    from taskvm.substrate.builtin_web.launcher import app_url
+    return app_url(app, host=host)
+
+
+def mobilegym_bridge_url(host: str = "localhost") -> str:
+    """Resolve the MobileGym bridge base URL (default port/env override
+    lives ONLY in the mobilegym substrate config)."""
+    from taskvm.substrate.mobilegym.evaluation import DEFAULT_BRIDGE_PORT
+    import os
+    env = os.environ.get("TASKVM_MOBILEGYM_PORT")
+    port = int(env) if env and env.isdigit() else DEFAULT_BRIDGE_PORT
+    return f"http://{host}:{port}"

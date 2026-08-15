@@ -64,11 +64,12 @@ from taskvm.benchmark.cost_model import CostModel
 from taskvm.benchmark.mobilegym_fixtures import (
     MOBILEGYM_TASKS, all_mobilegym_tasks, get_mobilegym_task)
 from taskvm.execution.action_dispatcher import dispatch
+from taskvm.execution.gui_driver import make_task_adapters
 from taskvm.execution.patch_compiler import compile_patch
 from taskvm.execution.rollback import RollbackLog
 from taskvm.harness import replay_engine as replay
 from taskvm.harness.observations import StepObservation, TraceFixture
-from taskvm.harness.state_adapter import make_adapters
+from taskvm.substrate.mobilegym.evaluation import MobileGymEvaluationEnvironment
 from taskvm.task_state.compiler import compile_binding
 from taskvm.task_state.entity_binding import TaskBinding
 from taskvm.verifier import canonical_state as cs
@@ -88,8 +89,18 @@ VITE_PORT = 3000
 MOBILEGYM_APPS = ["wechat", "alipay"]
 
 
+def _mg_envs(sid: str, host: str) -> dict[str, MobileGymEvaluationEnvironment]:
+    """Per-sid evaluation-plane environments (Agent B / substrate isolation:
+    reset/seed/oracle live on the EVALUATION plane; the runtime task adapters
+    only WRITE via the bridge operator routes, which wrap the injected CUA
+    loop = real gestures — the two planes are physically separate)."""
+    bridge = f"http://{host}:{BRIDGE_PORT}"
+    return {app: MobileGymEvaluationEnvironment(app, sid, bridge)
+            for app in MOBILEGYM_APPS}
+
+
 # ── MobileGym observation capture (combined page → per-app obs) ──────────────
-def _capture_mobilegym_obs(adapters: dict, sid: str) -> dict[str, StepObservation]:
+def _capture_mobilegym_obs(host: str, sid: str) -> dict[str, StepObservation]:
     """Capture the rendered-GUI observation from the bridge's combined
     ``GET /<sid>`` page (which serves BOTH wechat chats + alipay txs in one
     HTML — read-path-is-GUI, no GT). Split by id-attribute kind
@@ -97,8 +108,8 @@ def _capture_mobilegym_obs(adapters: dict, sid: str) -> dict[str, StepObservatio
     observations. Each app's ``dom_html`` is that app's rows only (so
     ``assert_obs_matches_state`` compares apples-to-apples vs the per-app
     ``read_canonical``); the compiler sees the per-app a11y + DOM."""
-    bridge_url = adapters["wechat"].base_url  # wechat + alipay share :3019
-    r = requests.get(f"{bridge_url}/{sid}", timeout=adapters["wechat"].timeout)
+    bridge_url = f"http://{host}:{BRIDGE_PORT}"  # wechat + alipay share :3019
+    r = requests.get(f"{bridge_url}/{sid}", timeout=10.0)
     r.raise_for_status()
     combined_dom = r.text
     typed = replay.parse_dom_entities_typed(combined_dom)
@@ -144,15 +155,16 @@ def _strip(v: Any) -> str:
     return " ".join(s.split()).lower()
 
 
-def _assert_mobilegym_obs_matches_state(adapters: dict, sid: str,
+def _assert_mobilegym_obs_matches_state(envs: dict, sid: str,
                                         obs: dict[str, StepObservation]) -> None:
     """Per-app live-state assert (replay_engine.assert_obs_matches_state's
-    MobileGym variant): the DOM-parsed entities must match ``read_canonical``
-    per app. Catches a stale/detached compiler input. Uses ``_mg_field_eq``
-    (local; the shared ``_field_eq`` has a falsy-0 trap on wechat n_messages)."""
+    MobileGym variant): the DOM-parsed entities must match the evaluation
+    plane's ``oracle_state`` per app. Catches a stale/detached compiler input.
+    Uses ``_mg_field_eq`` (local; the shared ``_field_eq`` has a falsy-0 trap
+    on wechat n_messages)."""
     mismatches: list[str] = []
-    for app, ad in adapters.items():
-        canonical = ad.read_canonical(sid)
+    for app, ad in envs.items():
+        canonical = ad.oracle_state(sid)
         canon_e = canonical["entities"]
         dom_e = replay.parse_dom_entities(obs[app].dom_html)
         if set(dom_e) != set(canon_e):
@@ -187,33 +199,35 @@ def _gt_task_binding(fixture) -> TaskBinding:
     return TaskBinding(task_id=fixture.task_id, variables=list(var_groups.values()))
 
 
-def run_round_trip_and_rollback(fixture, adapters: dict, *, sample_i: int) -> dict:
+def run_round_trip_and_rollback(fixture, adapters: dict, *, sample_i: int,
+                                host: str = "localhost") -> dict:
     """One sample of the write-happened + honest-irreversibility arc.
     reset+seed → capture obs → assert → GT binding → dispatch (real gestures)
     → check_round_trip (write-happened score) → undo_saga (honest 409) →
     check_rollback_fidelity (verifier independently confirms the message was
     NOT restored). Returns the per-sample record."""
     sid = f"{fixture.task_id}_mg_s{sample_i}_{int(time.time()*1000) % 100000}"
-    for ad in adapters.values():
-        ad.reset(sid)
-    replay.seed_apps(fixture, adapters, sid)
-    obs = _capture_mobilegym_obs(adapters, sid)
-    _assert_mobilegym_obs_matches_state(adapters, sid, obs)
+    envs = _mg_envs(sid, host)   # evaluation plane; adapters = runtime write plane
+    for env in envs.values():
+        env.reset(sid)
+    replay.seed_apps(fixture, envs, sid)
+    obs = _capture_mobilegym_obs(host, sid)
+    _assert_mobilegym_obs_matches_state(envs, sid, obs)
     tb = _gt_task_binding(fixture)
-    pre = cs.snapshot(adapters, sid)   # BEFORE dispatch (the state to restore)
+    pre = cs.snapshot(envs, sid)   # BEFORE dispatch (the state to restore)
     rlog = RollbackLog()
 
     # WRITE: dispatch the GT patch via real GUI gestures (bridge send_message).
     ops = compile_patch(fixture.user_edit, tb)
     dispatch_report = dispatch(ops, adapters, sid, broken=None, rollback_log=rlog)
-    post_dispatch = cs.snapshot(adapters, sid)
-    rt = check_round_trip(sid, fixture, adapters, pre)
+    post_dispatch = cs.snapshot(envs, sid)
+    rt = check_round_trip(sid, fixture, envs, pre)
 
     # ROLLBACK (honest irreversibility): undo the saga → 409 → partial_failure.
     saga_id = rlog.latest_saga_id()
     sres = rlog.undo_saga(saga_id, sid, adapters) if saga_id else None
-    post_undo = cs.snapshot(adapters, sid)
-    rf = (check_rollback_fidelity(pre, post_undo, adapters, sid, sres)
+    post_undo = cs.snapshot(envs, sid)
+    rf = (check_rollback_fidelity(pre, post_undo, envs, sid, sres)
           if sres is not None else None)
 
     # the message-still-there proof (no set_state backdoor delete on the 409):
@@ -249,25 +263,27 @@ def run_round_trip_and_rollback(fixture, adapters: dict, *, sample_i: int) -> di
         },
     }
     # cleanup
-    for ad in adapters.values():
-        ad.reset(sid)
+    for env in envs.values():
+        env.reset(sid)
     return rec
 
 
-def run_binding_discovery(fixture, adapters: dict, *, sample_i: int,
+def run_binding_discovery(fixture, *, sample_i: int,
                            model: str | None, cost_model: CostModel | None,
-                           temperature: float | None = None) -> dict:
+                           temperature: float | None = None,
+                           host: str = "localhost") -> dict:
     """task-4: a frontier model discovers the alipay→wechat binding from the
     RENDERED observation alone (no GT). Captures obs via the bridge's html_view
     (``GET /<sid>``, split per-app), builds a TraceFixture, calls
     ``compile_binding``, and scores the discovered binding vs GT
     (``binding_accuracy``). Diagnostic, NOT a gate."""
     sid = f"{fixture.task_id}_mg_bd_s{sample_i}_{int(time.time()*1000) % 100000}"
-    for ad in adapters.values():
-        ad.reset(sid)
-    replay.seed_apps(fixture, adapters, sid)
-    obs = _capture_mobilegym_obs(adapters, sid)
-    _assert_mobilegym_obs_matches_state(adapters, sid, obs)
+    envs = _mg_envs(sid, host)   # evaluation plane (no runtime writes here)
+    for env in envs.values():
+        env.reset(sid)
+    replay.seed_apps(fixture, envs, sid)
+    obs = _capture_mobilegym_obs(host, sid)
+    _assert_mobilegym_obs_matches_state(envs, sid, obs)
     observed_ids = {app: set(replay.parse_dom_entities(o.dom_html).keys())
                    for app, o in obs.items()}
     trace = TraceFixture(task_id=fixture.task_id, goal=fixture.goal, final_obs=obs)
@@ -280,8 +296,8 @@ def run_binding_discovery(fixture, adapters: dict, *, sample_i: int,
         # crash the whole kill-test — the core gate (round-trip + honest-
         # irreversibility + neg) is model-free. Report the binding-discovery
         # sample as model-unavailable, honestly.
-        for ad in adapters.values():
-            ad.reset(sid)
+        for env in envs.values():
+            env.reset(sid)
         return {
             "task_id": fixture.task_id, "sample": sample_i, "sid": sid,
             "model": model or model_client.TASKVM_DEFAULT_MODEL,
@@ -296,8 +312,8 @@ def run_binding_discovery(fixture, adapters: dict, *, sample_i: int,
     valid, bind_errs = (False, ["no binding parsed"]) if binding is None \
         else validate_binding(binding, observed_ids, fixture.task_id)
     bacc = binding_accuracy(binding, fixture) if binding else binding_accuracy(None, fixture)
-    for ad in adapters.values():
-        ad.reset(sid)
+    for env in envs.values():
+        env.reset(sid)
     return {
         "task_id": fixture.task_id, "sample": sample_i, "sid": sid,
         "model": model or model_client.TASKVM_DEFAULT_MODEL,
@@ -308,20 +324,22 @@ def run_binding_discovery(fixture, adapters: dict, *, sample_i: int,
     }
 
 
-def run_neg_control(fixture, adapters: dict, *, sample_i: int = 0) -> dict:
+def run_neg_control(fixture, adapters: dict, *, sample_i: int = 0,
+                    host: str = "localhost") -> dict:
     """Negative control: GT binding + broken (noop) dispatcher → MUST score
     ≤0.3. If it doesn't, the verifier is dishonest."""
     sid = f"{fixture.task_id}_mg_neg_{int(time.time()*1000) % 100000}"
-    for ad in adapters.values():
-        ad.reset(sid)
-    replay.seed_apps(fixture, adapters, sid)
+    envs = _mg_envs(sid, host)   # evaluation plane; adapters = runtime write plane
+    for env in envs.values():
+        env.reset(sid)
+    replay.seed_apps(fixture, envs, sid)
     tb = _gt_task_binding(fixture)
-    pre = cs.snapshot(adapters, sid)
+    pre = cs.snapshot(envs, sid)
     ops = compile_patch(fixture.user_edit, tb)
     dispatch_report = dispatch(ops, adapters, sid, broken="noop")
-    res = check_round_trip(sid, fixture, adapters, pre)
-    for ad in adapters.values():
-        ad.reset(sid)
+    res = check_round_trip(sid, fixture, envs, pre)
+    for env in envs.values():
+        env.reset(sid)
     return {
         "task_id": fixture.task_id, "neg_control": True, "broken": "noop",
         "sid": sid, "score": res.score,
@@ -425,18 +443,21 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s")
 
-    adapters = make_adapters(apps=MOBILEGYM_APPS, host=args.host)
+    # Agent B (substrate isolation): runtime WRITE adapters (GUI-only — the
+    # bridge operator routes wrap the injected CUA loop = real gestures) and
+    # the EVALUATION environments (reset/seed/oracle) are physically separate.
+    adapters = make_task_adapters(apps=MOBILEGYM_APPS, host=args.host)
     # health-check bridge + Vite (E8: a kill-test against unreachable services
     # is not honest — exit loudly, don't fabricate scores)
-    for app, ad in adapters.items():
+    for app, env in _mg_envs("healthcheck", args.host).items():
         try:
-            h = ad.health()
+            h = env.health()
             if h.get("status") != "ok":
                 logger.error(f"{app} (bridge) not healthy: {h}"); sys.exit(2)
         except Exception as e:
             logger.error(f"{app} (bridge :{BRIDGE_PORT}) not reachable: {e}\n"
                          f"  start the stack first: Vite (:3000) + bridge (:3019) "
-                         f"— see docs/HANDOFF_TaskVM.md / the demo runbook"); sys.exit(2)
+                         f"(demo runbook)"); sys.exit(2)
     try:
         r = requests.get(f"http://{args.host}:{VITE_PORT}", timeout=4)
         if r.status_code != 200:
@@ -450,7 +471,7 @@ def main(argv=None):
     ts = time.strftime("%Y%m%d_%H%M%S")
 
     if args.neg_control:
-        neg = run_neg_control(fixture, adapters)
+        neg = run_neg_control(fixture, adapters, host=args.host)
         out_path = Path(args.out) if args.out else EVAL_DIR / f"mobilegym_negcontrol_{ts}.json"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps([neg], ensure_ascii=False, indent=2))
@@ -463,22 +484,24 @@ def main(argv=None):
     rt_samples = []
     for i in range(args.samples):
         logger.info(f"--- sample {i+1}/{args.samples} (round-trip + rollback) ---")
-        s = run_round_trip_and_rollback(fixture, adapters, sample_i=i)
+        s = run_round_trip_and_rollback(fixture, adapters, sample_i=i,
+                                        host=args.host)
         logger.info(f"sample {i+1}: round_trip={s['round_trip']['score']} "
                     f"partial_failure={s['honest_irreversibility']['partial_failure']} "
                     f"fidelity={s['honest_irreversibility']['fidelity']} "
                     f"msg_still_there={s['honest_irreversibility']['message_still_there_post_undo']}")
         rt_samples.append(s)
-    neg = run_neg_control(fixture, adapters)
+    neg = run_neg_control(fixture, adapters, host=args.host)
     logger.info(f"[neg-control] score={neg['score']} → {'PASS' if neg['passed'] else 'FAIL'}")
 
     binding_samples = []
     if not args.no_binding_discovery:
         for i in range(args.samples):
             logger.info(f"--- sample {i+1}/{args.samples} (binding discovery) ---")
-            b = run_binding_discovery(fixture, adapters, sample_i=i,
+            b = run_binding_discovery(fixture, sample_i=i,
                                       model=args.model, cost_model=cost_model,
-                                      temperature=args.temperature)
+                                      temperature=args.temperature,
+                                      host=args.host)
             logger.info(f"binding sample {i+1}: compile_ok={b['compile_ok']} "
                         f"f1={b['binding_accuracy']['f1']} "
                         f"f1_triples={b['binding_accuracy']['f1_triples']}")

@@ -2631,3 +2631,47 @@ Oracle 按 layered_ownership_protocol §4 严审 v5：§4.1-§4.10/§4.13-§4.15
 ### 五、下一里程碑
 
 Agent D/E：projection/runtime 接线（taskvm/projection、taskvm/runtime 两模块解封），把 GovernanceService.bootstrap 接到 workspace_ui 真实入口；Oracle 评审本轮 diff 后 Kernel contract frozen（E28 前提条件已满足）。
+
+
+## E30 — Wave-B 收尾：MobileGym 脚本双 plane 迁移 + executor 后门旋钮根除 + port 按名路由
+
+**日期**：2026-08-15 · **Agent**：B（substrate isolation）· **状态**：完成，211 passed / 1 skipped
+
+### 一、背景与任务
+
+E29 提交（3197a03）后残留三块：(1) 三个 MobileGym killtest 脚本仍 import 已删除的 `taskvm.harness.state_adapter`（import 即炸）；(2) `workspace_ui/server.py` 的 CLI 仍带 `--executor` 后门旋钮（`choices=["api","gui_agent"]`）；(3) `gui_driver.py` 直连 `taskvm.substrate.builtin_web.launcher`（上层→实现导入，违反 AC3）。
+
+### 二、改动清单
+
+1. `run_mobilegym_killtest.py`（22 处编辑）：删 harness.state_adapter import；新增 `_mg_envs(sid, host)` 工厂（`MobileGymEvaluationEnvironment` per app）；reset/seed/`cs.snapshot`/`check_round_trip`/`check_rollback_fidelity`/obs-assert 全部走 `envs`（评测面），`dispatch`/`undo_saga` 走 `adapters`（运行时写面，`make_task_adapters`）——两平面在同一函数内物理分离、变量名可辨。
+2. `run_mg_vm_killtest.py` + `run_x_toggle_killtest.py`（委派子代理，我逐行复核 diff）：raw `requests.post` 写操作 → `MobileGymTaskAdapter.mutate_raw`（返回 `(status, body)`，409/500 诚实记录）；reset/seed/读状态 → `MobileGymEvaluationEnvironment`；`snap_fn` 适配 `oracle_state` 的 `{"entities": {row_id: row}}` 形状（wechat_chats 列表 → entities dict，peer_wxid 键保留）；governance 驱动 import → tests.fakes。复核时修一处注释措辞（说 "env.set_state" 但代码是 reset/seed）。
+3. `workspace_ui/server.py`：删 `--executor` argparse 旋钮 + `CLI_EXECUTOR` 全局 + "LEGACY BACKDOOR PATH" 警告分支；**修 main() 双 bug**（E29 把 `_get_fixture_and_adapters` 改成三元组返回且删了 executor 参数，但 main() 仍在传 `executor=args.executor`（TypeError）并按二元组解包（ValueError）——demo CLI 入口当时是坏的，"210 绿"没覆盖它）；健康检查改走评测环境 `env.health()`（GUITaskAdapter 无 health 方法）；两处实现导入 → `evaluation_registry.create` 按名路由 + `mobilegym_bridge_url(host)`（注意 MobileGym provider 配置键是 `bridge_url` 不是 `host`——`host` 会被静默忽略，host≠localhost 部署会静默连错）。
+4. `taskvm/substrate/__init__.py`：port 新增两个名字路由组合助手 `builtin_web_app_url(app, host)` / `mobilegym_bridge_url(host)`（lazy import 实现发生在 substrate 包内部——substrate 可以 import 自己）。端口表知识从 execution 层连根移除。
+5. `gui_driver.py`：删 `DEFAULT_PORTS` 表 + `builtin_web.launcher` 直连 import → port 路由；`make_task_adapters` 内改用 `builtin_web_app_url` / `mobilegym_bridge_url`。
+6. `workflow_executor.py`：docstring 去 api-executor 叙述（改为 "There is NO api executor and NO set_state — Agent B/E7/§12.16"）。
+7. `tests/test_imports.py`：`test_gui_driver_operator_tables` 的 `DEFAULT_PORTS["wechat"]==3019` 断言 → 断言 execution 层**没有**端口表（`not hasattr(gd, "DEFAULT_PORTS")`）+ port 路由函数返回正确 URL。
+
+### 三、关键纠错（E30 教训）
+
+1. **验收 grep 的变体枚举**：AC1 首轮用 `executor="api"` 字面量 grep 报"零命中"是**假阴性**——argparse 的 `choices=["api", "gui_agent"]` 不含该字面量。第二轮枚举 `--executor|executor=api|CLI_EXECUTOR` 才抓到。负面断言（"不存在 X"）必须枚举 X 的全部语法变体，或改用 AST 扫描。
+2. **"N 绿"不等于入口可用**：E29 的 210 绿完全没覆盖 `python -m taskvm.workspace_ui.server` 的 main() 路径——函数签名变了 main() 没跟着变，CI 全绿而 demo 一启动就 TypeError。CLI 入口至少要一条 import+arg-parse 冒烟测试。
+3. **边界 gate 的覆盖空洞**：`tests/architecture/test_import_boundaries.py` 只检查 `_RULES` 登记的新核目录，legacy `execution/`、`workspace_ui/` 不在范围，`gui_driver.py:34` 的实现导入漏网。修复不是扩 gate（legacy 终将退役）而是让上层没有理由导入实现——port 名字路由让 URL/端口知识只在 substrate 内。
+4. **config dict 键静默忽略**：`MobileGymEvaluationProvider.create` 只认 app/sid/bridge_url/timeout，传 `host` 不报错但被忽略。跨层 config 无 schema 校验时调用方必须核对实现端键名（本次以 `mobilegym_bridge_url(host)` 在 port 层封装掉）。
+5. **多 agent 提交纪律**（用户指令固化）：工作区混有其他 agent 进行中的修改（architect/* 4 文件、verifier/__init__.py 属 Agent E）——commit 只 add 自己本会话修改的文件，绝不 `git add -A`。
+
+### 四、验收证据（grep 于 2026-08-15，可复跑）
+
+- AC1 `grep -rn "executor=\"api\"|--executor|CLI_EXECUTOR" taskvm/ --include="*.py"` → 仅剩 server.py 的删除说明注释，无活代码；
+- AC 写路径 `grep -rn "requests\.post" taskvm/ --include="*.py"`（排除 substrate/evaluation/harness）→ 仅 gui_driver.py 的 MobileGymTaskAdapter 对 bridge operator 路由调用（bridge 进程内执行注入的 CUA 真手势，是文档化 GUI 写路径的传输层）与 docstring 提及；
+- AC3 `grep -rn "from taskvm.substrate.(builtin_web|mobilegym|osworld)" taskvm/`（排除 substrate/、evaluation/）→ **零命中**；
+- AC5 `grep -rn "substrate ==|substrate_name ==|if substrate"` → 仅评测脚本输出字符串；
+- 全量 `pytest tests/ -q` → **211 passed, 1 skipped**（+1 来自其他 agent 解封 taskvm/runtime 使 future-wave gate 转正）。
+
+### 五、证明了什么 / 没证明什么
+
+证明：运行时源码中 API 写执行器（`--executor api` 旋钮、`executor="api"`、app Flask 直写、DB snapshot 恢复、GUI 失败回落 API）全部不存在；上层对 substrate 实现子树零导入（URL/端口知识收敛到 port 名字路由）；三个 MobileGym killtest 脚本 import 即用双 plane 架构；workspace_ui demo CLI 入口 import 冒烟可用。
+没证明：(1) 三个 killtest 的端到端实跑（需 bridge:3019 + Vite:3000 + 模型在线，本次只做 import/compile/守护测试层验证）；(2) `mobilegym_bridge_url` 在 TASKVM_MOBILEGYM_PORT 环境变量路径下的实机行为（单测断言默认值）；(3) legacy execution//workspace_ui/ 目录自身的 AST 边界 gate（仍不在 _RULES，靠 grep 验收）。
+
+### 六、下一里程碑
+
+Agent D/E：taskvm/projection + taskvm/runtime 接线到 workspace_ui 真实入口（/start 的 honest-fail → 真 bootstrap）；Agent F：legacy oracle verifier 从 taskvm/verifier 迁 evaluation/；本波 grep 验收固化为守护测试（防 AC1 类假阴性复发）。

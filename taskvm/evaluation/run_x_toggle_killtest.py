@@ -109,9 +109,9 @@ def _run_one_toggle(host: str, sid: str, post_id: str, operator: str,
     skipping the inline f-string. When False (default), the bridge builds its
     own f-string (unchanged — zero regression).
     """
-    url = f"http://{host}:{BRIDGE_PORT}/api/x/{sid}/{post_id}"
-    payload = {"operator": operator, "value": True,
-               "verify_mode": "any_new"}  # E17-A Option B
+    # Agent B (substrate isolation): raw bridge write POSTs moved behind
+    # MobileGymTaskAdapter (bridge routes wrap the injected CUA loop = real gestures).
+    payload_extra = {"verify_mode": "any_new"}  # E17-A Option B
     instruction_override = None
     driver_nl = None
     if use_driver:
@@ -119,8 +119,10 @@ def _run_one_toggle(host: str, sid: str, post_id: str, operator: str,
         # it through GovernanceInterpreter to get the subgoal NL. This is the
         # de-segmentation: the instruction comes from the governance layer's
         # interpretation of a user-behavior event, not a hardcoded f-string.
-        from taskvm.governance.scripted_driver import ScriptedUserDriver
-        from taskvm.governance.governance_interpreter import GovernanceInterpreter
+        # (Agent C role collapse: the drivers now live in tests/fakes.)
+        from tests.fakes.scripted_driver import ScriptedUserDriver
+        from tests.fakes.governance_interpreter import GovernanceInterpreter
+        from tests.fakes.user_behavior_driver import UserBehaviorEvent
         from taskvm.governance.vm_state import VMStateSnapshot
         from taskvm.execution.rollback import RollbackLog
         from taskvm.benchmark.mobilegym_fixtures import MORNING_BRIEF_POST_ID
@@ -135,20 +137,22 @@ def _run_one_toggle(host: str, sid: str, post_id: str, operator: str,
                                       "operator": operator}]}])
         vm_state = VMStateSnapshot(
             sid=sid, binding=binding, adapters={}, rollback_log=RollbackLog())
-        ev = __import__("taskvm.governance.user_behavior_driver",
-                        fromlist=["UserBehaviorEvent"]).UserBehaviorEvent(
+        ev = UserBehaviorEvent(
             "edit_field", {"var_id": "x_toggle", "new_value": True})
         subgoals = GovernanceInterpreter().interpret(ev, vm_state)
         if subgoals:
             instruction_override = subgoals[0].natural_language
             driver_nl = instruction_override
-            payload["instruction_override"] = instruction_override
+            payload_extra["instruction_override"] = instruction_override
     t0 = time.time()
     try:
-        r = requests.post(url, json=payload, timeout=180)
+        from taskvm.execution.gui_driver import MobileGymTaskAdapter
+        status, body = MobileGymTaskAdapter(
+            "x", bridge_url=f"http://{host}:{BRIDGE_PORT}").mutate_raw(
+            sid, post_id, operator, True, payload_extra=payload_extra)
         elapsed = round(time.time() - t0, 1)
-        if r.status_code == 200:
-            d = r.json()
+        if status == 200 and isinstance(body, dict):
+            d = body
             trace = d.get("trace", {})
             return {
                 "post_id": post_id,             # the requested (session-label) post
@@ -168,19 +172,18 @@ def _run_one_toggle(host: str, sid: str, post_id: str, operator: str,
             }
         else:
             # HTTP 500 = the toggle didn't land (bridge RuntimeError) or
-            # the model didn't finish in max_steps
-            try:
-                err_body = r.json()
-                err_msg = str(err_body.get("detail", err_body))[:300]
-            except Exception:
-                err_msg = r.text[:300]
+            # the model didn't finish in max_steps; 409 = honest irreversible
+            if isinstance(body, dict):
+                err_msg = str(body.get("detail", body))[:300]
+            else:
+                err_msg = str(body)[:300]
             return {
                 "post_id": post_id,
                 "toggled_post_id": None,
                 "before_count": None,
                 "after_count": None,
                 "operator": operator,
-                "http_status": r.status_code,
+                "http_status": status,
                 "success": False,
                 "elapsed_s": elapsed,
                 "steps": None,
@@ -246,10 +249,14 @@ def main(argv=None):
             for operator in args.operators:
                 sid = f"xkill_{sample_i}_{post_id}_{operator}_{int(time.time()) % 100000}"
                 # reset the sim for each test (clean state)
+                # Agent B (substrate isolation): reset moved behind the
+                # MobileGymEvaluationEnvironment (setup plane, not a write).
                 try:
-                    requests.post(
-                        f"http://{args.host}:{BRIDGE_PORT}/api/reset/{sid}",
-                        timeout=30)
+                    from taskvm.substrate.mobilegym.evaluation import (
+                        MobileGymEvaluationEnvironment)
+                    MobileGymEvaluationEnvironment(
+                        "x", sid, f"http://{args.host}:{BRIDGE_PORT}",
+                        timeout=30).reset(sid)
                 except Exception:
                     pass
                 logger.info(f"  {operator} on {post_id} ...")

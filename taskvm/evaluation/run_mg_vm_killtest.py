@@ -143,27 +143,42 @@ def _health_check(host: str) -> bool:
 
 
 def _reset_and_seed(host: str, sid: str, seed_state: dict) -> None:
-    """Reset the bridge session and seed the task state."""
-    requests.post(f"http://{host}:{BRIDGE_PORT}/api/reset/{sid}", timeout=30)
-    requests.post(f"http://{host}:{BRIDGE_PORT}/api/inject_task/{sid}",
-                  json={"task_id": None, "goal": "", "seed_state": seed_state},
-                  timeout=30)
+    """Reset the bridge session and seed the task state (setup plane)."""
+    from taskvm.substrate.mobilegym.evaluation import (
+        MobileGymEvaluationEnvironment)
+    # Agent B (substrate isolation): reset/seed moved behind the
+    # MobileGymEvaluationEnvironment (setup-only exam-room power —
+    # never reachable from the runtime session).
+    env = MobileGymEvaluationEnvironment("wechat", sid,
+                                         f"http://{host}:{BRIDGE_PORT}",
+                                         timeout=30)
+    env.reset(sid)
+    env.seed(sid, task_id=None, goal="", seed_state=seed_state)
 
 
 def _read_wechat(host: str, sid: str) -> dict:
-    """Read wechat chats via bridge (real app state, not GT)."""
-    r = requests.get(f"http://{host}:{BRIDGE_PORT}/api/wechat_chats/{sid}",
-                     timeout=20)
-    r.raise_for_status()
-    return r.json()
+    """Read wechat chats via the evaluation plane (real app state, not GT).
+
+    Returns the oracle entity map ``{"entities": {row_id: row}}`` — each
+    row carries id/peer_wxid/peer_name/n_messages/messages (see
+    ``bridge._flatten_wechat_chats``); ``row_id`` is the chat's ``id``."""
+    from taskvm.substrate.mobilegym.evaluation import (
+        MobileGymEvaluationEnvironment)
+    env = MobileGymEvaluationEnvironment("wechat", sid,
+                                         f"http://{host}:{BRIDGE_PORT}",
+                                         timeout=20)
+    return env.oracle_state(sid)
 
 
 def _read_x_state(host: str, sid: str) -> dict:
-    """Read X toggle lists via bridge (real app state, not GT)."""
-    r = requests.get(f"http://{host}:{BRIDGE_PORT}/api/x_state/{sid}",
-                     timeout=20)
-    r.raise_for_status()
-    return r.json()
+    """Read X toggle lists via the evaluation plane (real app state, not
+    GT). Same shape as the raw bridge GET (liked/retweeted/bookmarked ids)."""
+    from taskvm.substrate.mobilegym.evaluation import (
+        MobileGymEvaluationEnvironment)
+    env = MobileGymEvaluationEnvironment("x", sid,
+                                         f"http://{host}:{BRIDGE_PORT}",
+                                         timeout=20)
+    return env.x_state(sid)
 
 
 def _build_adapters_snap_fn(host: str):
@@ -176,17 +191,19 @@ def _build_adapters_snap_fn(host: str):
     """
     def snap_fn(sid: str) -> dict:
         result: dict[str, dict] = {}
-        # wechat
+        # wechat — oracle_state returns {"entities": {row_id: row}} keyed
+        # by the chat's internal id; snap_fn keeps keying by peer_wxid with
+        # id fallback (same output shape as the old wechat_chats list walk)
         try:
             wc = _read_wechat(host, sid)
             wc_entities: dict[str, dict] = {}
-            for chat in (wc.get("wechat_chats") or []):
-                wxid = chat.get("peer_wxid") or chat.get("id")
+            for row_id, row in (wc.get("entities") or {}).items():
+                wxid = row.get("peer_wxid") or row_id
                 if wxid:
                     wc_entities[wxid] = {
-                        "messages": chat.get("messages", ""),
-                        "n_messages": chat.get("n_messages", 0),
-                        "peer_name": chat.get("peer_name", ""),
+                        "messages": row.get("messages", ""),
+                        "n_messages": row.get("n_messages", 0),
+                        "peer_name": row.get("peer_name", ""),
                     }
             result["wechat"] = {"entities": wc_entities}
         except Exception as e:
@@ -303,31 +320,31 @@ def _execute_subgoal(subgoal, host: str, sid: str,
                 operator = op.operator
                 value = op.value
                 t0 = time.time()
-                if app == "wechat":
-                    url = f"http://{host}:{BRIDGE_PORT}/api/wechat/{sid}/{eid}"
-                    payload = {"operator": operator, "value": value}
-                    if subgoal.natural_language:
-                        payload["instruction_override"] = subgoal.natural_language
-                    r = requests.post(url, json=payload, timeout=180)
-                elif app == "x":
-                    url = f"http://{host}:{BRIDGE_PORT}/api/x/{sid}/{eid}"
-                    payload = {"operator": operator, "value": value,
-                               "verify_mode": "specific"}
-                    if subgoal.natural_language:
-                        payload["instruction_override"] = subgoal.natural_language
-                    r = requests.post(url, json=payload, timeout=180)
-                else:
+                if app not in ("wechat", "x"):
                     rec["error"] = f"unsupported app {app!r} in mg killtest"
                     return rec
+                # Agent B (substrate isolation): raw bridge write POSTs moved
+                # behind MobileGymTaskAdapter (bridge routes wrap the
+                # injected CUA loop = real gestures).
+                from taskvm.execution.gui_driver import MobileGymTaskAdapter
+                payload_extra: dict = {}
+                if subgoal.natural_language:
+                    payload_extra["instruction_override"] = subgoal.natural_language
+                if app == "x":
+                    payload_extra["verify_mode"] = "specific"
+                adapter = MobileGymTaskAdapter(
+                    app, bridge_url=f"http://{host}:{BRIDGE_PORT}")
+                status, body = adapter.mutate_raw(
+                    sid, eid, operator, value,
+                    payload_extra=payload_extra or None)
                 elapsed = round(time.time() - t0, 1)
                 http_rec: dict[str, Any] = {
                     "app": app, "eid": eid, "operator": operator,
-                    "http_status": r.status_code,
+                    "http_status": status,
                     "elapsed_s": elapsed,
-                    "ok": r.status_code == 200,
+                    "ok": status == 200,
                 }
-                if r.status_code == 200:
-                    body = r.json()
+                if status == 200 and isinstance(body, dict):
                     http_rec["response"] = {k: v for k, v in body.items()
                                             if k != "trace"}
                     # record in rollback log for undo_saga
@@ -348,12 +365,13 @@ def _execute_subgoal(subgoal, host: str, sid: str,
                     http_rec["saga_id"] = saga_id
                     http_rec["steps"] = trace.get("steps")
                 else:
-                    try:
-                        err_body = r.json()
+                    # honest failure body (409 irreversible / 500 loop-
+                    # exhausted) — recorded, never masked
+                    if isinstance(body, dict):
                         http_rec["error"] = str(
-                            err_body.get("detail", err_body))[:300]
-                    except Exception:
-                        http_rec["error"] = r.text[:300]
+                            body.get("detail", body))[:300]
+                    else:
+                        http_rec["error"] = str(body)[:300]
                 rec["http_results"].append(http_rec)
             # Check all ops succeeded
             all_ok = all(h["ok"] for h in rec["http_results"])
@@ -543,41 +561,53 @@ def run_one_sample(task_id: str, host: str, sample_i: int,
 
 
 def _build_bridge_adapters(host: str, sid: str) -> dict:
-    """Build thin HTTP-wrapper adapters for undo_saga (wechat + x).
+    """Build thin adapters for undo_saga (wechat + x).
 
     undo_saga calls ad.mutate(sid, eid, operator, value). For wechat, the
     'undo' value is the 'old' field from the CompensationRecord (which is
     'msg:<id>' — see bridge mutate_wechat). For x, value=False triggers the
     rollback path (OUTLINE target state)."""
+    from taskvm.execution.gui_driver import MobileGymTaskAdapter
+    from taskvm.substrate.mobilegym.evaluation import (
+        MobileGymEvaluationEnvironment)
+    bridge_url = f"http://{host}:{BRIDGE_PORT}"
+
     class _BridgeAdapter:
         def __init__(self, app: str):
             self.app = app
-            self.base_url = f"http://{host}:{BRIDGE_PORT}"
+            self._writer = MobileGymTaskAdapter(app, bridge_url=bridge_url)
+            self._env = MobileGymEvaluationEnvironment(
+                app, sid, bridge_url, timeout=30)
 
         def mutate(self, sid: str, eid: str, operator: str, value: Any) -> dict:
-            url = f"{self.base_url}/api/{self.app}/{sid}/{eid}"
-            payload = {"operator": operator, "value": value}
-            r = requests.post(url, json=payload, timeout=180)
-            if r.status_code == 200:
-                return r.json()
-            if r.status_code == 409:
+            # Agent B (substrate isolation): raw bridge write POSTs moved
+            # behind MobileGymTaskAdapter (bridge routes wrap the injected
+            # CUA loop = real gestures). Non-200 raises (undo_saga catches
+            # Exception → honest partial_failure) — same contract as the
+            # old requests.exceptions.HTTPError on 409.
+            status, body = self._writer.mutate_raw(sid, eid, operator, value)
+            detail = (body.get("detail", body) if isinstance(body, dict)
+                      else body)
+            if status == 200 and isinstance(body, dict):
+                return body
+            if status == 409:
                 # honest 409 — raise so undo_saga marks partial_failure
-                raise requests.exceptions.HTTPError(
-                    f"409 Conflict: {r.text[:200]}", response=r)
-            raise RuntimeError(f"{self.app}.mutate HTTP {r.status_code}: "
-                               f"{r.text[:200]}")
+                raise RuntimeError(f"409 Conflict: {str(detail)[:200]}")
+            raise RuntimeError(f"{self.app}.mutate HTTP {status}: "
+                               f"{str(detail)[:200]}")
 
         def read_canonical(self, sid: str) -> dict:
             # not used by undo_saga, but required by StateAdapter contract
             return {"entities": {}}
 
         def health(self) -> dict:
-            r = requests.get(f"{self.base_url}/health", timeout=5)
+            # health check is not a write path — plain GET stays
+            r = requests.get(f"{bridge_url}/health", timeout=5)
             return r.json() if r.status_code == 200 else {"status": "error"}
 
         def reset(self, sid: str) -> dict:
-            r = requests.post(f"{self.base_url}/api/reset/{sid}", timeout=30)
-            return r.json() if r.status_code == 200 else {}
+            # setup plane (evaluation environment), not a runtime write
+            return self._env.reset(sid)
 
     return {
         "wechat": _BridgeAdapter("wechat"),

@@ -55,13 +55,23 @@ def test_gui_driver_write_plane():
 
 
 def test_gui_driver_operator_tables():
-    """The per-app operator tables migrated from legacy substrate/base.py."""
-    from taskvm.execution.gui_driver import _OP_FIELD, _ENTITY_KIND, DEFAULT_PORTS
+    """The per-app operator tables migrated from legacy substrate/base.py.
+
+    Agent B (substrate isolation): ``DEFAULT_PORTS`` no longer lives in the
+    execution layer — URL/port resolution is name-routed through the
+    substrate port (``builtin_web_app_url`` / ``mobilegym_bridge_url``),
+    so upper layers never learn ports."""
+    from taskvm.execution.gui_driver import _OP_FIELD, _ENTITY_KIND
     assert set(_OP_FIELD) == {"calendar", "taskboard", "drive", "mail",
                               "outlook_cal"}
     assert _OP_FIELD["taskboard"]["set_assignee"] == "assignee"
-    assert DEFAULT_PORTS["wechat"] == 3019
     assert _ENTITY_KIND["calendar"] == "event"
+    import taskvm.execution.gui_driver as gd
+    assert not hasattr(gd, "DEFAULT_PORTS"), \
+        "port table must not live in the execution layer (port routes by name)"
+    from taskvm.substrate import builtin_web_app_url, mobilegym_bridge_url
+    assert builtin_web_app_url("calendar") == "http://localhost:3013"
+    assert mobilegym_bridge_url() == "http://localhost:3019"
 
 
 def test_evaluation_environments_read_plane():

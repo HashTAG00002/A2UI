@@ -47,12 +47,7 @@ from taskvm.execution.patch_compiler import compile_patch
 from taskvm.execution.rollback import RollbackLog, SagaResult
 from taskvm.harness import replay_engine as replay
 from taskvm.execution.gui_driver import make_task_adapters
-from taskvm.substrate.builtin_web.evaluation import (
-    make_evaluation_environments,
-)
-from taskvm.substrate.mobilegym.evaluation import (
-    make_mobilegym_environments,
-)
+from taskvm.substrate import evaluation_registry, mobilegym_bridge_url
 from taskvm.task_state.entity_binding import TaskBinding
 from taskvm.workspace_ui.editable_components import (
     checkpoint_button_html, conflict_row_html, editable_field_html,
@@ -330,7 +325,6 @@ _PAGE_TPL = """\
 # screen). Set via ``--sim-url`` at startup (mobilegym demo only).
 SIM_URL: str = ""
 CLI_TASK: str = "doc_handoff"
-CLI_EXECUTOR: str = "gui_agent"   # Agent B: legacy knob, inert (GUI-only now)
 
 
 def _genui_rw_zone_html(sess: WorkspaceSession,
@@ -606,8 +600,10 @@ def _get_fixture_and_adapters(task_id: str, host: str = "localhost"):
         from taskvm.benchmark.mobilegym_fixtures import get_mobilegym_task
         return (get_mobilegym_task(task_id),
                 make_task_adapters(apps=["wechat", "alipay"], host=host),
-                make_mobilegym_environments(["wechat", "alipay"], sid="",
-                                            host=host))
+                {a: evaluation_registry.create(
+                    "mobilegym", {"app": a, "sid": "",
+                                  "bridge_url": mobilegym_bridge_url(host)})
+                 for a in ("wechat", "alipay")})
     from taskvm.benchmark.fixtures import get_task
     fixture = get_task(task_id)
     # FF.1 (honest pre-existing-fix): build the adapter set from the TASK's
@@ -622,7 +618,8 @@ def _get_fixture_and_adapters(task_id: str, host: str = "localhost"):
                   | {b.app for b in fixture.bindings})
     return (fixture,
             make_task_adapters(apps=apps, host=host),
-            make_evaluation_environments(apps, host=host))
+            {a: evaluation_registry.create(
+                "builtin_web", {"app": a, "host": host}) for a in apps})
 
 
 # ── routes ───────────────────────────────────────────────────────────────────
@@ -1262,13 +1259,6 @@ def main(argv=None):
                              "MobileGym demo: top3_expense_to_wechat")
     parser.add_argument("--app-host", default="localhost",
                         help="host the apps run on (localhost or a docker service name)")
-    parser.add_argument("--executor", default="gui_agent",
-                        choices=["api", "gui_agent"],
-                        help="EE.1 (§12.16 backdoor fix): write/rollback executor. "
-                             "Default 'gui_agent' — non-invasive real browser gestures "
-                             "via the GUI executor (the honest write path). Use 'api' "
-                             "ONLY for the legacy mock/debug path (requests.post to the "
-                             "app's internal Flask API = the backdoor, not for demo).")
     parser.add_argument("--sim-url", default="",
                         help="MobileGym sim URL for the split-screen phone iframe "
                              "(mobilegym demo only; e.g. http://localhost:3000)")
@@ -1292,31 +1282,26 @@ def main(argv=None):
                         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s")
     global SIM_URL
     SIM_URL = args.sim_url
-    global CLI_TASK, CLI_EXECUTOR
+    global CLI_TASK
     CLI_TASK = args.task
-    CLI_EXECUTOR = args.executor
-    fixture, adapters = _get_fixture_and_adapters(args.task, args.app_host,
-                                                  executor=args.executor)
-    # EE.1: log the executor so it's never silently on the backdoor path. When
-    # 'api' is chosen, warn loudly (§12.16: API writes are backdoors, not demo).
-    if args.executor == "api":
-        logger.warning("executor=api — LEGACY BACKDOOR PATH (requests.post to the "
-                       "app's internal Flask API). NOT §12.16-compliant. Use only "
-                       "for mock/debug. Demo must run with --executor gui_agent.")
-    else:
-        logger.info("executor=gui_agent — write/rollback drives a real browser "
-                    "(non-invasive gestures, §12.16-compliant).")
+    # Agent B (substrate isolation): the --executor knob is DELETED — the API
+    # write path (requests.post to the apps' Flask APIs) no longer exists.
+    # Every write/rollback drives real GUI gestures; seeds/oracle go through
+    # the physically separate evaluation environments (the exam room).
+    fixture, adapters, oracle = _get_fixture_and_adapters(args.task, args.app_host)
+    logger.info("runtime is GUI-only (Agent B): writes via real gestures; "
+                "reset/seed/oracle via the evaluation plane")
     # health-check the apps (warn, don't crash — a demo can start before apps)
-    for name, ad in adapters.items():
+    for name, env in oracle.items():
         try:
-            h = ad.health()
+            h = env.health()
             if h.get("status") != "ok":
                 logger.error(f"{name} not healthy: {h}")
         except Exception as e:
-            logger.warning(f"{name} not reachable @ {ad.base_url}: {e} "
+            logger.warning(f"{name} not reachable: {e} "
                            f"(start the apps first: python -m taskvm.apps.{name}.app "
                            f"or the mobilegym bridge on :3019)")
-    sess = seed_session(fixture, adapters, host=args.app_host)
+    sess = seed_session(fixture, adapters, oracle=oracle, host=args.app_host)
     sess.use_genui = args.use_genui   # EE.7: default on (--no-genui to disable)
     if args.ws:
         # create the per-sid inbound event queue for HumanWebSocketDriver

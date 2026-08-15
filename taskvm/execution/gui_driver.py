@@ -29,9 +29,10 @@ from typing import Any, Callable
 from taskvm.substrate import (
     GuiAction,
     SubstrateSession,
+    builtin_web_app_url,
+    mobilegym_bridge_url,
     substrate_registry,
 )
-from taskvm.substrate.builtin_web.launcher import app_url
 
 logger = logging.getLogger(__name__)
 
@@ -212,11 +213,6 @@ _ENTITY_KIND: dict[str, str] = {
 _WEB_APPS = ("calendar", "taskboard", "drive", "mail", "outlook_cal")
 _MOBILEGYM_APPS = ("wechat", "alipay", "x")
 
-DEFAULT_PORTS = {"calendar": 3013, "taskboard": 3014, "drive": 3015,
-                 "mail": 3017, "outlook_cal": 3018,
-                 "wechat": 3019, "alipay": 3019, "x": 3019}
-
-
 def make_task_adapters(apps: list[str] | None = None, *,
                        host: str = "localhost",
                        screenshot_dir: str | None = None,
@@ -233,12 +229,12 @@ def make_task_adapters(apps: list[str] | None = None, *,
     for a in apps:
         if a in _WEB_APPS:
             out[a] = GUITaskAdapter(
-                app=a, base_url=app_url(a, host=host),
+                app=a, base_url=builtin_web_app_url(a, host=host),
                 screenshot_dir=screenshot_dir,
                 grounding_backend=grounding_backend,
                 anchor_lookup=anchor_lookup)
         elif a in _MOBILEGYM_APPS:
-            url = mobilegym_url or f"http://{host}:{DEFAULT_PORTS[a]}"
+            url = mobilegym_url or mobilegym_bridge_url(host)
             out[a] = MobileGymTaskAdapter(app=a, bridge_url=url)
         else:
             raise ValueError(f"unknown app {a!r}; known: web={_WEB_APPS} "

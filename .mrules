@@ -68,6 +68,7 @@
 | **E27** | Wave-A.5 Kernel 瘦身（v5）：内容校验全部下放 domain 构造器+typed result（TaskArchitecture/VerificationResult/CompensationResult/ObservationBatch、ID namespace、deepcopy 瘦身）；probe 实证并补齐 3 处 doc-vs-code 缺口（pending-comp gate、COMPLETE 截断、PARTIAL disposition）；145 全绿；≤600 行指标与冻结范围不兼容，诚实挂起并登记 RFC-001 | L2487-2543 |
 | **E28** | v5 rollback closure（Oracle 收敛审计 3 组修复）：不可逆存留不再虚假 COMPLETE（诚实 PARTIAL）、COMPLETE 恢复全部 checkpoint desired+确定性 retarget 幸存未来合同+重置 rewind 的 loop counter、跨结构恢复变量 observed=unknown 不伪造现实；5 新测试先红后绿 + 2 旧测试语义迁移；187 全绿；RFC-001 裁决落盘（≤600 废止为 soft diagnostic）；Kernel contract 冻结前置条件全部满足 | L2547-2596 |
 | **E29** | Wave-B/C 落地（底座隔离+角色合并）：taskvm/architect 七模块（State Compiler fast/slow + TaskArchitect 一次调用 + CUA 序列化 + ModelCallLedger 计量 + no-leak）+ GovernanceService 六事件路由（LocalPatch 0 调用 / GoalPatch 恰 1 次 / Rollback 纯历史驱动）；旧 governance 角色全迁 tests/fakes；关键纠错：GoalPatch 历史闭包不再携带已作废 lane（否则 split-brain 误报）+ architect 首道校验补 exempt_node_ids（与 kernel 同源豁免）；4 个旧 killtest 脚本迁移双 plane；28 failed→**210 passed / 2 skipped** | L2598-2633 |
+| **E30** | Wave-B 收尾：三个 MobileGym killtest 脚本双 plane 迁移（写走 MobileGymTaskAdapter.mutate_raw / reset-seed-oracle 走 MobileGymEvaluationEnvironment）+ workspace_ui 删 --executor 后门旋钮并修 main() 双 bug（executor= 传参 + 二元组解包三元组，demo 入口当时是坏的）+ gui_driver 端口知识下放 port 按名路由（builtin_web_app_url/mobilegym_bridge_url，DEFAULT_PORTS 移出 execution 层）；验收 grep 全净（无 executor=api / 上层零实现导入）；关键纠错：字面量 grep 假阴性漏 argparse choices 形式、"N 绿≠入口可用"、config 键静默忽略（bridge_url vs host）；**211 passed / 1 skipped**；多 agent 提交纪律固化（只 add 自己的文件） | L2636-2677 |
 
 ---
 
@@ -85,4 +86,4 @@
 10. **内部信息零暴露**：entity_id / data-\* / get_state 产物 / 深链 URL / operator 黑话全禁进模型输入（E16/E21/E22）——泄露的总源头在渲染层，不能只在"最后一环"堵。
 
 ---
-*本文件最后更新：2026-08-15（Wave-B/C / E29：Agent B 底座隔离 + Agent C 角色合并落地，taskvm/architect + governance service 在位，210 测试全绿；关键纠错：GoalPatch 历史闭包丢弃未提交 lane + exempt_node_ids 与 kernel 同源；下一里程碑：Agent D/E 解封 taskvm/projection、taskvm/runtime 并把 bootstrap 接到 workspace_ui 真实入口）。下一次更新时在此修改日期并在 Episode 表格追加新行。*
+*本文件最后更新：2026-08-15（Wave-B 收尾 / E30：Agent B 三个 MobileGym killtest 双 plane 迁移 + executor 后门旋钮根除 + port 按名路由，211 测试全绿；下一里程碑：Agent D/E 把 bootstrap 接到 workspace_ui 真实入口 + 本波 grep 验收固化守护测试）。下一次更新时在此修改日期并在 Episode 表格追加新行。*

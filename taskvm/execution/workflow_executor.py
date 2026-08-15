@@ -3,15 +3,17 @@ Parallel / Loop).
 
 Walks ``WorkflowPlan.nodes``; each node dispatches its subgoals' patch_ops via
 the existing ``action_dispatcher.dispatch`` (which calls each adapter's
-``mutate`` — the app's own write surface: gui_agent = real browser gestures,
-api = requests.post to the app's Flask API. NEVER ``set_state`` — §12.16/E7).
+``mutate`` — GUI-only: real browser gestures on the web substrate / the
+bridge's CUA-wrapped operator routes on mobilegym. There is NO api executor
+and NO ``set_state`` — Agent B/E7/§12.16).
 
 Three node types (FF.4 §5.1):
   - SEQUENTIAL: subgoals one after another (the existing linear path).
   - PARALLEL: N subgoals issued concurrently via ThreadPoolExecutor, barrier
-    at the end (all must complete before the next node). For api executor this
-    is truly concurrent (HTTP to different apps); for gui_agent the singleton
-    browser serializes (one Playwright page — honest limitation, §13.1).
+    at the end (all must complete before the next node). For bridge-backed
+    writers this is truly concurrent (HTTP to different apps); for the
+    builtin-web GUI executor the singleton browser serializes (one Playwright
+    page — honest limitation, §13.1).
   - LOOP: one template subgoal instantiated ``loop_count`` times, each with
     ``loop_values[i]`` substituted as the patch_op entity_id. E11: EACH
     iteration is independently verified (canonical re-read confirms the op's
