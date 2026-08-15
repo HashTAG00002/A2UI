@@ -3044,3 +3044,33 @@ Agent D/E：taskvm/projection + taskvm/runtime 接线到 workspace_ui 真实入�
 ### commit 范围（本轮）
 
 `taskvm/projection/events.py` + `tests/projection/` + `tests/e2e_ui/` + `.mrules` + `.mrules.log`（多 agent 纪律：只 add 本会话文件，不 add Agent F 的 benchmark/evaluation 产物）。
+
+---
+
+## E41（Agent E bounded repair：Runtime 最终窄返工，2026-08-16）
+
+> base `e36e1caa`（session-start HEAD）。D 的 `32460b7`（projection layer，E40）在会话内并发落地；E 的三提交叠加其上：`00ac9b3`（P0-1）/ `7965d3c`（P0-2 + P1 RFCs）/ `804fc6b`（T1 bootstrap）。提交 message 用 "E40a/b/c" 子标号（与 D 的 plain "E40" 区分）；规范 episode 号 = **E41**。无 remote（`git remote` 空）；authoritative SHA = 本地 commit。
+
+### 修复的 frozen-contract 缺口（audit-charter §3.1 DEFECT）
+
+- **P0-1 active-surface per-gesture sync（PASS）**：runtime.md §8 要求每个 atomic GUI action 后 `act → fresh observe → extract → apply_observation → runtime event + visual artifact`；§3/§6 要求 `before` 来自 fresh pre-action 观察。pre-fix `autonomy.py::_run_contract_once` 只 `act → observe_active(只更新 fingerprint) → 下一 prediction`，extract/fold 只在 DONE；`before = task_state().observed_values()` 读 stale cache。修复：新增 `_observe_and_fold`（fresh observe → extract → `fold_action_observation`(apply_observation) → 发布 `ACTION_OBSERVED` event + screenshot artifact；catch StructureInvalidation）；contract 开始做 fresh-before fold（让 `start_action` 记录真实 before）；每 gesture 后 fold + event；`_finish_and_verify` 复用最后 folded obs 作 honest after。新增 `RuntimeEventKind.ACTION_OBSERVED`（per-gesture；`ACTION_LANDED` 仍是 verify-time，保 integration trace `landed[0].detail=='verified'`）。`fold_action_observation` 从 dead API 接入。回归测试 `tests/runtime/test_active_sync.py`（multi-gesture fold + fresh-before 真值）。
+- **P0-2 VisibleVerifier completion_condition（PASS）**：runtime.md §6 要求 `passed = desired_state match AND completion_condition visible criterion 满足`；pre-fix `_verify_action` 只查 desired_state，模块 docstring 却声称 "completion_condition / desired_state evaluated"——doc-vs-code lie（audit §3.2）。修复：`_verify_action` 现查 desired_state AND completion_condition；`_completion_satisfied` minimal deterministic form（RFC-003）：空=satisfied；`key==value`（复用 §11 loop termination_predicate 同一 minimal parse，非 NLP）；non-empty non-conforming = 诚实 fail-closed。E-owned conftest helper 默认 `completion=""`（保 desired-state 行为）。`tests/verifier/test_visible_verifier.py` 5 新测试含 **negative-control**（desired 全 match BUT completion 不满足 ⇒ passed=False；pre-fix 会 pass）。
+- **T1 gui_driver runtime violation（PENDING — bootstrap seam delivered；物理删除 gated）**：substrate.md §8 T1 = 删 `taskvm/execution/gui_driver.py`。grounded blast-radius（exact-SHA e36e1caa）：`gui_driver.py` 被 `execution/rollback.py`+`execution/action_dispatcher.py`（top-level import，被 server.py/workflow_executor/verifier-rollback_verify/~10 killtest 用）+ ~10 `evaluation/run_*_killtest.py`（top-level `make_task_adapters` import）+ `workspace_ui/server.py`（D 的）+ 2 `tests/test_imports.py` real-call test 依赖。E-only 强删会断 main+L0（违 "保持 main 可编译"）——正是 runtime.md §13（E 自己的冻结合同）的 C/D/F gating。prompt guardrail（"不与 D 同时大改同一文件"；killtest "或交给 Agent F"；"不要把整个 execution/** 一刀删光"）禁 E-only 强删。E 交付 **`taskvm/runtime/bootstrap.py`**（`compose_runtime` + `RuntimePorts` frozen bundle，gate-clean：只 import runtime/domain/substrate-PORT）——D 用它把 workspace_ui off gui_driver 的 clean interface。`tests/runtime/test_bootstrap.py` 证 seam 端到端跑通（real GUI path，非 adapter.mutate）。**未删 gui_driver.py / 未缩 TRANSITIONAL_DEBT_REGISTER T1 条目**（不 hide/modify register 逼 lock audit 变绿）。formal lock audit 诚实 FAIL 在 T1（register 仍非空；T2 已被 D 清）。T1 物理 deletion exit-criterion remainder：D（server.py make_task_adapters→compose_runtime）+ F（~10 killtest write-path 迁移 + legacy rollback/action_dispatcher 重写，Wave-3 G）+ test_imports gui_driver smoke 删除。
+- **P1 emergency-stop spec gap（RESOLVED — Option B RFC-004）**：handoff-06 提 `emergency stop：不启动下一 action + session needs reobserve`，但 frozen runtime.md §4 只冻结 soft-pause + stale-discard + irreversible act-前 epoch 复检 + pending-comp 阻断——未冻结独立 emergency-stop 操作（SPEC-GAP，非 DEFECT）。RFC-004 裁决：§4 soft-pause + epoch-invalidation 已 subsume（`request_pause` 阻下一 action via epoch bump；fresh-before fold IS the reobserve on next run）。不新增 facade method / needs_reobserve 字段（新 invariant category，out-of-scope）。回归：`test_soft_pause_blocks_the_next_atomic_action` + `test_fresh_before_observation_not_stale_kernel_cache`。
+- **P1 requires_confirmation 三方语义（ALIGNED — RFC-005，无代码变更）**：§3/§4/§6 文字 vs 代码 vs tests 三方一致（exact-SHA e36e1caa）。`requires_confirmation` 是 reversibility flag（IRREVERSIBLE），非 human-in-the-loop approval gate；act-前 epoch 复检 + loop-top soft-pause = §4 "再次检查 epoch + 治理态"（所有 governance 动作 bump epoch）。不新增 human approval system / 治理态字段。tests `test_irreversible_contract_rechecks_epoch_before_acting` + `test_irreversible_contract_executes_when_epoch_stable` 锁定。
+
+### 不返工的已通过区域（零变更，保绿）
+
+stale-response epoch gate / soft pause atomic boundary / model-call budget / invalid-prediction budget / context-preserving repair / GUI-only compensation / stale compensation discard / inactive heartbeat / conflict handling / bounded loop / fan-out-barrier-fan-in / Runtime DI / no-oracle runtime boundary —— 全部未动。
+
+### Validation（本会话独立复跑）
+
+- `compileall taskvm/runtime taskvm/verifier` exit 0
+- `pytest tests/runtime` 31 passed；`tests/verifier` 19 passed；`tests/architecture` 17 passed；`tests/integration/test_runtime_trace.py` 1 passed；`tests/substrate` 34 passed / 1 skipped
+- 全量 `pytest tests/` **437 passed / 5 skipped / 0 failed**（D 的 135 projection + E 的 ~9 新 + 全既有；零回归）
+- `grep read_canonical|set_state|oracle_state|entity_id taskvm/runtime taskvm/verifier`：runtime 干净（bootstrap docstring 已去 entity_id 字面量）；`verifier/visible.py`（E runtime verifier）干净；`verifier/{canonical_state,rollback_verify,round_trip_checks,reconciliation,non_interference,cross_app_checks}.py` 的 entity_id/oracle_state 是 legacy oracle verifier（runtime.md §13/§15 F 迁往 evaluation，已登记，不在 runtime path）
+- `TASKVM_SUBSTRATE_LOCK_AUDIT=1 pytest tests/substrate`：诚实 FAIL 在 T1（`FORMAL LOCK PENDING — registered §6 violations remain: ['taskvm/execution/gui_driver.py']`，T2 已清）——不 hide/modify register 逼绿
+
+### commit 范围（本轮）
+
+只 add E 自己的文件（多 agent 纪律，E30 教训）：`taskvm/runtime/{autonomy,ports,bootstrap,__init__}.py` + `taskvm/verifier/visible.py` + `tests/runtime/{conftest,test_active_sync,test_bootstrap}.py` + `tests/verifier/test_visible_verifier.py` + `docs/contracts/runtime_rfc_backlog.md`（RFC-003/004/005）+ `.mrules`/`.mrules.log`。**未触碰** D 的 projection/workspace_ui、F 的 benchmark/evaluation 产物、C 的 governance/architect。
