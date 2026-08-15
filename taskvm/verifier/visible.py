@@ -116,7 +116,10 @@ class VisibleVerifier:
         cond = (completion_condition or "").strip()
         if not cond:
             return True, None
-        if "==" in cond:
+        # strict single-clause minimal form (RFC-003): exactly one '=='. A
+        # multi-'==' string (e.g. 'a==b==c') is non-conforming -> fail-closed
+        # (never silently satisfied by partitioning on the first '==').
+        if cond.count("==") == 1:
             key, _, val = cond.partition("==")
             key = key.strip()
             val = val.strip().strip("'\"")
@@ -131,7 +134,7 @@ class VisibleVerifier:
             return (ok, None if ok
                     else f"completion_condition unmet: {key}={got!r} != {val!r}")
         return False, (f"completion_condition not in the deterministic "
-                       f"'key == value' form (RFC-003): {cond!r}")
+                       f"single-clause 'key == value' form (RFC-003): {cond!r}")
 
     # -- VERIFY: referenced variables must be at their desired values --------
     @staticmethod

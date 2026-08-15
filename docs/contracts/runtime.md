@@ -253,7 +253,7 @@ evaluate_loop_termination(node, terminated) -> {committed|continue|failed}
 
 `taskvm/execution/**` 是 legacy 双轨，违反本合同（benchmark import / `entity_id` / `read_canonical` / API dispatcher / wrong-target killtest / `NotImplementedError` stub / 独立 SubgoalGenerator 热路径）。**本 wave 不做物理删除**（kernel.md §6：迁移策略 1）——它被 `tests/test_imports.py`（L0 CI）、`taskvm/evaluation/run_*.py`（13 个 killtest，Agent F）、`taskvm/workspace_ui/server.py`（Agent D）、`taskvm/governance/`（Agent C）、`tests/fakes/` 交叉引用。**Runtime 是唯一 production execution truth，绝不 import `taskvm.execution`**；物理删除 gated 于 C/D/F 迁移各自调用点，由 Agent G（Wave 3）执行。`taskvm/verifier/` 的 legacy oracle verifier（`canonical_state` / `non_interference` / `round_trip_checks` / `cross_app_checks` / `reconciliation` / `rollback_verify`）同理为 evaluation-plane，由 Agent F 迁往 `taskvm/evaluation/`；本 wave 新增 `taskvm/verifier/visible.py` 作为 runtime-visible verifier，不触碰 legacy 文件。
 
-## 14. Runtime Contract Tests（`tests/runtime/`、`tests/verifier/`、`tests/runtime/test_runtime_architecture.py`、`tests/integration/test_runtime_trace.py`）
+## 14. Runtime Contract Tests（`tests/runtime/`、`tests/verifier/`、`tests/architecture/test_import_boundaries.py`、`tests/integration/test_runtime_trace.py`）
 
 至少覆盖：
 
