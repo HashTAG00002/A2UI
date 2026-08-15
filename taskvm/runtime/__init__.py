@@ -19,6 +19,7 @@ Public surface (frozen contract — docs/contracts/runtime.md):
     StructureInvalidation    the structural-drift signal the extractor raises
 """
 from taskvm.runtime.autonomy import AutonomyRuntime
+from taskvm.runtime.bootstrap import RuntimePorts, compose_runtime
 from taskvm.runtime.compensation import CompensationExecutor
 from taskvm.runtime.config import DEFAULT_BUDGETS, RuntimeBudgets
 from taskvm.runtime.ports import (
@@ -30,6 +31,8 @@ from taskvm.runtime.sync import StructureInvalidation, SurfaceSync
 
 __all__ = [
     "AutonomyRuntime", "SurfaceSync", "CompensationExecutor",
+    # bootstrap seam (composition entry point — substrate.md §8 T1)
+    "RuntimePorts", "compose_runtime",
     # ports
     "CUAGoalSerializer", "CUAModel", "ObservationExtractor", "Verifier",
     "CallLedger",
