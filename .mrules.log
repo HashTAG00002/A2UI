@@ -2758,3 +2758,16 @@ Agent D/E：taskvm/projection + taskvm/runtime 接线到 workspace_ui 真实入�
 
 - revision=0：contract 已注明 0=n/a，不立项；benchmark 真需要时先走 RFC 改 contract。
 - legacy governance exports / architecture gate 缺 governance 项：D/E/F 迁走消费者 → G integration cleanup 删导出 → governance 纳入 gate。均不阻塞 C freeze。
+
+
+---
+
+## E33 · Agent C final freeze closure：Sequence producer test 补钉（TEST-ONLY）
+
+时间：2026-08-15。触发：Oracle 终审唯一保留 blocker——architect.md §9"compose 一次成型（三 primitive 各一）"中 Sequence 无 producer test（fan-out 有 scenario 1、bounded loop 有 scenario 6，实现侧 `_chain_fill` 本就支持 NodeKind.SEQUENCE，缺的只是测试锚）。
+
+- 改动：**仅** `tests/architect/test_scenarios.py` 新增 `test_scenario_1b_sequence_composes_one_call_ordered_chain` + `SEQUENCE_JSON` fixture。生产代码零改动（严格 TEST-ONLY scope，未触碰 taskvm/architect|governance|domain|kernel）。
+- 测试内容：合法模型 reply（sequence container「排期推进」+ 三个 children：action→verify→action，无显式 intra-sequence 边）→ 真实 `TaskArchitect.compose()` → 断言 (1) 恰 1 次模型调用 + ledger.total()==1；(2) graph 含 NodeKind.SEQUENCE；(3) 三个 children 按模型 listed order 连成单链（改发布日期→核对新日期→同步文案截止，每后继 depends_on 含前驱）；(4) exactly one sink TERMINAL 且末步喂入 terminal。
+- 验证（Oracle 指定命令原文执行）：`pytest -q tests/architect tests/governance tests/architecture` → **38 passed / 1 skipped**；`python -m compileall -q taskvm/architect taskvm/governance` → exit 0。新测试单跑 PASSED（一次成型：实现本就支持，此为补缺失锚点而非修 defect，故无先红期待）。skip 2→1 系 Agent E 的 untracked `taskvm/runtime` 在制品出现解除占位，与本轮无关。
+- 证明了什么：三 primitive 的 producer anchor 齐了，§9 冻结要求闭合；TaskArchitect 对 SEQUENCE 的 listed-order 确定性连链被测试锁定。没证明什么：无新增（本条不扩任何验证面）。
+- Agent C 冻结退出主开发路径。

@@ -238,6 +238,72 @@ def test_scenario_6_bounded_loop_assembles_with_guards():
         "a bounded loop body is action/verify only")
 
 
+# ── scenario 1b: the SEQUENCE primitive from the same one-shot compose ──────
+# (frozen contract architect.md §9: "compose 一次成型（三 primitive 各一）" —
+#  fan-out has scenario 1, bounded loop has scenario 6; this anchors the
+#  third producer: a sequence container + its listed-order single chain)
+SEQUENCE_JSON = {
+    "variables": [
+        {"semantic_key": "release_date", "label": "发布日期",
+         "value_type": "date", "mutability": "editable",
+         "desired": "2026-08-18"},
+        {"semantic_key": "copy_deadline", "label": "文案截止",
+         "value_type": "date", "mutability": "editable",
+         "desired": "2026-08-18"},
+    ],
+    "workflow": {"nodes": [
+        {"kind": "sequence", "label": "排期推进"},
+        {"kind": "action", "label": "改发布日期", "container": "排期推进",
+         "semantic_goal": "推迟发布会议",
+         "sets": {"release_date": "2026-08-18"},
+         "completion": "日历卡片显示 2026-08-18",
+         "reversibility": "reversible", "risk": "",
+         "target_evidence": ["发布会议"]},
+        {"kind": "verify", "label": "核对新日期", "container": "排期推进",
+         "condition": "日历卡片显示 2026-08-18"},
+        {"kind": "action", "label": "同步文案截止", "container": "排期推进",
+         "semantic_goal": "文案截止同步",
+         "sets": {"copy_deadline": "2026-08-18"},
+         "completion": "任务板显示新截止", "reversibility": "reversible",
+         "risk": "", "target_evidence": ["项目文案"]},
+        {"kind": "terminal", "label": "完成", "after": ["同步文案截止"]},
+    ]},
+}
+
+
+def test_scenario_1b_sequence_composes_one_call_ordered_chain():
+    """The SEQUENCE primitive comes out of the SAME single compose call:
+    the container lands as NodeKind.SEQUENCE, its children chain in the
+    LISTED order (deterministic order-fill — no explicit intra-sequence
+    edges were supplied), and the architecture closes on one sink
+    TERMINAL."""
+    port = FakePort(SEQUENCE_JSON)
+    ledger = ModelCallLedger()
+    arch = TaskArchitect(port, ledger).compose(
+        INTENT, (OBSERVED_VARS[0], OBSERVED_VARS[1]))
+
+    assert len(port.calls) == 1, "sequence composition = exactly ONE call"
+    assert ledger.total() == 1
+    seqs = [n for n in arch.graph.nodes if n.kind is NodeKind.SEQUENCE]
+    assert len(seqs) == 1, "the sequence container landed in the graph"
+    seq = seqs[0]
+    children = [n for n in arch.graph.nodes if n.parent_id == seq.node_id]
+    assert [c.label for c in children] == ["改发布日期", "核对新日期",
+                                           "同步文案截止"]
+    # the listed order IS the chain: every later step waits on its
+    # predecessor inside the sequence (2 edges over 3 children)
+    for earlier, later in zip(children, children[1:]):
+        assert earlier.node_id in later.depends_on, (
+            f"sequence children must chain in listed order: "
+            f"{earlier.label!r} -> {later.label!r}")
+    # valid completion structure: exactly one sink TERMINAL the last
+    # sequence step feeds (the validating constructor accepted the whole
+    # architecture — re-asserted here as the frozen completion anchor)
+    terminals = arch.graph.terminal_nodes()
+    assert len(terminals) == 1
+    assert children[-1].node_id in terminals[0].depends_on
+
+
 # ── scenario 7: prompt no-leak on the ACTUALLY built messages ──────────────
 def test_scenario_7_prompt_no_leak_actual_messages():
     port = FakePort(ARCHITECTURE_JSON)
