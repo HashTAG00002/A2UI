@@ -3383,3 +3383,42 @@ gui_driver 的**三处活 import 宿主全是 G Wave-3 的 legacy 删除对象**
 **交付**：可直接粘贴的 G 启动 prompt（见会话回复；结构：角色→阅读顺序→执行序 Wave-3→双表收缩→B 盖章→目录分离→dev.sh→Smoke Journey→文档收敛→硬约束→环境事实→汇报纪律）。
 
 **验证**：纯文档改动（08 一个节替换），零代码；无需测试轮。
+
+---
+
+## E51（2026-08-16）：D/E/F 锁定裁决返工审计——三层全 PASS，A-G 全员冻结链闭合
+
+**触发**：用户指令（返工检查 Agent D/E/F 是否可在 A/B/C 已锁定基础上锁定通过；严格 audit_charter v2；既不过度防御也不放水）。
+
+**审计对象（charter §5.1 声明）**：
+- Audited layers: D（Projection/Frontend）、E（Runtime/Verifier/Rollback）、F（Benchmark/Evaluation）
+- Frozen contracts: projection.md(+RFC-D1)、runtime.md、handoff 05/06/07、docs/benchmark.md（F 合同锁=tests/evaluation/test_final_contract.py 六条+tests/benchmark/test_taxonomy.py）
+- **Exact SHA: 6ba9cf1**（HEAD，porcelain empty → Level-1 证据）
+- Bounded scope: 三层验收独立复现 / E47 后次生回归窗口排查 / F 遗留归因 / 残留 gate
+- Excluded: 重开 A/B/C 已 frozen invariant（§4.2）、hostile-caller 鲁棒性（§0.2）
+
+**独立复现（全部本轮亲跑，非 ledger 转述）**：
+- D 验收 `pytest tests/projection tests/e2e_ui`：152p/4s；设 PLAYWRIGHT_BROWSERS_PATH+LD_LIBRARY_PATH 后 e2e_ui **29p 含真浏览器 4/4**（E46 声称复现）
+- E 验收 `pytest tests/runtime tests/verifier tests/architecture`：**73 passed**
+- F 验收 `pytest tests/benchmark tests/evaluation`：**13 passed**（taxonomy 4 + final-contract 9）；CLI --help 四子命令 exit 0
+- compileall exit 0；**全量 468 passed / 1 skipped / 0 failed**（E47 记录 439+29=468 吻合）
+- 唯一 skip = LOCK 审计默认模式可见 PENDING（登记债务，合规 §6.2）；显式 `TASKVM_SUBSTRATE_LOCK_AUDIT=1` 诚实 FAIL 恰在 T1（owner 已 E48 移交 G）
+
+**次生回归窗口（§7.1 排查）**：2c85379(E47 基准)→6ba9cf1 全部 diff 仅 5 文件：.mrules/.mrules.log/substrate.md/handoff08/test_no_api_backdoor.py（9 行，E48 的 T2 清偿镜像+T1 owner 修正）。**taskvm/ 生产代码零字节改动** → D/E/F 自 E47 冻结裁决后不可能有次生回归（exact-SHA 级证据，非推断）。
+
+**残留 gate（§6.5）**：killtest 字符串生产面零命中；10 个 run_*killtest.py 已删（evaluation 目录=actors/aggregation/cli/harness/oracle/runner/statistics/world）；runtime/projection/verifier 零 executor="api"/requests.post；runtime stdlib-only 零 requests/flask/playwright；runtime 零 import taskvm.execution（三处 workspace_ui 命中均 docstring，§13 声明的合法调用缝）；SSE_TYPE_VOCABULARY count=33。
+
+**F 遗留归因（§5.3 ground-truth）**：E42 登记的 loop-inbox-zero/drift-relabel 两任务在最终矩阵 taskvm 条件 **3/3 seeds success=True**（trials 037/038/039、109/110/111 原始 JSON，all predicates hold、0 interference violations）——E45 F6b 后半已修复清零；E42 规则-2 落盘缺口已由 paper-matrix 271 JSON 补账。
+
+**Findings（2 条，均非阻塞）**：
+- F-N1（SPEC-GAP，owner→论文期/G）：handoff 07 列 8 系统条件，实现 6（缺 –live-projection/–persistent-GenUI 两消融）。docs/benchmark.md §4 诚实列 6（无 doc-vs-code lie）；handoff 自含"不要凑十几个 ablation"约束；确定性 fake 世界对人在环 projection 价值无信号。按 §4.1/§5B 走 RFC/论文 limitation，不阻塞。
+- F-N2（SPEC-GAP，owner→G/substrate 期）：底座仅确定性 BenchmarkWorld；builtin_web 登记为 pending dependency（非 silent stub）；benchmark.md §7.2 诚实披露。真实底座计量属 B/E/G 既有分工。
+
+**裁决（charter §8 模板）**：
+- **D：PASS / FORMALLY LOCKED**（E47 裁决维持；零次生回归；T2 已清偿；workspace_ui 物理删除归 G Wave-3 非 D 债务）
+- **E：PASS / OWNER-COMPLETE / CODE-FROZEN / LOCK PENDING T1**（登记债务 owner=G per E48；charter §5C 不是 E 返工）
+- **F：PASS / FORMALLY LOCKED**（2 条 SPEC-GAP 已诚实披露，无 DEFECT、无 doc-vs-code lie、无未决 HOLD）
+
+**用户直接 approve，无返工 prompt 下发**。G 既有启动 prompt（E50 定稿）已覆盖 E-LOCK 的唯一机械前提（T1 删除）与 F 两边界的继承方。
+
+**证据落盘**：eval_results/audit_def_lock_6ba9cf1.json（不入 git，规则 3）。
