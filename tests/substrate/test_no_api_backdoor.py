@@ -213,8 +213,13 @@ def test_no_executor_api_backdoor_knob_anywhere():
 #: contract doc is authoritative and this constant must mirror it 1:1).
 #: Every entry is a STILL-STANDING §6 VIOLATION scheduled for DELETION:
 #:
-#:   * T1 ``taskvm/execution/gui_driver.py`` — Owner: Agent E. Exit:
-#:     file deleted (runtime consumes SubstrateSession + CUA→GuiAction).
+#:   * T1 ``taskvm/execution/gui_driver.py`` — Owner: Agent G (reassigned
+#:     from E by the E47 audit, 2026-08-16: all three live import hosts
+#:     governance/vm_state.py, execution/action_dispatcher.py,
+#:     execution/rollback.py are G Wave-3 deletion targets; see handoff
+#:     08 ⭐ section). Exit: file deleted TOGETHER with its three live
+#:     import hosts (cluster deletion, never alone) — runtime consumes
+#:     SubstrateSession + CUA→GuiAction.
 #:   * T2 (RESOLVED 2026-08-16 by Agent D) ``taskvm/workspace_ui/server.py``
 #:     — _make_anchor_lookup deleted; anchor_lookup=None (VMStateSnapshot
 #:     optional field); targeting routes through Observation → State Compiler

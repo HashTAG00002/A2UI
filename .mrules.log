@@ -3315,3 +3315,33 @@ gui_driver 的**三处活 import 宿主全是 G Wave-3 的 legacy 删除对象**
 4. B 机械盖章 FORMAL LOCK（register 空 + LOCK audit 全绿）
 
 **没证明**：真 provider 在线全弧（E46 已标注）；SPA 前端；G Wave-3 可行性（本审计只证明交叉存在）。
+
+---
+## E48（2026-08-16）：T1 移交落地（E→G）+ G 交接文档注入 + BC/DE 组间联动重释
+
+**用户指令**：把 T1 leg-3 与 G Wave-3 结构性交叉着重写进 G 交接文档；澄清"BC 与 DE 联动"指 {B,C} 组与 {D,E} 组之间（上轮误读为 B↔C、D↔E，本轮纠正重析）。
+
+### 落盘改动（本会话三文件 + ledger，零代码改动）
+
+1. `docs/oracle/new-oracle/handoffs/08_INTEGRATION_RELEASE_CLEANUP_AGENT.md`：注入"⭐ T1 移交（E→G）与 Wave-3 一体化删除（E47 裁决注入，最高优先）"整节——三宿主×下游消费者交叉表、**禁止单删 gui_driver.py 禁令**、三棒接力状态（D leg-1 done E46 / F leg-2 done E45 / G leg-3 编排四步：簇删→双债务表收缩→LOCK audit 全绿→通知 Oracle 盖章）、与 F 审计并行约束（exact-SHA 锚定 + 除 shrink-only register 外禁触 F 内部）；"清理旧代码"节追加 gui_driver + 三宿主条目。
+2. `docs/contracts/substrate.md` §8：T1 owner 显式修正 **Agent E → Agent G**（附 E47 引证与交叉理由）；B 状态行 "WAITING ON E + G cleanup" → "WAITING ON G ONLY"。§8 登记表是登记非合同正文（§8 自声明 "does NOT amend the contract"），owner 字段修正属 E47 裁决的显式登记变更，消除 doc-vs-doc 矛盾。
+3. `tests/substrate/test_no_api_backdoor.py`：镜像注释同步（dict 零改动，注释级）。
+
+### BC↔DE 组间联动（纠正后的正确分析）
+
+两组之间恰有**两条 port 中介的稳定缝**，别无第三条：
+1. **B→E 缝**：`composition.py:250 substrate_registry.create_session("builtin_web", cfg)` + `bootstrap.py:40` 仅 import `SubstrateSession` ABC（observe/act/capture port）；E46 已改纯名路由 + `TASKVM_MOBILEGYM_BRIDGE_URL` 操作员环境变量（D/E 组合根零具体 provider import）。
+2. **C→(D/E) 缝**：零直接 import（双向 grep 干净）；C 只经 A 的 kernel 被触达——D 的 `POST /governance/*` → driver → kernel →（GoalPatch 恰一次）architect。
+另有 B→D **合同性零耦合**（projection 架构 gate 禁 substrate import，127 测试含此 gate）。
+**冻结推论**：T1 违规的本质恰是"绕开 B→E 缝"（gui_driver 不走 port 直捅 B 内部实现），因此 B 的 LOCK 待决**不可能**阻塞 D/E——D/E 现代面只消费冻结稳定的缝本身。唯一真实跨组义务（T1）全在 legacy 平面，现已随 owner 修正整体划入 G。
+
+### 验证
+
+- `tests/substrate + tests/evaluation/test_final_contract + tests/projection`：**170 passed / 1 skipped**
+- 全量非 e2e：**439 passed / 1 skipped / 0 failed**（与 E47 基线逐位一致，零回归）
+
+### 对用户三问的裁定（详见会话回复）
+
+1. **G 可否开工/与 F 审计并行**：可以。条件：F 审计锚定 exact SHA（E38 协议）；G 除 `test_final_contract.py` shrink-only register 编辑外禁触 F 内部；A/C/D 盖章先落（无依赖）。
+2. **G 结束 = user study GUI？**：G 范围含 Smoke Journey 15 条（用户输 goal→看 workflow→CUA 推进→surface cards 实时截图→热 LocalPatch→GoalPatch→conflict→GUI rollback→SSE 重连）+ 前端专项验收 + `./scripts/dev.sh` 单命令。当前 `/sessions/<sid>` 已预留 SPA 壳接缝（`static_folder` 接上即发 index.html，否则诚实 JSON 快照）——G 接前端是"接线"不是"重建"。诚实边界：E46 全弧是确定性 fake 证明的；真 provider 在线弧未证明，user study 用真 CUA 需配 provider。
+3. **B 为何无法完全冻结**：见会话白话解释（机场航站楼类比）——B 自身完工全绿冻结；卡的是登记表上唯一违规条目 T1 的物理拆除，而拆除与 G 的 legacy 簇是同一批多米诺；LOCK 审计诚实红是设计而非缺陷。

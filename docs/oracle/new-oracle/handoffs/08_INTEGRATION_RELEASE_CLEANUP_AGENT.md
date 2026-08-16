@@ -38,6 +38,64 @@ configs/**
 
 ---
 
+## ⭐ T1 移交（E→G）与 Wave-3 一体化删除（E47 裁决注入，2026-08-16，最高优先）
+
+> 依据：E47 A–E 冻结裁决审计（exact SHA `2c85379`，证据
+> `eval_results/freeze_audit_2c85379.json`；ledger `.mrules` E47 行）。
+> `substrate.md` §8 的 T1 owner 已显式由 E 改为 G：不是因为 E 未完成，
+> 而是 T1 的物理删除与你的 Wave-3 在结构上是同一批多米诺骨牌。
+
+### 结构性交叉（为什么 T1 必须并入你的 Wave-3）
+
+`taskvm/execution/gui_driver.py` 在生产代码仍有**三处活 import 宿主**，
+而这三个宿主全部位于你的 Wave-3 legacy 删除范围：
+
+| 宿主（gui_driver import 点） | 下游消费者（删宿主即断这些链） |
+|---|---|
+| `taskvm/governance/vm_state.py:45` | `governance/__init__.py`、`tests/fakes/*`（5 个）、`tests/test_imports.py` |
+| `taskvm/execution/action_dispatcher.py:28` | `execution/workflow_executor.py`、`workspace_ui/server.py` |
+| `taskvm/execution/rollback.py:40` | `workspace_ui/server.py`、`verifier/rollback_verify.py`、`tests/fakes/scripted_driver.py`、`tests/test_imports.py` |
+
+交叉证据：`vm_state.py` 与 `workspace_ui/server.py` 均已列入 F 的
+`LEGACY_BENCHMARK_IMPORTERS` 债务表（`tests/evaluation/test_final_contract.py`），
+表内注释明写 "pending Agent G's deletion wave"。
+
+**⚠️ 禁令：不得单独删除 gui_driver.py。** 孤立删除将连锁 ImportError
+断裂上表三条链，把失败归因搅进你的 wave。
+
+### 删除编排（顺序敏感）
+
+前置两棒已完成（E47 实证）：
+- 第一棒（D，E46）：`workspace_ui/server.py` 已切离 gui_driver，生产组合根
+  走 `composition.py:251 → runtime/bootstrap.compose_runtime`；legacy 写路由
+  已 409 退役。
+- 第二棒（F，E45）：引用 gui_driver 的 killtest 脚本已删除；`taskvm/` 与
+  `tests/` 之外零 gui_driver 引用（grep 实证）。
+
+你的第三棒（一体化，一次提交簇内完成）：
+1. 以 dead-code/import scan 为准，按依赖逆序删除整个 legacy execution /
+   governance 簇：`gui_driver.py`、`vm_state.py`、`action_dispatcher.py`、
+   `rollback.py`（及随行 `workflow_executor.py`、`gui_executor*.py` 等 scan
+   判死文件）；同步拆除 `governance/__init__.py`、`verifier/rollback_verify.py`、
+   `workspace_ui/server.py` 的对应 import，清掉 `tests/fakes/*` 与
+   `tests/test_imports.py` 中的 gui_driver smoke 测试；
+2. 同步收缩两张 shrink-only 债务表：
+   - `tests/substrate/test_no_api_backdoor.py` → `TRANSITIONAL_DEBT_REGISTER = {}`；
+   - `tests/evaluation/test_final_contract.py` → `LEGACY_BENCHMARK_IMPORTERS`
+     移除已删条目（F 合同明确允许 "update ONLY on deletion"）；
+3. `TASKVM_SUBSTRATE_LOCK_AUDIT=1 pytest tests/substrate -q` 必须全绿；
+4. 全绿即达成 B 的 FORMAL LOCK 机械条件（登记表空），通知 Oracle 盖章。
+
+### 与 F 审计并行的约束
+
+F 尚未审计。允许 F 审计与你并行：F 的证据锚定 exact SHA（E38 协议），
+你在其后提交不使 F 在锚定 SHA 上的证据失效。但：除上述
+`test_final_contract.py` 的 shrink-only 编辑外，不得改动 F 拥有的
+benchmark/evaluation 内部；README/pyproject 你会重写（F 在 E45 刚清理过），
+属预期内的顺序接力，不是冲突。
+
+---
+
 ## 权威文档清理
 
 ### 替换心智模型
@@ -173,6 +231,8 @@ README 只写：概念、最终架构、快速启动、用户 workflow、final b
 
 - `taskvm/_shim/`；
 - `harness/state_adapter.py`；
+- **`taskvm/execution/gui_driver.py`（T1，见上文⭐节——必须与三宿主同簇删除，禁止单删）；**
+- **`taskvm/governance/vm_state.py`、`taskvm/execution/action_dispatcher.py`、`taskvm/execution/rollback.py`（gui_driver 三处活 import 宿主，随簇删除）；**
 - replay/scripted driver 中间实现；
 - legacy `workspace_ui/renderer.py`；
 - static f-string editable fallback；
