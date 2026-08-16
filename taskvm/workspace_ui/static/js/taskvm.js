@@ -88,6 +88,8 @@ function renderGovernance() {
   const isPaused = g.autonomy === "paused" || g.autonomy === "stopped";
   document.getElementById("btn-pause").classList.toggle("hidden", isPaused);
   document.getElementById("btn-resume").classList.toggle("hidden", !isPaused);
+  document.getElementById("btn-start").classList.toggle("hidden",
+    g.autonomy === "running");
 }
 
 function autonomyClass(a) {
@@ -209,9 +211,21 @@ function renderConflicts() {
   for (const c of conflicts) {
     const row = document.createElement("div");
     row.className = "conflict-row";
-    row.innerHTML = `<div>${esc(c.description)}</div><div class="surface-status">keys: ${esc((c.semantic_keys || []).join(", "))}</div>`;
+    let html = `<div>${esc(c.description)}</div><div class="surface-status">keys: ${esc((c.semantic_keys || []).join(", "))}</div>`;
+    if (c.conflict_id) {
+      html += `<button class="btn btn-default" data-conflict="${esc(c.conflict_id)}">Resolve</button>`;
+    }
+    row.innerHTML = html;
     container.appendChild(row);
   }
+  container.querySelectorAll("button[data-conflict]").forEach(btn => {
+    btn.onclick = () => {
+      govCommand("resolve_conflict", {
+        conflict_id: btn.dataset.conflict,
+        resolution: "keep_desired",
+        detail: "UI resolve" });
+    };
+  });
 }
 
 async function govCommand(cmd, body) {
@@ -226,11 +240,29 @@ async function govCommand(cmd, body) {
 document.addEventListener("DOMContentLoaded", () => {
   loadSessions();
   document.getElementById("session-select").onchange = onSessionChange;
+  document.getElementById("btn-start").onclick = () => govCommand("start", { rationale: "UI start" });
   document.getElementById("btn-pause").onclick = () => govCommand("pause", { rationale: "UI pause" });
   document.getElementById("btn-resume").onclick = () => govCommand("resume", { rationale: "UI resume" });
   document.getElementById("btn-stop").onclick = () => govCommand("stop", { rationale: "UI stop" });
   document.getElementById("btn-checkpoint").onclick = () => {
     const label = prompt("Checkpoint label:");
     if (label) govCommand("checkpoint", { label });
+  };
+  // goal patch modal (recompose): open / apply / cancel
+  document.getElementById("btn-recompose").onclick = () => {
+    document.getElementById("goal-modal").classList.remove("hidden");
+  };
+  document.getElementById("gp-cancel").onclick = () => {
+    document.getElementById("goal-modal").classList.add("hidden");
+  };
+  document.getElementById("gp-submit").onclick = () => {
+    const goal = document.getElementById("gp-goal").value.trim();
+    if (!goal) return;
+    const constraints = document.getElementById("gp-constraints").value
+      .split("\n").map(s => s.trim()).filter(Boolean);
+    const rationale = document.getElementById("gp-rationale").value.trim()
+      || "UI goal patch";
+    govCommand("goal_patch", { goal, constraints, rationale });
+    document.getElementById("goal-modal").classList.add("hidden");
   };
 });
