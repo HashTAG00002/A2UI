@@ -18,7 +18,7 @@ Kernel owns:   STATE / TIME / HISTORY / TRANSITION (epoch, lifecycle, patch, che
 
 > 用户不操作 ≠ TaskVM 静止。`governance over autonomy`：用户没有发起治理操作时，CUA 应持续自主推进 Workflow，直到 terminal / pause / budget-exhausted / unrecoverable-verify-failure / need-human / irreversible-boundary。
 
-## 1. 依赖规则（由 tests/architecture + tests/runtime/test_runtime_architecture 强制执行）
+## 1. 依赖规则（由 tests/architecture/test_import_boundaries.py 强制执行，含 test_runtime_port_vs_concrete_substrate）
 
 ```text
 taskvm.runtime   → 仅 taskvm.domain + taskvm.kernel(facade) + taskvm.substrate(PORT 根) + 标准库

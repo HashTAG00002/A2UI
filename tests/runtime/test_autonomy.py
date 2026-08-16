@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from taskvm.domain.events import EventKind
 from taskvm.domain.workflow import NodeKind, WorkflowGraph, WorkflowNode
+from taskvm.runtime import CUADecision, CUADecisionKind
+from taskvm.substrate import GuiAction
 
 from tests.runtime.conftest import (
     CLICK, DONE, FakeExtractor, FakeSubstrate, ScriptedCUA, action_node,
@@ -184,6 +186,49 @@ def test_cua_fail_lands_honest_failure():
     reason = rt.run()
 
     assert status_of(k, "a1").value == "failed"
+    assert any(e.kind.value == "node_failed" for e in rt.runtime_events())
+
+
+def test_mid_contract_cua_fail_lands_failed():
+    """A CUA FAIL AFTER gestures already executed (handle STARTED) must land
+    an honest FAILED verdict too. The kernel protocol is request → start →
+    FINISH → verify: the verdict can only land on a FINISHED attempt, so
+    ``_land_fail`` must finish the handle before landing — pre-fix it called
+    ``land_verification`` on a STARTED handle, the kernel raised, the runtime
+    swallowed it, and the node hung in RUNNING forever (a silently dropped
+    failure is not an honest failure)."""
+    k = make_kernel([var("x", "x0", "A")], _single_graph())
+    sub = FakeSubstrate({"app": {"x": "x0"}})
+    cua = ScriptedCUA([type_kv("x", "A"),
+                       CUADecision(kind=CUADecisionKind.FAIL,
+                                   reason="lost the field")])
+    rt = make_runtime(k, sub, cua)
+
+    reason = rt.run()
+
+    assert status_of(k, "a1").value == "failed"   # not stuck RUNNING
+    assert any(e.kind.value == "node_failed" for e in rt.runtime_events())
+
+
+def test_mid_contract_structure_invalidation_lands_failed():
+    """Same honest-failure contract for a mid-contract structure
+    invalidation (per-gesture fold raises ``StructureInvalidation`` after a
+    gesture landed): the node must land FAILED, not hang in RUNNING."""
+    k = make_kernel([var("x", "x0", "A")], _single_graph())
+    sub = FakeSubstrate({"app": {"x": "x0"}})
+
+    def gesture2(cua_self, obs):
+        # the visible world externally lost the anchor right after gesture 1
+        sub.world["app"]["STRUCTURE-GONE"] = "1"
+        return CUADecision(kind=CUADecisionKind.ACT,
+                           action=GuiAction(kind="click", coordinate=(1, 1)))
+
+    cua = ScriptedCUA([type_kv("x", "A"), gesture2, DONE])
+    rt = make_runtime(k, sub, cua)
+
+    reason = rt.run()
+
+    assert status_of(k, "a1").value == "failed"   # not stuck RUNNING
     assert any(e.kind.value == "node_failed" for e in rt.runtime_events())
 
 

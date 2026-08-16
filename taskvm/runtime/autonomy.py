@@ -545,21 +545,29 @@ class AutonomyRuntime:
         """Land an honest node failure. If no gesture ever started we still
         walk the handle through its full lifecycle (start → finish → failed
         verdict) — a CUA 'cannot proceed' IS an attempt and must move the
-        node off READY; leaving it spinning would be a hot retry loop."""
+        node off READY; leaving it spinning would be a hot retry loop.
+
+        The kernel's protocol is request → start → **finish** → verify: a
+        verdict can only land on a FINISHED attempt. A mid-contract failure
+        (CUA FAIL / structure invalidated / irreversible unavailable) arrives
+        with the handle STARTED — it must be finished here too, else the
+        kernel rejects the verdict and the node would hang in RUNNING
+        forever (a silently dropped failure is not an honest failure). A
+        stale finish (governance superseded the attempt) returns False and
+        the verdict is correctly not landed."""
         if not started:
             started = self._kernel.start_action(action_id)
             if not started:
                 return    # stale handle — governance already superseded it
-            if not self._kernel.finish_action(action_id, observations=()):
-                return    # stale discard
-        if started:
-            vr = VerificationResult(
-                node_id=node.node_id, epoch=self._kernel.epoch,
-                passed=False, action_id=action_id, detail=detail)
-            try:
-                self._kernel.land_verification(vr)
-            except ValidationError:
-                pass  # node already terminal — honest no-op
+        if not self._kernel.finish_action(action_id, observations=()):
+            return    # stale discard (epoch bumped / node historical)
+        vr = VerificationResult(
+            node_id=node.node_id, epoch=self._kernel.epoch,
+            passed=False, action_id=action_id, detail=detail)
+        try:
+            self._kernel.land_verification(vr)
+        except ValidationError:
+            pass  # node already terminal — honest no-op
         self._publish(RuntimeEventKind.NODE_FAILED, node_id=node.node_id,
                       detail=detail)
 

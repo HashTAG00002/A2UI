@@ -3106,3 +3106,49 @@ stale-response epoch gate / soft pause atomic boundary / model-call budget / inv
 ### commit 范围（本轮）
 
 只 add F 自己的文件：`taskvm/benchmark/{__init__,schema,tasks,registry}.py` + `taskvm/evaluation/{__init__,world,actors,oracle,harness,runner,statistics,aggregation,cli}.py` + 跨域修复 `taskvm/architect/architect.py`、`taskvm/kernel/workflow_store.py`（两处已在上面标注 Oracle 备案）+ `docs/oracle/new-oracle/handoffs/12_AGENT_F_SESSION_HANDOFF.md` + `.mrules`/`.mrules.log`。eval_results/ 不进 git（规则 3）。
+
+---
+
+## E43（Agent E 复核会话：审计五项 finding 合理性裁决 + GLM 5.2 E41 修复质量独立验证 + 遗留缺陷接手修复，2026-08-16）
+
+> 用户委托（三段）：① 依 audit_charter.md 裁决审计 agent 五项 finding（P0-1/P0-2/T1/P1×2）是否合理（注意"过度防御导致 bug 越修越多"的历史，但"合理审计不该放过的地方不睁一只眼闭一只眼"）；② 验证 GLM 5.2 的 00ac9b3/7965d3c/804fc6b/290c3c9/ed076d0 是否正确修复且无次生问题；③ 不合格处直接接手。BASE = ed076d0（HEAD）。
+
+### ① 审计五项 finding 合理性裁决：全部合理，无过度防御
+
+- **P0-1（§3.1 DEFECT，成立）**：runtime.md §8 冻结"每 atomic action 后 act→observe→extract→apply_observation→event+artifact"；pre-fix 代码（git diff 实证）确实只 `act→observe_active(fingerprint)→下一 prediction`，fold 只在 DONE。合同条款+file:line+counterexample 齐备。
+- **P0-2（§3.1 DEFECT + §3.2 doc-vs-code lie，成立）**：§6 冻结 `passed = desired match AND completion_condition 满足`；pre-fix `_verify_action` 只查 desired，模块 docstring 却声称两者都查。审计 prompt 预判了自由文本无法确定性验证的问题并指示走 RFC 最小澄清（RFC-003）——非 NLP、非新 invariant category。
+- **T1（registered debt，处置边界正确）**：substrate.md §8 T1 owner E；exit criterion 含 F 的 killtest 迁移。E 单方强删会断 main+L0（违反 runtime.md §13 自己的冻结合同）。seam-only 交付 + register 不缩 + LOCK 诚实 FAIL = §5C OWNER-COMPLETE/LOCK PENDING 的正确姿势。
+- **P1 emergency-stop（SPEC-GAP，Option B 正确）**：handoff-06 是 Level 5 evidence 非 frozen contract；§4 未冻结独立 emergency-stop 操作；按 §4.1 走 RFC-004 对齐而非发明新 facade method。
+- **P1 requires_confirmation（三方 ALIGNED，实证）**：本会话独立核对 contract.py（reversibility property）+ autonomy.py L348 act-前 epoch 复检 + test_hot_governance.py:135/161 两测试存在。RFC-005 无代码变更正确。
+- 审计 prompt 遵守 §5D（一次性枚举）+ 12 项禁返工清单 + 指定验证命令 + 五项 PASS/FAIL 出口——无 treadmill、无 hostile-caller 框架、无 production-grade 防御要求。
+
+### ② GLM 5.2 修复质量独立验证：五项全部合格，无次生回归
+
+- **P0-1**：fresh-before fold 先于 `start_action`（kernel L300 实证从 observed plane 记 `before_observed`）；每 gesture 后 `_observe_and_fold`（extract→apply_observation→`ACTION_OBSERVED`+artifact）；观察次数与 pre-fix 持平（N+1）；DONE 复用最后 fold（无额外 observe）；`poll_inactive` 仍跳 active surface（无双重 heartbeat）；测试 mid-flight 断言（gesture2 callable 内查 plane）+ fresh-before 断言（world=B vs cache=x0）。**PASS**。
+- **P0-2**：`_verify_action` 现查 desired AND completion；RFC-003 minimal form（E41e 加严 `count("==")==1`）；empty=无额外判据（合同明确非忽略）；unobserved key→fail；non-conforming→fail-closed；negative-control 在（desired 全 match BUT completion 不满足⇒False）。**PASS**。
+- **T1**：bootstrap.py gate-clean（只 import runtime/domain/substrate-PORT）；`compose_runtime`+`RuntimePorts` 五 port frozen bundle；E2E 测试走真实 GUI path（`act_log==["type"]` 非 adapter.mutate）；gui_driver.py 未删（gated D/F/G，register 未动）。**seam 交付；物理删除 PENDING gated**（与 E41 登记一致）。
+- **P1×2**：RFC-004 RESOLVED（Option B）/ RFC-005 ALIGNED。
+- 基线独立复现：`pytest tests/` **437 passed / 5 skipped / 0 failed**（与 E41 changelog 一致）+ compileall exit 0。
+
+### ③ 本会话接手修复（两处 GLM 5.2/E41e 遗漏 + 一处 E35/E37 既有 DEFECT）
+
+1. **`_land_fail(started=True)` verdict 永不落地（E35/E37 既有 DEFECT，非 GLM 5.2 regression）**：kernel 协议 request→start→**finish**→verify（`land_verification` 要求 FINISHED handle，kernel L377 实证）；mid-contract 失败（CUA FAIL / structure invalidation / IrreversibleAction）到达时 handle 是 STARTED，旧代码直接 land→kernel 抛 ValidationError→`except: pass`（注释"node already terminal"错误，节点是 RUNNING 非 terminal）→**节点永久卡 RUNNING、失败被静默吞掉**。红色探针实证（两探针先红：`NodeStatus.RUNNING`）。修复：land 前对 STARTED handle 调 `finish_action(observations=())`（stale→False→诚实不 land）。既有 `test_cua_fail_lands_honest_failure` 只钉 started=False 路径（§3.5 类 oracle 缺口）。新增 2 回归测试（mid-contract CUA FAIL / mid-contract structure invalidation）。
+2. **runtime.md §1 引用不存在的 `tests/runtime/test_runtime_architecture`（doc-vs-code，元原则 9 违规）**：E41e 修了 §14 同路径 lie 漏了 §1。修正为 `tests/architecture/test_import_boundaries.py（含 test_runtime_port_vs_concrete_substrate）`（均实证存在）。
+3. **RFC-005 措辞精确化（E41e 登记的 optional tightening）**："所有 governance 动作都 bump epoch"→"改道（retargeting）类（pause/GoalPatch/LocalPatch/compensation）才 bump；event-only 的 record_conflict/resolve_conflict 不 bump"。消除未来 doc-vs-code treadmill 种子。
+
+### 验证（本会话独立复跑）
+
+- 全量 `pytest tests/`：**439 passed / 5 skipped / 0 failed**（437 基线 + 2 新回归测试，零回归）
+- `compileall taskvm/runtime taskvm/verifier` exit 0
+- `grep read_canonical|set_state|oracle_state|entity_id taskvm/runtime taskvm/verifier/visible.py`：**零命中**
+- `TASKVM_SUBSTRATE_LOCK_AUDIT=1 pytest tests/substrate`：诚实 FAIL 在 T1（register 非空，预期；T2 已清）
+- `.mrules`/`.mrules.log` 含并行 Agent F 已 staged 未 commit 的 E42 记录（竞态带入本 commit，账本不丢不重）
+
+### 证明了什么 / 没证明什么
+
+**证明了**：审计五项 finding 全部 charter 合规；GLM 5.2 五项修复全部落地且无次生回归（基线独立复现）；`_land_fail` mid-contract 卡死是真实缺陷（红→绿）且修复零回归；§1 路径 lie 已清。
+**没证明**：T1 物理删除（gated D/F/G，非本会话 scope）；compensation 路径 per-gesture fold（E41e 已登记非阻塞 §8-spirit gap，且补偿在禁返工清单）；`_evaluate_termination` 与 RFC-003 加严未对齐（loop 端多 `==` 只致诚实 continue + max_iterations 兜底，无静默满足风险，登记不改）；Playwright E2E（环境 skip）。
+
+### commit 范围（本轮）
+
+只 add E 自己的文件：`taskvm/runtime/autonomy.py` + `tests/runtime/test_autonomy.py` + `docs/contracts/runtime.md` + `docs/contracts/runtime_rfc_backlog.md` + `.mrules`/`.mrules.log`（含 F 的 staged E42 竞态带入）。**未触碰** F 的 benchmark/evaluation 在制品、D 的 projection/workspace_ui、C/A 的冻结域。

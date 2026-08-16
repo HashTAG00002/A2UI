@@ -119,9 +119,10 @@
     + `test_irreversible_contract_executes_when_epoch_stable`（稳定 → 正常落地）锁定该 gate。
 - **裁决**：三方**ALIGNED**。frozen §3/§4 "再次检查 Kernel epoch + 治理态" 的 minimal 实现是：
   (a) irreversible-specific act-前 epoch 复检（governance 介入 bump epoch → 拦截）+ (b) loop 顶
-  soft-pause/`_governance_says_paused` 检查。所有 governance 动作（pause/GoalPatch/LocalPatch/
-  compensation）都 bump epoch，故 epoch 复检 IS the governance-state signal——无需新增独立 "治理态"
-  字段（那会是冗余/新 invariant）。`requires_confirmation` 是 reversibility flag（非 human
+  soft-pause/`_governance_says_paused` 检查。所有改道（retargeting）类 governance 动作（pause/
+  GoalPatch/LocalPatch/compensation）都 bump epoch（event-only 的 record_conflict/resolve_conflict
+  除外——它们不改可执行状态，不触发 act-前拦截的需求），故 epoch 复检 IS the governance-state
+  signal——无需新增独立 "治理态" 字段（那会是冗余/新 invariant）。`requires_confirmation` 是 reversibility flag（非 human
   approval gate）；runtime 不实现 human-in-the-loop confirmation boundary（合同未要求）。
 - **不修改的冻结面**：runtime.md §3/§4/§6 不动；不新增 human approval system；不新增治理态字段。
 - **状态**：**已裁决（ALIGNED，无代码变更）**。RFC 记录三方一致性，防未来 drift。
