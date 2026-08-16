@@ -160,7 +160,13 @@ class WorkflowStore:
         contract references an updated semantic key. Only the target VALUE
         changes — topology, evidence, reversibility and risk class are
         structurally untouched. Committed history is never retargeted.
-        Returns the retargeted node ids."""
+
+        The ``completion_condition`` (RFC-003 ``key == value`` form) is
+        retargeted in lockstep: when the updated key appears as the
+        condition's LHS, the RHS value is replaced with the new target.
+        A non-conforming or empty condition is left untouched (the
+        verifier's fail-closed semantics handle it). Returns the
+        retargeted node ids."""
         with self._lock:
             if self._graph is None:
                 return []
@@ -175,8 +181,11 @@ class WorkflowStore:
                                 for k in n.contract.desired_state)):
                     new_ds = {k: updates.get(k, v)
                               for k, v in n.contract.desired_state.items()}
-                    n = replace(n, contract=replace(n.contract,
-                                                    desired_state=new_ds))
+                    new_cc = self._retarget_completion(
+                        n.contract.completion_condition, updates)
+                    n = replace(n, contract=replace(
+                        n.contract, desired_state=new_ds,
+                        completion_condition=new_cc))
                     retargeted.append(n.node_id)
                 new_nodes.append(n)
             if retargeted:
@@ -184,6 +193,22 @@ class WorkflowStore:
                                       revision=self._graph_rev + 1)
                 self._graph_rev += 1
             return retargeted
+
+    @staticmethod
+    def _retarget_completion(condition: str,
+                             updates: dict) -> str:
+        """Deterministically update the value side of a RFC-003
+        ``key == value`` completion_condition when ``key`` is in
+        ``updates``. Non-conforming conditions are returned unchanged."""
+        cond = (condition or "").strip()
+        if not cond or cond.count("==") != 1:
+            return condition
+        key, sep, val = cond.partition("==")
+        key_s = key.strip()
+        if key_s in updates:
+            new_val = str(updates[key_s])
+            return f"{key_s} == {new_val}"
+        return condition
 
     # ── status transitions ───────────────────────────────────────────────
     def set_status(self, node_id: str, status: NodeStatus) -> None:

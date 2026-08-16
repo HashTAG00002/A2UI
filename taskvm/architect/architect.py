@@ -133,7 +133,11 @@ def historical_node_ids(snapshot: WorkflowSnapshot) -> frozenset[str]:
     COMMITTED/COMPENSATED nodes, minus ephemeral loop-body commits (a
     committed child of a not-yet-committed BOUNDED_LOOP is per-iteration
     scratch, not history — mirrors WorkflowStore's own rule, computed from
-    public data only; the store stays authoritative).
+    public data only; the store stays authoritative).  TERMINAL nodes are
+    structural sentinels, not committed work — they are excluded so the
+    recomposed future produces its own fresh terminal (carrying an old
+    terminal + adding a new one would violate the exactly-one-TERMINAL
+    invariant).
     """
     graph = snapshot.graph
     if graph is None:
@@ -143,6 +147,8 @@ def historical_node_ids(snapshot: WorkflowSnapshot) -> frozenset[str]:
         if st not in (NodeStatus.COMMITTED, NodeStatus.COMPENSATED):
             continue
         node = graph.node(nid)
+        if node is not None and node.kind is NodeKind.TERMINAL:
+            continue  # structural sentinel, not history
         if node is not None and node.parent_id is not None:
             parent = graph.node(node.parent_id)
             if (parent is not None

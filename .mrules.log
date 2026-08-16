@@ -3074,3 +3074,35 @@ stale-response epoch gate / soft pause atomic boundary / model-call budget / inv
 ### commit 范围（本轮）
 
 只 add E 自己的文件（多 agent 纪律，E30 教训）：`taskvm/runtime/{autonomy,ports,bootstrap,__init__}.py` + `taskvm/verifier/visible.py` + `tests/runtime/{conftest,test_active_sync,test_bootstrap}.py` + `tests/verifier/test_visible_verifier.py` + `docs/contracts/runtime_rfc_backlog.md`（RFC-003/004/005）+ `.mrules`/`.mrules.log`。**未触碰** D 的 projection/workspace_ui、F 的 benchmark/evaluation 产物、C 的 governance/architect。
+
+---
+
+## E42（Agent F：final benchmark 主落地 F1–F7 + F6b 三修复 + 会话交接，2026-08-16）
+
+> 任务书：`docs/oracle/new-oracle/handoffs/07_FINAL_BENCHMARK_AGENT.md`。会话交接文档（下一个 agent 从这里开工）：`docs/oracle/new-oracle/handoffs/12_AGENT_F_SESSION_HANDOFF.md`。本条目为会话末补账（窗口过长导致规则 1 的"即时写入"退化为"收尾一次写入"，引以为戒）。
+
+### 交付（F1–F7，全新 11 文件 + 2 个 __init__ 重写）
+
+- **benchmark 层**：`schema.py`（TaskSpec/Family×12/Split×5/Injection；seed/success/protected = Evaluation-plane 秘密）、`tasks.py`（15 任务：ID×11 + task_holdout/operation_holdout/surface_holdout/cross_product 各 1）、`registry.py`（suite：smoke 3/final 15/open-world 4/governance 7；Condition 6；BUDGET_PRESETS）。
+- **evaluation 层**：`world.py`（BenchmarkWorld 确定性考场 + WorldSubstrate L1 适配）、`actors.py`（TemplateCUA/TemplateModelPort 确定性 fakes；GoalProgram 文本解析）、`oracle.py`（隐藏判卷，失败只判 evaluation error）、`harness.py`（6 条件：direct-cua/planner-cua/taskvm/taskvm-oracle-upper-bound⚠诊断/taskvm-no-verifier/taskvm-no-replan + TrialBudget + WorldExtractor + runtime 事件反应器）、`runner.py`、`statistics.py`（wilson CI/percentile）、`aggregation.py`（failure taxonomy + report schema `taskvm.evaluation.report/1` + paper tables）、`cli.py`（list/run/report/compare，验收命令已验证可用）。
+
+### F6b：governance suite 3 个 taskvm false_done 全修（对照 eval_results/gov-test-current 基线 0.571）
+
+1. **goalpivot-review**：GoalPatch 重组合携带已提交 TERMINAL + 新 terminal → 违反 exactly-one-TERMINAL。修复：`architect/architect.py::historical_node_ids` 排除 TERMINAL（结构哨兵非历史）。⚠ C 冻结域修改，需 Oracle 备案。
+2. **localpatch-shift**：retarget 只改 desired_state 不改 completion_condition → verifier fail-closed。修复：`kernel/workflow_store.py::_retarget_completion`（RFC-003 key==value 确定性 LHS 命中→RHS 替换，非 conforming 不动）。⚠ A kernel 域修改，需 Oracle 备案。
+3. **conflict-budget**：① WorldExtractor fallback handle_id="world" → evidence 永不匹配真实 surface → 误判漂移 → invalidation 循环（修复：handle_id 必须==obs_surface，删 fallback）；② 冲突 retarget 后同旧 desired 的 sibling（mail_budget_note）未级联（修复：`harness.py::_on_runtime_event` surface_conflict 分支按 desired 相等级联 retarget）。
+
+### 验证（2026-08-16 复跑）
+
+- 全量 `pytest tests/`：**437 passed / 5 skipped / 0 failed**（与本会话全部改动共存，零回归，基线=E41）。
+- CLI `--help`/`list` 可用；修复后 smoke 3/3、ID split 9/11（loop-inbox-zero harness_crash、drift-relabel no_ready_work 为**预先存在**失败，复现脚本与根因线索见交接文档 §3）。
+- ⚠ **规则 2 缺口（诚实登记）**：修复后数字未落盘 eval_results/（只在 /tmp + 转录），接手 agent 必须第一步重跑落盘。
+
+### 证明了什么 / 没证明什么
+
+**证明了**：final benchmark 骨架端到端可用（15 任务×6 条件×确定性 actors）；三个治理 false_done 是可修的真实缺陷而非 harness 噪声；权限隔离骨架（TaskSpec 秘密面）就位。
+**没证明**：论文级指标完整度（stale rate/interaction compression/round-trip/同步成本等缺，F9）；权限隔离/no-leak/复现性没有专门测试（F10）；cross-substrate（builtin_web 为 registered pending dependency，诚实未覆盖）；两个遗留失败的修复（F6b-loop/drift）。
+
+### commit 范围（本轮）
+
+只 add F 自己的文件：`taskvm/benchmark/{__init__,schema,tasks,registry}.py` + `taskvm/evaluation/{__init__,world,actors,oracle,harness,runner,statistics,aggregation,cli}.py` + 跨域修复 `taskvm/architect/architect.py`、`taskvm/kernel/workflow_store.py`（两处已在上面标注 Oracle 备案）+ `docs/oracle/new-oracle/handoffs/12_AGENT_F_SESSION_HANDOFF.md` + `.mrules`/`.mrules.log`。eval_results/ 不进 git（规则 3）。
