@@ -3425,7 +3425,7 @@ gui_driver 的**三处活 import 宿主全是 G Wave-3 的 legacy 删除对象**
 
 ---
 
-## E52（Agent G Wave-3，2026-08-16）：legacy 簇一体化删除 + 双债务表收缩 + substrate FORMAL LOCK 条件达成（L3428-3445；E54 审计点名原 L3443-3497 为索引漂移，已修正）
+## E52（Agent G Wave-3，2026-08-16）：legacy 簇一体化删除 + 双债务表收缩 + substrate FORMAL LOCK 条件达成（L3428-3445；E53 审计点名原 L3443-3497 为索引漂移，已修正）
 
 **base**：6ba9cf1（E50 后 HEAD，工作树干净）。
 
