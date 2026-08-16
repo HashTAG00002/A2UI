@@ -36,6 +36,10 @@ configs/**
 
 可为集成修复最小修改各模块，但必须通知对应 owner；不重新打破边界。
 
+**E49 用户指令追加（2026-08-16）**：全仓目录结构可依 prototype/bench 分离原则调整
+（含 `taskvm/` 顶层与 `tests/`），见下文⭐⭐节；调整不得改变冻层内容语义
+（保冻结合同的迁移约束同节）。
+
 ---
 
 ## ⭐ T1 移交（E→G）与 Wave-3 一体化删除（E47 裁决注入，2026-08-16，最高优先）
@@ -93,6 +97,71 @@ F 尚未审计。允许 F 审计与你并行：F 的证据锚定 exact SHA（E38
 `test_final_contract.py` 的 shrink-only 编辑外，不得改动 F 拥有的
 benchmark/evaluation 内部；README/pyproject 你会重写（F 在 E45 刚清理过），
 属预期内的顺序接力，不是冲突。
+
+---
+
+## ⭐⭐ 目录终局：prototype 与 bench 物理分离（用户指令，E49 注入）
+
+> 用户心智模型（原话裁定）：TaskVM 是“枪”，substrate（builtin_web 自建 app +
+> MobileGym）是“模拟靶场”——用户在靶场里验证枪是否好用，因此 substrate 与
+> `apps/`、`thirdparty/` 都属于 prototype；benchmark/evaluation/baselines 是
+> 论文计量仪器，与用户试验无关。**用户试验的代码路径不得离开 prototype。**
+> （“prototype/infra”理解为“prototype 及其配套基础设施”：组合根、dev.sh、
+> configs、apps、thirdparty 均入 prototype 侧。）
+
+### 终态布局
+
+```text
+taskvm/         ← prototype（枪 + 靶场；用户试验不离开此包）
+  domain/ kernel/ architect/                # 冻结现代平面（A/C）
+  governance/service  runtime/  projection/ # 现代治理/运行时/投影（C/E/D）
+  substrate/  apps/  thirdparty/            # 靶场（B 层 + 自建 app + MobileGym）
+  workspace_ui/composition.py               # 生产组合根（或随迁 runtime/ 旁）
+taskvm_bench/   ← 计量（论文测量仪；名字可自定：greppable、单词、taskvm 之外）
+  benchmark/ evaluation/ baselines/         # 三包原样迁入，内部结构不动
+tests/          ← prototype 合同锁 + integration/smoke；bench 的 tests 随 bench 迁走
+```
+
+### 为什么这是“迁移”不是“重构”（已具备的结构事实）
+
+- F 的五包导入图合同已证：现代 runtime 平面零 benchmark/evaluation import；
+  E49 复核（grep 全仓）：prototype 侧导入 benchmark 的文件**恰为**
+  LEGACY_BENCHMARK_IMPORTERS 的 11 个 legacy 文件，现代五包零命中；
+- demo / user-study 路径（dev.sh → projection → composition → runtime →
+  substrate/apps）不需要 bench 包。
+
+文件系统只需追认导入面已经成立的事实。
+
+### 执行约束（顺序敏感）
+
+1. **先 Wave-3 簇删、后目录迁移**：11 个 legacy importer 大半是删除对象；
+   先删后搬则 import 改写只剩 bench 自身平面与其 tests（给将死文件改
+   import 是浪费，且制造审计 diff 噪音）。
+2. **prototype 保留 `taskvm` 包名**：五包互 import 全是 `taskvm.*`，保留名字
+   = 冻结层（A/C/D 内容、B 全层）零字节改动；git blob 内容寻址不受路径影响，
+   E38 式 exact-SHA 证据链不被破坏。
+3. **bench 迁移是纯机械动作**：`taskvm.(benchmark|evaluation|baselines)`
+   前缀改写到新顶层；同步 pyproject packages/entry-points、
+   configs/paper_matrix.json、docs/benchmark.md、Final Gates 的
+   `python -m taskvm.evaluation.cli` 调用、tests/benchmark +
+   tests/evaluation 随迁。
+4. **substrate/ 内 evaluation.py 本 wave 不动**（B 层 CODE-FROZEN；oracle/seed
+   评测面原地保留；动它属 post-lock 可选清理，需 RFC）。
+5. **等价性验收**：迁移前后全量套件数字逐位一致 + compileall 过；迁移 commit
+   不得混入任何“顺手改进”（纯 move + 机械 import 改写，一 commit 一性质）。
+
+### tests/ 处置边界（用户问询裁定，防误删）
+
+用户问“tests 是否都是中间阶段产物、prototype 建好即可全删”——裁定：**不可全删**。
+
+- tests/ 主体是**最终系统的合同锁**（kernel 84 / substrate 34 / architect 16 /
+  projection 127 / runtime 37 / 五包导入图 / no-leak / 债务登记表 / LOCK 审计
+  本身 / e2e 真浏览器 29）。删除它们 = 冻结合同失去执法器；user study 期间的
+  任何修复都可能无声破坏 GUI-only / 零内部暴露 / 回滚诚实。
+- 随代码消亡的仅限**测 legacy 的部分**：fakes 对 vm_state/rollback 的引用、
+  test_imports 的 gui_driver smoke——它们随 Wave-3 簇删一并删除。
+- Smoke Journey / 前端 crawler 属**新增**（tests/integration、tests/smoke）。
+- 比方：tests 是靶场的校枪规与质检章，不是脚手架——枪造好后每次改装仍要过规。
 
 ---
 

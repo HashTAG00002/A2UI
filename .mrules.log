@@ -3345,3 +3345,25 @@ gui_driver 的**三处活 import 宿主全是 G Wave-3 的 legacy 删除对象**
 1. **G 可否开工/与 F 审计并行**：可以。条件：F 审计锚定 exact SHA（E38 协议）；G 除 `test_final_contract.py` shrink-only register 编辑外禁触 F 内部；A/C/D 盖章先落（无依赖）。
 2. **G 结束 = user study GUI？**：G 范围含 Smoke Journey 15 条（用户输 goal→看 workflow→CUA 推进→surface cards 实时截图→热 LocalPatch→GoalPatch→conflict→GUI rollback→SSE 重连）+ 前端专项验收 + `./scripts/dev.sh` 单命令。当前 `/sessions/<sid>` 已预留 SPA 壳接缝（`static_folder` 接上即发 index.html，否则诚实 JSON 快照）——G 接前端是"接线"不是"重建"。诚实边界：E46 全弧是确定性 fake 证明的；真 provider 在线弧未证明，user study 用真 CUA 需配 provider。
 3. **B 为何无法完全冻结**：见会话白话解释（机场航站楼类比）——B 自身完工全绿冻结；卡的是登记表上唯一违规条目 T1 的物理拆除，而拆除与 G 的 legacy 簇是同一批多米诺；LOCK 审计诚实红是设计而非缺陷。
+
+---
+## E49（2026-08-16）：G 职能扩展——prototype/bench 物理分离 + tests 处置裁定
+
+**用户指令**：① G 整理文件格式：taskvm 的 prototype/infra 与 benchmark 部分分开，用户试验代码不离开 prototype；用户裁定 substrate 属 prototype（"用户要在模拟靶场里验证枪是否好用"）；目录中所有内容都可据此调整，据此更新 G 交接文档与职能。② 问：tests/ 是否都是中间阶段测试、prototype 建好后可全删？
+
+### 落盘改动（仅文档：handoff 08 + ledger，零代码）
+
+1. `08_INTEGRATION_RELEASE_CLEANUP_AGENT.md` 注入 **⭐⭐ 目录终局节**：
+   - 终态树：`taskvm/`（prototype：五现代包 + substrate + apps + thirdparty + 组合根）与 `taskvm_bench/`（benchmark/evaluation/baselines 原样迁入）；bench tests 随 bench 走，tests/ 只留 prototype 合同锁 + integration/smoke；
+   - 结构事实：E49 全仓 grep 复核——prototype 侧导入 benchmark 的文件**恰为** LEGACY_BENCHMARK_IMPORTERS 的 11 个 legacy 文件，现代五包零命中；demo/user-study 路径不需 bench 包 → 这是"迁移"不是"重构"，文件系统追认导入面已成立的事实；
+   - 五条执行约束：先 Wave-3 簇删后迁移 / prototype 保留 taskvm 包名（冻结层零字节改动，blob 内容寻址保 exact-SHA 证据链）/ bench 迁移纯机械（pyproject、configs、docs、Final Gates CLI、tests 同步）/ substrate 内 evaluation.py 不动（B 冻结，动需 RFC）/ 等价性验收（迁移前后套件数字逐位一致 + 一 commit 一性质）；
+   - Owned paths 追加 E49 用户授权行（全仓目录可依分离原则调整，含 taskvm 顶层与 tests）。
+2. **tests/ 处置裁定**（写进 handoff 防后续误删）：不可全删——主体是最终系统合同锁（kernel 84 / substrate 34 / architect 16 / projection 127 / runtime 37 / 五包图 / no-leak / 债务登记 / LOCK 审计本身 / e2e 29）；随代码消亡的仅限测 legacy 部分（fakes 的 vm_state/rollback 引用、test_imports 的 gui_driver smoke，随 Wave-3 簇删）；G 的 Smoke Journey 属新增。比方：tests 是靶场的校枪规与质检章，不是脚手架。
+
+### 边缘目录归属取证（支撑终态树）
+
+`apps/`（calendar/taskboard/mail/drive/outlook_cal 自建可复位应用）、`thirdparty/mobilegym` → 靶场设施 → prototype；`_migration/`、`_shim/`、`vm_state/`（顶层）→ legacy 残留 → Wave-3 删除对象。
+
+### 验证
+
+文档级改动零代码；全量非 e2e 复核 439 passed / 1 skipped / 0 failed（基线 1e6e3fb 不变）。
