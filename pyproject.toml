@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "taskvm"
 version = "0.2.0"
-description = "TaskVM — compile live state of multiple existing apps into an editable, executable, verifiable task interface. Final benchmark: python -m taskvm.evaluation.cli"
+description = "TaskVM — compile live state of multiple existing apps into an editable, executable, verifiable task interface. Final benchmark: python -m taskvm_bench.evaluation.cli"
 requires-python = ">=3.10"
 # Canonical conda env: taskvm (cloned from senseact, 2026-08-12)
 #   Path: /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/conda/envs/taskvm
@@ -28,4 +28,4 @@ browser = ["playwright>=1.40"]
 dev = ["pytest>=7.0"]
 
 [tool.setuptools.packages.find]
-include = ["taskvm*"]
+include = ["taskvm*", "taskvm_bench*"]

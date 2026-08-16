@@ -3425,7 +3425,7 @@ gui_driver 的**三处活 import 宿主全是 G Wave-3 的 legacy 删除对象**
 
 ---
 
-## E52（Agent G Wave-3，2026-08-16）：legacy 簇一体化删除 + 双债务表收缩 + substrate FORMAL LOCK 条件达成（L3443-3497）
+## E52（Agent G Wave-3，2026-08-16）：legacy 簇一体化删除 + 双债务表收缩 + substrate FORMAL LOCK 条件达成（L3428-3445；E54 审计点名原 L3443-3497 为索引漂移，已修正）
 
 **base**：6ba9cf1（E50 后 HEAD，工作树干净）。
 
@@ -3443,3 +3443,47 @@ gui_driver 的**三处活 import 宿主全是 G Wave-3 的 legacy 删除对象**
 **没证明什么**：本步骤无真模型 GUI 弧（确定性套件）；B 层触碰全部为 docstring/错误提示字符串级。
 
 **教训（元原则 12 候选）**：dead-code 删除的引用扫描必须模块级 grep 全量 import 图——测试绿 ≠ import 图干净（bench/延迟路径的模块级 import 只有运行到才炸）；删除类改动的必要验收 = grep import 图 + 全平面 import smoke + 全量测试三件套。
+
+---
+
+## E53（2026-08-16）：Agent F 锁定后次生回归复审——PASS 维持、FORMALLY LOCKED 不动，零新 finding
+
+**触发**：用户指令（"按照刚刚的原则审计 agentF 有没有问题"；沿用 E51 的 charter v2 纪律 + §7.1 唯一合法重开面）。
+
+**背景澄清（消解过时待办）**：F 在 E51 已随 D/E 同轮纳入审计并裁决 **PASS / FORMALLY LOCKED**（用户直接 approve，无返工 prompt）。上轮会话摘要遗留的"待办：F 删 5 个 killtest 脚本（T1 第二棒）"是**过时状态**——该义务实际已由 E45（FF 收官，一次删除 14 个脚本，含全部 10 个 `run_*killtest.py`）完成，E51 以 grep + 目录清单双重验证清零；T1 接力随后经 E48 改派 G 并在 E52 簇删中终结（TRANSITIONAL_DEBT_REGISTER→{}）。**F 名下无未清偿义务。**
+
+**审计对象（charter §5.1 声明）**：
+- Audited layer: F（benchmark/evaluation/baselines）
+- Frozen contract: handoff 07 + docs/benchmark.md + 合同锁 `tests/benchmark/test_taxonomy.py` + `tests/evaluation/test_final_contract.py`
+- Lock SHA: 6ba9cf1（E51）；本轮 exact SHA: **qe95d8dc**（HEAD；工作树脏污仅为 G 在途 taskvm_bench 迁移，不属 F 裁决面）
+- Bounded scope: ①§7.1 次生回归窗口 6ba9cf1→HEAD；②F 验收在 HEAD 提取树独立复跑；③§6.5 残留 gate 复查；④E48"F 并行约束"遵守情况
+- Excluded: 重开 E51 已裁决事项（§4.2/§7.3，含 F-N1/F-N2 两条 SPEC-GAP 再评审）；G 未提交迁移的裁决（owner G，等价性验收属 G）
+
+**事实（本轮全部亲取，非 ledger 转述）**：
+1. **次生回归窗口**：F 域（taskvm/benchmark|evaluation|baselines、tests/benchmark|evaluation、configs/paper_matrix.json、docs/benchmark.md）在 6ba9cf1→HEAD 的唯一 diff = `tests/evaluation/test_final_contract.py`（+6/−9），内容严格为 LEGACY_BENCHMARK_IMPORTERS 11→2 **shrink-only**（删 9 个 Wave-3 已死条目 + 注释说明），测试语义零改动——恰为 handoff-08"F 并行约束"引用 F 合同（"update ONLY on deletion"）预授权的唯一编辑类别。**F 生产面零字节改动 → 次生回归在 exact-SHA 级排除**。
+2. **独立复跑**（`git archive HEAD` 提取树 ≡ exact tree 对象，规避触碰 G 脏工作树；本环境 `git worktree add` 报 invalid reference 不可用，archive 为等效 Level-1 取证）：handoff-07 冻结验收命令 `pytest -q tests/benchmark tests/evaluation tests/architecture` = **30 passed in 1.43s**；`taskvm.evaluation.cli --help` exit 0（list/run/report/compare 四子命令）；`compileall -q taskvm` exit 0。
+3. **残留 gate**：`git grep killtest HEAD -- taskvm/ tests/ README.md pyproject.toml configs/ docs/benchmark.md` = **0 命中**（final-test 6 成立）；taskvm/evaluation/ 目录恰为 8 干净文件 + __init__；LEGACY_BENCHMARK_IMPORTERS=2 幸存者（harness/replay_engine、task_state/compiler——随 bench 分离迁移）。
+4. **规则 2 证据复核**：eval_results/paper-matrix/ **270 个 trial JSON** 在场 + report.json n_trials=270；by_condition 原始字段：taskvm=1.0 / direct-cua=0.8 / planner-cua=0.8 / taskvm-no-replan=0.8667 / taskvm-no-verifier=1.0（平坦，确定性世界诚实标注不可解释）/ oracle-upper-bound=1.0——与 E45/E51 台账逐项一致。
+5. **在途迁移归属与抽查（G 域观察项，不入 F 裁决）**：working tree 的 taskvm_bench 迁移对 F 文件抽查（evaluation/harness.py、tests/evaluation/test_final_contract.py）为机械 import 改写（taskvm.*→taskvm_bench.*）+ REPO 目录深度调整（`"..",".."`→三段）；在途版债务表进一步收缩为 `frozenset({})`，注释诚实说明两幸存者随 bench 物理迁移。E51 证据锚定 6ba9cf1，不受在途改动影响；逐位等价验收属 G（E49 约束 5）。
+
+**Findings：无**。本轮 bounded scope 内没有发现新的 contract defect，亦无次生回归。F-N1（条件矩阵 6/8）/ F-N2（world-only 底座）维持 E51 裁决（SPEC-GAP 非阻塞，owner 已路由论文期/G）。
+
+**裁决（charter §8 模板）**：**F：PASS / FORMALLY LOCKED（维持）**——锁后未出现合法重开事由；E52 窗口唯一触碰属预授权 shrink-only。全部 A-G 中 F 侧无遗留动作。
+
+**小台账备注**（不入裁决）：E52 行自引区间写作 L3443-3497，实际 .mrules.log E52 节占 ~L3428-3445（G 侧索引漂移，纯装饰性；按多 agent 纪律本会话未代改 G 的行）。
+
+**证据落盘**：eval_results/audit_f_lockcheck_qe95d8dc.json（不入 git，规则 3）。
+
+---
+
+## E54（2026-08-16，Agent G）④ prototype/bench 目录分离：taskvm_bench 顶层落地 + 等价性验收逐位一致
+
+**做了什么**：按 E49 裁定把计量仪迁出为独立顶层包 `taskvm_bench/`（纯机械迁移）：`taskvm/{benchmark,evaluation,baselines,harness,task_state}` 五包 + `tests/{benchmark,evaluation}` → `taskvm_bench/` 对应位置；包内 import 前缀 `taskvm.xxx` → `taskvm_bench.xxx` 机械重写（39 文件 146+/152-）。配套：`pyproject.toml` packages.find += `taskvm_bench*`；`configs/paper_matrix.json` / `docs/benchmark.md` / `README.md` CLI 路径改 `python -m taskvm_bench.evaluation.cli`；架构门 `_ALWAYS_BANNED = ("taskvm_bench",)` 整包直禁（bench 平面永不进 prototype）；`bridge.py` docstring 摘除已删 shim 引用。
+
+**解耦点（迁移前已就位，本波收尾）**：`replay_engine.py` 对已删 `governance.translate` 的依赖 → `harness/locator.py` 内联四个符号（TITLE_FIELD/ID_FIELD/build_locator_index），bench 平面自洽；LEGACY_BENCHMARK_IMPORTERS 11→**{}**（replay_engine + task_state/compiler 随迁，prototype 零 bench import）。
+
+**关键纠错**：`taskvm_bench/tests/evaluation/test_final_contract.py` 迁移后首跑 3 红——`REPO = dirname/../..` 差一层（文件深了一级）+ 两处 `taskvm/evaluation/...` 路径拼接未跟迁；修为 `../../..` + `taskvm_bench/evaluation/...`。教训：**迁移类改动的路径基准（`__file__` 相对深度）是教科书级回归点，首跑必须逐红核对根因再修**。
+
+**等价性验收（E44 worktree 先例，证据 eval_results/dir_split_equivalence.json）**：HEAD（e95d8dc，E52 后）worktree 基线 `pytest tests/ -q` = **429p/5s/0f** vs 工作区迁移后 `pytest tests/ taskvm_bench/tests/ -q` = **429p/5s/0f**；junitxml 逐测试比对：434/434 node ID 完全一致（唯一合法差异 = 迁移文件路径前缀，已归一化），零结果差异 → verdict=**EQUIVALENT**。`compileall taskvm/ taskvm_bench/` exit 0。CLI 冒烟 `python -m taskvm_bench.evaluation.cli --help` 四子命令正常。依赖方向 grep：`taskvm/` 零引用 taskvm_bench；bench 正向引用 prototype 恰 3 文件（evaluation/actors+world+harness，被测系统方向，合法）。
+
+**没证明什么**：paper_matrix 全矩阵未重跑（等价性由逐测试比对 + 确定性世界保证，E45 落盘数字仍有效）；e2e 真浏览器属 ⑥ 独立验收。

@@ -1,6 +1,6 @@
 # TaskVM Final Benchmark — 运行手册与证据规范
 
-> Owner: Agent FF (E-波次收尾). 层: `taskvm/benchmark/`（考场定义）+ `taskvm/evaluation/`（考官与判卷）.
+> Owner: Agent FF (E-波次收尾). 层: `taskvm_bench/benchmark/`（考场定义）+ `taskvm_bench/evaluation/`（考官与判卷）.
 > 本文档只描述**当前代码真实存在的行为**; 任何与代码不符的表述都是 bug.
 
 ## 1. 一句话
@@ -11,17 +11,17 @@
 
 ```bash
 # 标准环境: /mnt/dolphinfs/.../conda/envs/taskvm/bin/python, PYTHONPATH=仓库根
-PYTHONPATH=. python -m taskvm.evaluation.cli list --what suites
+PYTHONPATH=. python -m taskvm_bench.evaluation.cli list --what suites
 
 # 冒烟 (15 任务 × 全部 6 条件 × 1 seed, 分钟级)
-PYTHONPATH=. python -m taskvm.evaluation.cli run --suite final --seeds 1 --budget smoke \
+PYTHONPATH=. python -m taskvm_bench.evaluation.cli run --suite final --seeds 1 --budget smoke \
     --run-id ff-smoke --out eval_results
 
 # 论文矩阵 (15 × 6 × 3 seeds, paper 预算放宽 loop/round 上限)
-PYTHONPATH=. python -m taskvm.evaluation.cli compare --config configs/paper_matrix.json
+PYTHONPATH=. python -m taskvm_bench.evaluation.cli compare --config configs/paper_matrix.json
 
 # 从落盘产物重新渲染论文表格 (不重跑)
-PYTHONPATH=. python -m taskvm.evaluation.cli report --input eval_results/<run-id> --format paper
+PYTHONPATH=. python -m taskvm_bench.evaluation.cli report --input eval_results/<run-id> --format paper
 ```
 
 产物: `eval_results/<run-id>/report.json`（机器可读 + per-trial `trials/*.json`）与 `report.md`. `eval_results/` 不进 git.

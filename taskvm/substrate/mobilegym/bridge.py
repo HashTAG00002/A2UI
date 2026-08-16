@@ -140,7 +140,8 @@ class MobileGymBridge:
                     "back to headless so the demo doesn't crash. Per-step "
                     "screenshots still land in eval_results/mobilegym_visual_*/. "
                     "For a live headed demo, run on a machine with a display "
-                    "(or `xvfb-run python -m taskvm.harness.mobilegym_bridge --headed`).")
+                    "(or start this bridge headless and drive it via the "
+                    "L1 observe/act port).")
                 effective_headless = True
         self.env = MobileGymEnv(url=self.sim_url, headless=effective_headless,
                                 verbose=False)

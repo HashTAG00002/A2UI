@@ -39,7 +39,7 @@ _CONCRETE_SUBSTRATES = (
     "taskvm.substrate.builtin", "taskvm.substrate.builtin_web",
     "taskvm.substrate.mobilegym", "taskvm.substrate.osworld",
 )
-_ALWAYS_BANNED = ("taskvm.benchmark", "taskvm.evaluation")
+_ALWAYS_BANNED = ("taskvm_bench",)
 
 _RULES: dict[str, PkgRule] = {
     # the pure core: stdlib only
@@ -191,8 +191,9 @@ def test_core_packages_exist_and_are_pure():
 
 # ── regressions: the gate itself must catch what it claims to catch ───────
 def test_relative_forbidden_import_is_caught():
-    """from ..benchmark import x inside taskvm/kernel must resolve to
-    taskvm.benchmark and be rejected."""
+    """from ..benchmark import x inside taskvm/kernel resolves to
+    taskvm.benchmark and is rejected (outside the allowed set; the real
+    bench plane taskvm_bench.* is _ALWAYS_BANNED outright)."""
     src = "from ..benchmark import fixtures\n"
     problems = check_source(src, "taskvm/kernel/virtual_mod.py",
                             _RULES["taskvm/kernel"])

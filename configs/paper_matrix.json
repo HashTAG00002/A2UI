@@ -1,5 +1,5 @@
 {
-  "_readme": "Paper matrix for the final TaskVM benchmark (Agent FF). Deterministic world + capability-matched fakes. Run: PYTHONPATH=. python -m taskvm.evaluation.cli compare --config configs/paper_matrix.json --out eval_results/. Seeds is a COUNT (runner uses seed = 0..seeds-1 per cell); budget is a BUDGET_PRESETS key. taskvm-oracle-upper-bound is diagnostic-only (never a headline number).",
+  "_readme": "Paper matrix for the final TaskVM benchmark (Agent FF; migrated to taskvm_bench by Agent G). Deterministic world + capability-matched fakes. Run: PYTHONPATH=. python -m taskvm_bench.evaluation.cli compare --config configs/paper_matrix.json --out eval_results/. Seeds is a COUNT (runner uses seed = 0..seeds-1 per cell); budget is a BUDGET_PRESETS key. taskvm-oracle-upper-bound is diagnostic-only (never a headline number).",
   "suite": "final",
   "conditions": [
     "taskvm",
