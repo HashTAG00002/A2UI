@@ -3269,3 +3269,49 @@ Agent FF 接手 F 的未竟事业（07_FINAL_BENCHMARK_AGENT 任务书，F 交�
 ### 下一里程碑（不变）
 
 E 第二棒 T1 清账（物理删 gui_driver）+ G Wave-3 删 legacy execution → 登记表清空 → `TASKVM_SUBSTRATE_LOCK_AUDIT=1` 全绿 → B/C 双双正式 LOCK。D 的 T2 责任已清（E41 时），本条后 D 无挂账债务。
+
+---
+## E47（2026-08-16）：A–E 冻结裁决审计（用户问："是否可以冻结A-E，注意B/C和D/E联动接口"）
+
+**exact SHA：2c853793ac89042089a89d0b7498c8254bd6a793**（= HEAD，E46）
+证据落盘：`eval_results/freeze_audit_2c85379.json`（不入 git，规则 2/3）
+
+### 裁决结论
+
+| Agent | 裁决 | 依据 |
+|---|---|---|
+| A kernel | **FORMAL LOCK 可立即盖章** | E28 后 `7b4ad1d..HEAD` 零提交；封闭性 grep 零上层 import；tests/kernel 84 绿 |
+| B substrate | **维持 CODE-FROZEN；FORMAL LOCK 机械等 T1** | E45 对 B 的触碰仅注释级词汇清理（4 文件 14 行，§6 合同面零动，diffstat 实证）；tests/substrate 34p/1s；显式 LOCK audit 红点**恰好且仅**为 T1 唯一条目（T2 已由 D 于 58f0d0c 清偿）；合同原文"B does not reopen scope; LOCK stamps mechanically when register empty" |
+| C architect | **FORMAL LOCK 可立即盖章** | E33 退场后零提交；E44 条件达成 + E38 exact-SHA 证据链闭环；architect 零 substrate/projection/execution import；tests/architect 16 绿 |
+| D projection | **FORMAL LOCK 可立即盖章（与 T1 无关）** | E46 收官后无新提交；projection 零 substrate import；tests/projection 127 绿 + 五包导入图 9 绿；D 的 T1 义务仅 leg-1 接线，已完成 |
+| E runtime | **现代面可冻结，但冻结前必须先裁决 T1 leg-3 归属** | E44 TEST-ONLY 后 taskvm/runtime 零提交；封闭性干净；tests/runtime 37 绿；唯一在途义务 = T1 物理删除 |
+
+### 联动接口验证（用户点名两项）
+
+**B/C**：C 只消费 A 的 kernel domain（grep 实证 architect 零 substrate import）→ B 的 LOCK **不阻塞** C；T2 由 D 清偿；E45 的 B 层触碰为注释级（合同面零动）。
+**D/E**：`composition.py:251 → bootstrap.py:69 compose_runtime` 单一生产调用点（grep 实证）；`/governance/start` 真启动路径 + typed 409；SSE 33 项词汇 totality + format_sse chokepoint；五包现代导入图 9/9 绿；双向封闭性（D 零 substrate / E 零 projection）干净。
+
+### ⭐ 本次审计新发现：T1 leg-3 与 G Wave-3 存在结构性交叉
+
+gui_driver 的**三处活 import 宿主全是 G Wave-3 的 legacy 删除对象**：
+1. `taskvm/governance/vm_state.py:45` → 被 governance/__init__、tests/fakes×5、test_imports 消费
+2. `taskvm/execution/action_dispatcher.py:28` → 被 workflow_executor、workspace_ui/server.py 消费
+3. `taskvm/execution/rollback.py:40` → 被 workspace_ui/server.py、verifier/rollback_verify.py、fakes、test_imports 消费
+
+**证据**：`vm_state.py` 与 `workspace_ui/server.py` 均在 F 的 `LEGACY_BENCHMARK_IMPORTERS`（tests/evaluation/test_final_contract.py:42-54），注释明写 "pending Agent G's deletion wave"。
+**含义**：E 孤立删 gui_driver.py 会让 legacy 栈连锁 ImportError（governance/__init__ → vm_state → gui_driver 等）。T1 leg-3 二选一：①正式移交 G Wave-3（substrate.md §8 T1 owner 字段显式修正为 E→G，非静默）；②E 执行但须做三宿主 import 手术（侵入 G 范围的 legacy 文件）。**推荐①**：E46 的 "T1 owner E/G" 措辞已是伏笔，且 F 的脚本删除（第二棒）已确认完成（盘上零 killtest 脚本、taskvm/tests 之外零 gui_driver 引用）。
+
+### 全量复现（exact SHA）
+
+- 非 e2e：**439 passed / 1 skipped / 0 failed**
+- e2e 真浏览器：**29 passed / 0 failed**（PLAYWRIGHT_BROWSERS_PATH=taskvm env opt/ms-playwright）
+- 显式 LOCK audit：6 passed / **1 failed（仅 test_formal_lock_audit，红点=T1 唯一条目，诚实预期）**
+
+### 建议执行顺序
+
+1. A/C/D 三家 FORMAL LOCK 盖章（exact SHA 2c85379，ledger 记录）
+2. §8 T1 owner 修正 E→G（显式登记变更）→ E 冻结为 OWNER-COMPLETE/CODE-FROZEN
+3. G Wave-3：删 gui_driver.py + vm_state/action_dispatcher/rollback + workspace_ui legacy + fakes 清理 + 双债务表收缩（TRANSITIONAL_DEBT_REGISTER→{} + LEGACY_BENCHMARK_IMPORTERS 同步收缩）
+4. B 机械盖章 FORMAL LOCK（register 空 + LOCK audit 全绿）
+
+**没证明**：真 provider 在线全弧（E46 已标注）；SPA 前端；G Wave-3 可行性（本审计只证明交叉存在）。
