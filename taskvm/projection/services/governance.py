@@ -96,8 +96,16 @@ class KernelGovernancePort:
     def rollback(self, target_checkpoint_id: str,
                  rationale: str = "") -> dict[str, Any]:
         """Rollback goes through the compensation path: the kernel builds
-        a CompensationPatch referencing the checkpoint, then the runtime
-        executes it. Here we just request the compensation plan."""
+        a CompensationPatch referencing the checkpoint; the ROUTE then
+        hands the returned plan (under ``"plan"``) to the session driver
+        for execution. With no driver registered the plan honestly stays
+        pending (§8: never a fake success).
+
+        ``disposition`` starts as "pending"; the route replaces it with
+        the runtime's verdict ("complete"/"partial"/"failed") when an
+        executor exists. The ``"plan"`` key carries the typed
+        CompensationPlan object — internal to the server, popped before
+        JSON serialisation."""
         from taskvm.domain.patch import CompensationPatch
         patch = CompensationPatch(
             patch_id=f"rb-{int(time.time()*1000)}",
@@ -106,7 +114,10 @@ class KernelGovernancePort:
         plan = self._kernel.request_compensation(patch)
         return {"ok": True, "action": "rollback",
                 "plan_id": plan.plan_id,
-                "entries": len(plan.entries)}
+                "entries": len(plan.entries),
+                "uncompensatable": len(plan.uncompensatable),
+                "disposition": "pending",
+                "plan": plan}
 
     # ── conflict resolution ──────────────────────────────────────────────
 

@@ -141,6 +141,72 @@ class TestModelCallRegression:
             f"read routes triggered {calls[0]} probe calls; "
             "expected at most 2 (1 snapshot + 1 governance)")
 
+    def test_twenty_data_deltas_zero_model_calls(self):
+        """D-F4 repair (contract §12 as written): N≥20 consecutive REAL
+        data deltas — ``kernel.apply_observation`` → OBSERVATION_RECEIVED
+        event → SSE envelope — leave the model-call count EXACTLY at the
+        baseline. The pre-repair test read 20 snapshots and asserted
+        ``delta <= 20``; this is the delta-injection oracle the contract
+        intended (§3: 0 model calls on the delta data plane)."""
+        from taskvm.domain.state import ObservedValue, SurfaceEvidence, \
+            SurfaceHandle
+        from taskvm.projection.events import SSE_TYPE_VOCABULARY, sse_envelope
+
+        kernel = _make_kernel()
+        calls = [0]
+
+        def probe():
+            calls[0] += 1
+            return calls[0]
+
+        store = ProjectionSessionStore()
+        store.register("s1", kernel, model_call_probe=probe)
+        app = create_app(store)
+        app.config["TESTING"] = True
+        c = app.test_client()
+
+        baseline = calls[0]
+        assert baseline == 0  # registration costs nothing
+
+        # inject 20 real observations → 20 OBSERVATION_RECEIVED events
+        for i in range(20):
+            kernel.apply_observation([ObservedValue(
+                semantic_key="release_date",
+                value=f"2026-08-{14 + (i % 10):02d}",
+                evidence=(SurfaceEvidence(
+                    surface=SurfaceHandle(handle_id="vis"),
+                    visible_label="发布日期"),))])
+
+        # every event flows out as a typed SSE delta inside the vocabulary
+        events = kernel.events()
+        deltas = [e for e in events
+                  if getattr(e, "kind", None) is not None
+                  and e.kind.name == "OBSERVATION_RECEIVED"]
+        assert len(deltas) >= 20
+        for ev in deltas:
+            envelope = sse_envelope(ev)
+            assert envelope["sse_type"] in SSE_TYPE_VOCABULARY
+
+        # THE core §3 oracle: the delta data plane itself costs EXACTLY 0
+        # probe invocations — apply_observation never touches the ledger
+        # probe (which counts model calls in real composition roots).
+        assert calls[0] == 0, (
+            f"20 real data deltas triggered {calls[0]} model calls; "
+            "the delta data plane must cost EXACTLY the baseline (0)")
+
+        # the read routes serving those deltas stay architecture-free:
+        # the probe fires ONLY as the governance-bar ledger read (exactly 1
+        # per snapshot — same oracle as test_read_routes_no_model_calls),
+        # and the events route must add nothing on top.
+        for _ in range(5):
+            c.get("/api/sessions/s1/snapshot")
+            c.get("/api/sessions/s1/events?limit=100")
+
+        assert calls[0] == 5, (
+            f"5 snapshots + 5 event reads triggered {calls[0]} probe calls; "
+            "expected EXACTLY 5 (1 governance-bar ledger read per snapshot, "
+            "0 for the events route)")
+
     def test_artifact_serving_no_model_calls(self):
         """GET /artifacts/<ref> costs 0 model calls (contract §5)."""
         kernel = _make_kernel()

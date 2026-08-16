@@ -191,7 +191,7 @@ class TestPlaywrightE2E:
             const d = await r.json();
             return {status: r.status, ok: d.ok, label: d.label};
         }""", server_url)
-        assert result["status"] == 200
+        assert result["status"] == 201  # RFC-D1 §6: checkpoint CREATES a resource
         assert result["ok"] is True
         assert result["label"] == "浏览器检查点"
         page.close()

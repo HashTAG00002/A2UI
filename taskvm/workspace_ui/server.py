@@ -52,7 +52,11 @@ from taskvm.harness import replay_engine as replay
 # (compose_task_runtime → taskvm.runtime.bootstrap.compose_runtime).
 # The legacy operator-write routes below honest-fail while this file
 # awaits its gated deletion (substrate.md §8 T1 / Agent F).
-from taskvm.workspace_ui.composition import mobilegym_bridge_url
+# §6-clean (D-F2 fix round): NO provider URL knowledge in this layer —
+# the MobileGym bridge URL, when not at the provider's own default, is
+# supplied by the OPERATOR via TASKVM_MOBILEGYM_BRIDGE_URL (see
+# _get_fixture_and_adapters).
+import os as _os
 from taskvm.substrate import evaluation_registry
 from taskvm.task_state.entity_binding import TaskBinding
 from taskvm.workspace_ui.editable_components import (
@@ -588,11 +592,16 @@ def _get_fixture_and_adapters(task_id: str, host: str = "localhost"):
     from taskvm.benchmark.mobilegym_fixtures import MOBILEGYM_TASKS
     if task_id in MOBILEGYM_TASKS:
         from taskvm.benchmark.mobilegym_fixtures import get_mobilegym_task
+        # §6-clean: bridge_url ONLY when the operator says so — the
+        # provider's own default (localhost:3019) applies otherwise.
+        bridge = _os.environ.get("TASKVM_MOBILEGYM_BRIDGE_URL", "").strip()
+        eval_cfg: dict = {"sid": ""}
+        if bridge:
+            eval_cfg["bridge_url"] = bridge
         return (get_mobilegym_task(task_id),
                 {},
                 {a: evaluation_registry.create(
-                    "mobilegym", {"app": a, "sid": "",
-                                  "bridge_url": mobilegym_bridge_url(host)})
+                    "mobilegym", {"app": a, **eval_cfg})
                  for a in ("wechat", "alipay")})
     from taskvm.benchmark.fixtures import get_task
     fixture = get_task(task_id)

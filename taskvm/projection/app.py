@@ -2,7 +2,11 @@
 (contract §6: route matrix; §3: 0 model calls on read paths; §5: no
 substrate import).
 
-Route matrix (frozen contract §6.1):
+Route matrix (frozen contract §6, REVISED by RFC-D1 — see
+docs/contracts/projection_rfc_backlog.md; governance-authorized via the
+D audit rework order 2026-08-16):
+
+    GET  /sessions/<sid>                        SPA page (or JSON snapshot)
     GET  /api/sessions                          list sessions
     GET  /api/sessions/<sid>/snapshot           full snapshot bundle
     GET  /api/sessions/<sid>/governance         governance bar
@@ -11,17 +15,25 @@ Route matrix (frozen contract §6.1):
     GET  /api/sessions/<sid>/checkpoints        checkpoint timeline
     GET  /api/sessions/<sid>/surfaces           surface cards
     GET  /api/sessions/<sid>/conflicts          open conflicts
-    GET  /api/sessions/<sid>/events              event log (paginated)
-    GET  /api/sessions/<sid>/sse                 SSE stream (live deltas)
+    GET  /api/sessions/<sid>/events             event log (paginated JSON)
+    GET  /api/sessions/<sid>/sse                SSE stream (live deltas)
     GET  /api/sessions/<sid>/artifacts/<ref>    artifact bytes (read-only)
-    POST /api/sessions/<sid>/governance/pause    autonomy control
-    POST /api/sessions/<sid>/governance/resume
-    POST /api/sessions/<sid>/governance/stop
-    POST /api/sessions/<sid>/governance/local_patch
-    POST /api/sessions/<sid>/governance/goal_patch
-    POST /api/sessions/<sid>/governance/checkpoint
-    POST /api/sessions/<sid>/governance/rollback
-    POST /api/sessions/<sid>/governance/resolve_conflict
+    POST /api/sessions/<sid>/governance/start      200 | 409 pending-recompose
+    POST /api/sessions/<sid>/governance/pause      200
+    POST /api/sessions/<sid>/governance/resume     200 | 409
+    POST /api/sessions/<sid>/governance/stop       200
+    POST /api/sessions/<sid>/governance/local_patch   200 | 422 non-editable
+    POST /api/sessions/<sid>/governance/goal_patch    202 (async two-phase)
+    POST /api/sessions/<sid>/governance/checkpoint    201 | 409 unstable
+    POST /api/sessions/<sid>/governance/rollback      202 plan + disposition
+    POST /api/sessions/<sid>/governance/resolve_conflict 200
+
+Error semantics (typed, class-based — no string matching):
+    UnknownCheckpointError → 404   (unknown checkpoint on rollback)
+    PatchSemanticsError    → 422   (non-editable key / wrong patch class)
+    ValidationError        → 409   (unstable boundary / pending recompose /
+                                    pending compensation of current epoch)
+    anything else          → 400   (malformed payload)
 """
 from __future__ import annotations
 
@@ -34,8 +46,12 @@ from typing import Any, Callable
 from flask import Flask, Response, jsonify, request, send_file
 from io import BytesIO
 
-from taskvm.domain.events import Event, EventKind
-from taskvm.projection.events import format_sse, sse_envelope
+from taskvm.domain.errors import (
+    PatchSemanticsError, TaskVMError, UnknownCheckpointError, ValidationError,
+)
+from taskvm.projection.events import (
+    TRANSPORT_EVENT_SSE, format_sse, sse_envelope,
+)
 from taskvm.projection.store import (
     ArtifactStore, ProjectionSession, ProjectionSessionStore, SurfaceDecl,
 )
@@ -63,6 +79,10 @@ def create_app(store: ProjectionSessionStore,
     _sub_lock = threading.Lock()
 
     def _notify(sid: str, envelope: dict[str, Any]) -> None:
+        try:
+            frame = format_sse(envelope)  # vocabulary assertion (D-F3)
+        except ValueError:
+            return  # an unregistered sse_type never reaches the wire
         with _sub_lock:
             for q in _subscribers.get(sid, []):
                 try:
@@ -83,6 +103,38 @@ def create_app(store: ProjectionSessionStore,
                 if not _subscribers[sid]:
                     del _subscribers[sid]
 
+    def _push_kernel_events(sid: str, sess: ProjectionSession,
+                            since_index: int) -> None:
+        """Forward kernel events emitted after ``since_index`` to SSE
+        subscribers (typed envelopes; public facade only)."""
+        events = sess.kernel.events()
+        for ev in events[since_index:]:
+            try:
+                _notify(sid, sse_envelope(ev))
+            except ValueError:
+                pass
+
+    def _driver_for(sess: ProjectionSession):
+        """Return the session's driver, lazily constructing the default
+        ThreadedRuntimeDriver over the registered runtime (D-F2: the
+        HTTP start path must be able to begin autonomy). ``None`` when
+        the session has no runtime at all — the route reports honestly."""
+        if sess.driver is not None:
+            return sess.driver
+        if sess.runtime is None:
+            return None
+        from taskvm.projection.services.driver import ThreadedRuntimeDriver
+
+        def _on_runtime_event(ev: Any) -> None:
+            try:
+                _notify(sess.sid, sse_envelope(ev))
+            except ValueError:
+                pass
+
+        sess.driver = ThreadedRuntimeDriver(sess.runtime,
+                                            on_event=_on_runtime_event)
+        return sess.driver
+
     # ── helpers ──────────────────────────────────────────────────────────
 
     def _get_session(sid: str) -> ProjectionSession:
@@ -95,8 +147,8 @@ def create_app(store: ProjectionSessionStore,
     def _gov(sess: ProjectionSession):
         return sess.governance_port()
 
-    def _json_response(data: Any) -> Response:
-        return jsonify(_jsonable(data))
+    def _json_response(data: Any, status: int = 200) -> Response:
+        return jsonify(_jsonable(data)), status
 
     def _jsonable(value: Any) -> Any:
         if value is None or isinstance(value, (bool, int, float, str)):
@@ -106,6 +158,19 @@ def create_app(store: ProjectionSessionStore,
         if isinstance(value, dict):
             return {str(k): _jsonable(v) for k, v in value.items()}
         return str(value)
+
+    def _error_status(e: Exception) -> int:
+        """Typed error → HTTP status (RFC-D1 §6 error semantics)."""
+        if isinstance(e, UnknownCheckpointError):
+            return 404
+        if isinstance(e, PatchSemanticsError):
+            return 422
+        if isinstance(e, ValidationError):
+            return 409
+        return 400
+
+    def _error_body(action: str, e: Exception) -> dict[str, Any]:
+        return {"ok": False, "action": action, "error": str(e)}
 
     # ── read routes ───────────────────────────────────────────────────────
 
@@ -187,7 +252,8 @@ def create_app(store: ProjectionSessionStore,
             # send an initial snapshot so the client has a starting point
             try:
                 snap = snapshot_view(sess)
-                yield f"data: {json.dumps({'sse_type': 'snapshot', 'detail': snap}, ensure_ascii=False)}\n\n"
+                yield format_sse({"sse_type": TRANSPORT_EVENT_SSE["snapshot"],
+                                  "detail": snap})
             except Exception:
                 pass
             try:
@@ -208,19 +274,47 @@ def create_app(store: ProjectionSessionStore,
 
     # ── governance command routes ─────────────────────────────────────────
 
+    #: per-route success status (RFC-D1: 201 checkpoint creation, 202
+    #: async two-phase goal_patch / plan-accepted rollback, 200 the rest)
+    _SUCCESS_STATUS = {
+        "pause": 200, "resume": 200, "stop": 200, "start": 200,
+        "local_patch": 200, "goal_patch": 202, "checkpoint": 201,
+        "rollback": 202, "resolve_conflict": 200,
+    }
+
     def _gov_cmd(sid: str, method_name: str) -> Response:
         sess = _get_session(sid)
         port = _gov(sess)
         body = request.get_json(silent=True) or {}
+        event_index = len(sess.kernel.events())
         try:
             fn = getattr(port, method_name)
             result = fn(**body) if body else fn()
-            # notify SSE subscribers
-            _notify(sid, {"sse_type": "governance.applied",
-                           "detail": _jsonable(result)})
-            return _json_response(result)
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 400
+            if not isinstance(result, dict):
+                result = {"ok": True, "result": _jsonable(result)}
+            # rollback: hand the plan to the driver for execution (§8
+            # honest disposition; without a driver it stays "pending")
+            if method_name == "rollback":
+                plan = result.pop("plan", None)
+                if plan is not None:
+                    driver = _driver_for(sess)
+                    if driver is not None:
+                        result["disposition"] = driver.execute_compensation(
+                            plan)
+            # notify SSE subscribers (registered transport ack type)
+            _notify(sid, {"sse_type": TRANSPORT_EVENT_SSE["governance.applied"],
+                          "detail": _jsonable(result)})
+            # forward any kernel events the command produced (checkpoint.
+            # committed / plan.patched / compensation.* …) as live deltas
+            _push_kernel_events(sid, sess, event_index)
+            status = _SUCCESS_STATUS.get(method_name, 200)
+            return _json_response(result, status)
+        except TaskVMError as e:
+            _notify(sid, {"sse_type": "error",
+                          "detail": _error_body(method_name, e)})
+            return jsonify(_error_body(method_name, e)), _error_status(e)
+        except Exception as e:  # malformed payload / unexpected failure
+            return jsonify(_error_body(method_name, e)), 400
 
     @app.route("/api/sessions/<sid>/governance/pause", methods=["POST"])
     def gov_pause(sid: str) -> Response:
@@ -255,7 +349,47 @@ def create_app(store: ProjectionSessionStore,
     def gov_resolve(sid: str) -> Response:
         return _gov_cmd(sid, "resolve_conflict")
 
-    # ── index route (serves workspace_ui if configured) ───────────────────
+    # ── autonomy start (contract §6 row: begin/resume autonomy) ───────────
+
+    @app.route("/api/sessions/<sid>/governance/start", methods=["POST"])
+    def gov_start(sid: str) -> Response:
+        """D-F2: the HTTP path that begins autonomy via the runtime
+        driver. 409 when the kernel awaits recompose (GoalPatch phase-1
+        landed but the architect has not closed the composition) or when
+        the session registered no runtime — honest conflicts, never 500."""
+        sess = _get_session(sid)
+        if getattr(sess.kernel, "pending_recompose", None) is not None:
+            body = {"ok": False, "action": "start",
+                    "error": "任务目标已变更，等待重新编排（recompose）后才能继续执行"}
+            return jsonify(body), 409
+        driver = _driver_for(sess)
+        if driver is None:
+            body = {"ok": False, "action": "start",
+                    "error": "本会话未注册运行时（composition 未注入 runtime），无法启动自治"}
+            return jsonify(body), 409
+        try:
+            state = driver.start()
+        except Exception as e:
+            return jsonify(_error_body("start", e)), 400
+        result = {"ok": True, "action": "start", "state": state}
+        _notify(sid, {"sse_type": TRANSPORT_EVENT_SSE["governance.applied"],
+                      "detail": _jsonable(result)})
+        return _json_response(result)
+
+    # ── pages ─────────────────────────────────────────────────────────────
+
+    @app.route("/sessions/<sid>")
+    def session_page(sid: str) -> Response:
+        """RFC-D1 §6: the per-session page. Serves the SPA shell when a
+        static frontend is wired (the SPA reads the sid from the path);
+        otherwise the JSON snapshot (200) — 404 for unknown sid either way."""
+        sess = _get_session(sid)
+        if app.static_folder is not None:
+            try:
+                return app.send_static_file("index.html")
+            except Exception:
+                pass
+        return _json_response(snapshot_view(sess))
 
     @app.route("/")
     def index() -> Response:

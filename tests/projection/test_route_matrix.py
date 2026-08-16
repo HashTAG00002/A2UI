@@ -224,7 +224,8 @@ class TestGovernanceCommands:
                         json={"goal": "新目标",
                               "constraints": ["不可逆操作需确认"],
                               "rationale": "scope change"})
-        assert r.status_code == 200
+        # RFC-D1 §6: goal_patch is async two-phase ⇒ 202 Accepted.
+        assert r.status_code == 202
         data = r.get_json()
         assert data["ok"] is True
         assert data["action"] == "goal_patch"
@@ -232,7 +233,8 @@ class TestGovernanceCommands:
     def test_checkpoint(self, client):
         r = client.post("/api/sessions/s1/governance/checkpoint",
                         json={"label": "发布前检查点"})
-        assert r.status_code == 200
+        # RFC-D1 §6: checkpoint CREATES a resource ⇒ 201.
+        assert r.status_code == 201
         data = r.get_json()
         assert data["ok"] is True
         assert "checkpoint_id" in data
@@ -243,13 +245,54 @@ class TestGovernanceCommands:
         r1 = client.post("/api/sessions/s1/governance/checkpoint",
                          json={"label": "cp1"})
         cp_id = r1.get_json()["checkpoint_id"]
-        # then rollback to it
+        # then rollback to it (plan accepted; execution async ⇒ 202)
         r2 = client.post("/api/sessions/s1/governance/rollback",
                          json={"target_checkpoint_id": cp_id})
-        assert r2.status_code == 200
+        assert r2.status_code == 202
         data = r2.get_json()
         assert data["ok"] is True
         assert data["action"] == "rollback"
+        # no driver registered ⇒ the plan honestly stays pending (§8)
+        assert data["disposition"] == "pending"
+
+    def test_checkpoint_unstable_boundary_409(self, client):
+        """RFC-D1 §6 (semantics, not spelling): after a GoalPatch the
+        kernel awaits recompose — a checkpoint then violates the stable
+        boundary ⇒ ValidationError ⇒ 409, never a flat 400."""
+        r1 = client.post("/api/sessions/s1/governance/goal_patch",
+                         json={"goal": "另一个目标"})
+        assert r1.status_code == 202
+        r2 = client.post("/api/sessions/s1/governance/checkpoint",
+                         json={"label": "不该成立"})
+        assert r2.status_code == 409
+        assert r2.get_json()["ok"] is False
+
+    def test_local_patch_non_editable_key_422(self, client):
+        """RFC-D1 §6: a LocalPatch on a readonly/locked key is a
+        PatchSemanticsError ⇒ 422, never a flat 400."""
+        store = ProjectionSessionStore()
+        kernel = TaskVMKernel(
+            "s_ro", TaskIntent(goal="发布产品", scope=("发布",)))
+        kernel.init_task_state([
+            TaskVariable(semantic_key="frozen_key", label="锁定项",
+                         observed="a", desired="a",
+                         mutability="readonly"),
+        ])
+        store.register("s_ro", kernel)
+        app = create_app(store)
+        app.config["TESTING"] = True
+        c = app.test_client()
+        r = c.post("/api/sessions/s_ro/governance/local_patch",
+                   json={"updates": {"frozen_key": "b"}})
+        assert r.status_code == 422
+        assert r.get_json()["ok"] is False
+
+    def test_rollback_unknown_checkpoint_404(self, client):
+        """RFC-D1 §6: an unknown target checkpoint ⇒ 404 (typed
+        UnknownCheckpointError), not a flat 400."""
+        r = client.post("/api/sessions/s1/governance/rollback",
+                        json={"target_checkpoint_id": "ckpt:nope"})
+        assert r.status_code == 404
 
     def test_resolve_conflict(self, client):
         # record a conflict first
@@ -325,6 +368,91 @@ class TestSSEEndpoint:
         # read some bytes
         data = next(r.response)
         assert b"data:" in data or b"data: " in data
+
+
+# ── autonomy start route (D-F2: the HTTP path that begins autonomy) ─────
+
+class TestStartRoute:
+    def test_start_without_runtime_409(self, client):
+        """A session registered with NO runtime cannot start autonomy —
+        an honest conflict (409), never a 500."""
+        r = client.post("/api/sessions/s1/governance/start", json={})
+        assert r.status_code == 409
+        assert r.get_json()["ok"] is False
+
+    def test_start_pending_recompose_409(self, client):
+        """RFC-D1 §6 semantics: after a GoalPatch the kernel awaits
+        recompose — start is blocked with 409 until closure."""
+        client.post("/api/sessions/s1/governance/goal_patch",
+                   json={"goal": "另一目标"})
+        r = client.post("/api/sessions/s1/governance/start", json={})
+        assert r.status_code == 409
+        assert r.get_json()["ok"] is False
+
+    def test_start_with_runtime_200(self):
+        """With a runtime + driver registered, start drives autonomy.
+        (The full start→ACTION→rollback arc is in
+        tests/e2e_ui/test_runtime_e2e.py.)"""
+        store = ProjectionSessionStore()
+        kernel = _make_kernel("s_rt")
+
+        class _FakeDriver:
+            def __init__(self):
+                self.started = False
+
+            def start(self):
+                self.started = True
+                return "running"
+
+            def pause(self):
+                return "paused"
+
+            def resume(self):
+                return "running"
+
+            def stop(self):
+                return "stopped"
+
+            def status(self):
+                return "running" if self.started else "idle"
+
+            def execute_compensation(self, plan):
+                return "complete"
+
+            def join(self, timeout=None):
+                return None
+
+        driver = _FakeDriver()
+        store.register("s_rt", kernel, runtime=object(), driver=driver)
+        app = create_app(store)
+        app.config["TESTING"] = True
+        c = app.test_client()
+        r = c.post("/api/sessions/s_rt/governance/start", json={})
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data["ok"] is True
+        assert data["state"] == "running"
+        assert driver.started is True
+
+    def test_start_unknown_sid_404(self, client):
+        r = client.post("/api/sessions/nonexistent/governance/start",
+                        json={})
+        assert r.status_code == 404
+
+
+# ── per-session page (RFC-D1 §6 row 1) ────────────────────────────────────
+
+class TestSessionPage:
+    def test_session_page_json_fallback(self, client):
+        """Without a static frontend the per-session page returns the
+        embedded snapshot as JSON (200)."""
+        r = client.get("/sessions/s1")
+        assert r.status_code == 200
+        assert r.get_json()["sid"] == "s1"
+
+    def test_session_page_unknown_sid_404(self, client):
+        r = client.get("/sessions/nonexistent")
+        assert r.status_code == 404
 
 
 # ── index route ───────────────────────────────────────────────────────────

@@ -1,6 +1,9 @@
 # Contract: `taskvm.projection` (L5 Projection & User Frontend)
 
 > Owner: Agent D (`05_PROJECTION_FRONTEND_AGENT.md`). Frozen 2026-08-15.
+> §6/§7 REVISED 2026-08-16 by RFC-D1 (`projection_rfc_backlog.md`) —
+> doc-vs-code alignment from the D audit end-game; semantics frozen,
+> spelling aligned to the implementation.
 > One page, result-oriented. Layered-ownership applies: content legality of
 > every object D constructs is D's; STATE/TIME/HISTORY/TRANSITION stay with
 > the Kernel; execution stays with the Runtime; composition stays with the
@@ -92,28 +95,43 @@ facade helper to reach a substrate.
   operator vocabulary anywhere in model inputs or rendered output
   (GG red line §0; `noleak` discipline inherited).
 
-## 6. Route / control semantics (frozen route matrix)
+## 6. Route / control semantics (frozen route matrix, REVISED by RFC-D1)
 
 All URLs are generated server-side (`url_for`) or absolute API paths —
 relative form actions that lose the `/<sid>` prefix are a contract
 violation (the legacy 405 class). Commands are JSON POST; pages render
-from one embedded snapshot then go delta-only.
+from one embedded snapshot then go delta-only. Path spelling below is
+the implemented matrix (RFC-D1 chose doc-aligns-code; outcomes — status
+semantics, error typing, honesty — are the frozen part).
 
 | Route | Method | Request semantics | Success | Error semantics |
 |---|---|---|---|---|
-| `/sessions/<sid>` | GET | page load | 200 HTML + embedded snapshot | unknown sid ⇒ 404 page |
+| `/sessions/<sid>` | GET | page load (SPA shell if static wired; else JSON snapshot) | 200 | unknown sid ⇒ 404 |
+| `/api/sessions` | GET | list registered sessions | 200 JSON | — |
 | `/api/sessions/<sid>/snapshot` | GET | full view-model bundle + revisions | 200 JSON | 404 JSON |
-| `/api/sessions/<sid>/events` | GET | SSE stream (`Last-Event-ID`/revision reconnect) | 200 `text/event-stream` | 404 JSON |
+| `/api/sessions/<sid>/governance` | GET | governance bar view model | 200 JSON | 404 |
+| `/api/sessions/<sid>/variables` | GET | task variables | 200 JSON | 404 |
+| `/api/sessions/<sid>/workflow` | GET | workflow map view model | 200 JSON | 404 |
+| `/api/sessions/<sid>/checkpoints` | GET | checkpoint timeline | 200 JSON | 404 |
+| `/api/sessions/<sid>/surfaces` | GET | surface cards | 200 JSON | 404 |
+| `/api/sessions/<sid>/conflicts` | GET | open conflicts | 200 JSON | 404 |
+| `/api/sessions/<sid>/events` | GET | paginated JSON event log (`?limit=`) | 200 JSON | 404 |
+| `/api/sessions/<sid>/sse` | GET | SSE stream: `snapshot` frame on connect, then typed deltas (revision reconnect) | 200 `text/event-stream` | 404 JSON |
 | `/api/sessions/<sid>/artifacts/<ref>` | GET | stored artifact bytes | 200 `image/*` | 404 JSON business message |
-| `/api/sessions/<sid>/start` | POST | begin/resume autonomy via runtime driver | 200 `{state}` | 404 / 409 (pending recompose) |
-| `/api/sessions/<sid>/pause` | POST | soft pause at next action boundary | 200 `{state}` | 404 |
-| `/api/sessions/<sid>/resume` | POST | resume autonomy | 200 `{state}` | 404 / 409 |
-| `/api/sessions/<sid>/stop` | POST | governance stop | 200 `{state}` | 404 |
-| `/api/sessions/<sid>/checkpoints` | POST | `{label}` governance checkpoint | 201 `{checkpoint_id}` | 409 unstable boundary / 400 |
-| `/api/sessions/<sid>/local-patches` | POST | `{updates:{key:value}, rationale}` | 200 `{retargeted_nodes}` | 400 schema / 404 / 422 non-editable key |
-| `/api/sessions/<sid>/goal-patches` | POST | `{goal, constraints?, scope?, success_criteria?, rationale}` | 202 `{phase}` (see §8) | 400 / 404 |
-| `/api/sessions/<sid>/rollback` | POST | `{target_checkpoint_id, rationale?}` | 202 plan accepted (execution async) | 404 unknown checkpoint / 400 |
-| `/api/sessions/<sid>/conflicts/<cid>/resolve` | POST | `{resolution: keep_world\|apply_desired\|edit_*, detail?}` | 200 | 404 / 400 |
+| `/api/sessions/<sid>/governance/start` | POST | begin/resume autonomy via runtime driver | 200 `{state:"running"}` (deterministic lifecycle answer) | 404 / 409 (pending recompose / no runtime) |
+| `/api/sessions/<sid>/governance/pause` | POST | soft pause at next action boundary | 200 `{state:"paused"}` | 404 |
+| `/api/sessions/<sid>/governance/resume` | POST | resume autonomy | 200 `{state:"running"}` | 404 / 409 |
+| `/api/sessions/<sid>/governance/stop` | POST | governance stop | 200 `{state:"stopped"}` | 404 |
+| `/api/sessions/<sid>/governance/checkpoint` | POST | `{label}` governance checkpoint | **201** `{checkpoint_id}` | 409 unstable boundary / 400 |
+| `/api/sessions/<sid>/governance/local_patch` | POST | `{updates:{key:value}, rationale}` | 200 `{retargeted_nodes}` | 400 schema / 404 / **422** non-editable key |
+| `/api/sessions/<sid>/governance/goal_patch` | POST | `{goal, constraints?, scope?, success_criteria?, rationale}` | **202** `{phase}` (two-phase, §8) | 400 / 404 |
+| `/api/sessions/<sid>/governance/rollback` | POST | `{target_checkpoint_id, rationale?}` | **202** plan EXECUTED via driver port + `{disposition: complete\|partial\|failed\|pending}` (§8 honesty) | 404 unknown checkpoint / 400 |
+| `/api/sessions/<sid>/governance/resolve_conflict` | POST | `{conflict_id, resolution, detail?}` | 200 | 404 / 400 |
+
+Error mapping is typed and class-based (no string matching):
+`UnknownCheckpointError` ⇒ 404, `PatchSemanticsError` ⇒ 422,
+`ValidationError` ⇒ 409 (unstable boundary / pending recompose / pending
+compensation), anything else ⇒ 400 malformed payload.
 
 Normal-path guarantees: **0 unexpected 405, 0 unexpected 500, 0 unhandled
 browser console errors**; invalid input ⇒ structured 4xx JSON; unknown sid
@@ -121,17 +139,33 @@ browser console errors**; invalid input ⇒ structured 4xx JSON; unknown sid
 when the client actually used the wrong verb — the served page never
 generates one).
 
-## 7. SSE event vocabulary (transport is replaceable; semantics are frozen)
+## 7. SSE event vocabulary (transport is replaceable; semantics are frozen — REVISED by RFC-D1)
 
-`projection_delta` (values/progress), `workflow_delta` (node statuses /
-loop iteration), `runtime_status` (autonomy state machine), 
-`surface_observation` + `screenshot_available` (artifact refs),
-`verification_result` (passed/failed + evidence ref),
-`checkpoint_committed`, `compensation` (requested/applied/partial/failed/
-discarded disposition), `conflict`, `error` (business-readable). Events
-carry monotone ids; clients may drop out-of-order/duplicate events and
-recover from snapshot + revisions. Whole-page reload as a sync mechanism
-is a contract violation.
+The frozen vocabulary is the exact set exposed as
+`taskvm.projection.events.SSE_TYPE_VOCABULARY` — the single source of
+truth (33 types, all dot.notation):
+
+- every kernel `EventKind` (23): `observation.received`, `state.updated`,
+  `plan.created`, `plan.patched`, `action.requested`, `action.started`,
+  `action.finished`, `action.discarded`, `action.requeued`,
+  `verification.passed`, `verification.failed`, `node.committed`,
+  `checkpoint.committed`, `governance.requested`, `conflict.detected`,
+  `conflict.resolved`, `compensation.requested`, `compensation.complete`,
+  `compensation.partial`, `compensation.failed`, `compensation.discarded`,
+  `loop.iteration_started`, `loop.iteration_evaluated`;
+- every runtime `RuntimeEventKind` (8): `action.observed`,
+  `action.landed`, `structure.invalidated`, `surface.conflict`,
+  `compensation.entry`, `budget.exhausted`, `loop.tick`, `node.failed`;
+- two transport-level frames the SSE endpoint itself emits: `snapshot`
+  (initial full state on connect) and `governance.applied` (command ack).
+
+Totality is test-pinned (EventKind + RuntimeEventKind sweeps) and the
+single emission chokepoint `format_sse` refuses any unregistered
+`sse_type` — no free-form strings ever reach the wire. Envelope shape:
+`{sse_type, event_id, session_id, epoch, revision, correlation_id,
+detail, ts}`; events carry monotone ids; clients may drop
+out-of-order/duplicate events and recover from snapshot + revisions.
+Whole-page reload as a sync mechanism is a contract violation.
 
 ## 8. Governance UI semantics
 

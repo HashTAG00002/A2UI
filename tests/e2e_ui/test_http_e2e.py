@@ -207,7 +207,8 @@ class TestGovernanceCommandsE2E:
     def test_checkpoint(self, server_url):
         r = requests.post(f"{server_url}/api/sessions/s1/governance/checkpoint",
                           json={"label": "E2E检查点"})
-        assert r.status_code == 200
+        # RFC-D1 §6: checkpoint CREATES a resource ⇒ 201
+        assert r.status_code == 201
         assert r.json()["ok"] is True
         assert r.json()["label"] == "E2E检查点"
 
@@ -222,7 +223,8 @@ class TestGovernanceCommandsE2E:
         r = requests.post(f"{server_url}/api/sessions/s1/governance/goal_patch",
                           json={"goal": "新目标",
                                 "rationale": "e2e scope change"})
-        assert r.status_code == 200
+        # RFC-D1 §6: goal_patch is async two-phase ⇒ 202 Accepted
+        assert r.status_code == 202
         assert r.json()["ok"] is True
 
     def test_rollback(self, server_url):
@@ -230,12 +232,16 @@ class TestGovernanceCommandsE2E:
         # kernel in _pending_recompose state, which blocks checkpoint.
         r1 = requests.post(f"{server_url}/api/sessions/s2/governance/checkpoint",
                            json={"label": "rb_target"})
-        assert r1.status_code == 200, r1.text
+        assert r1.status_code == 201, r1.text
         cp_id = r1.json()["checkpoint_id"]
         r2 = requests.post(f"{server_url}/api/sessions/s2/governance/rollback",
                            json={"target_checkpoint_id": cp_id})
-        assert r2.status_code == 200
+        # RFC-D1 §6: rollback accepts the plan asynchronously ⇒ 202; s2
+        # has no runtime/driver registered, so the honest disposition is
+        # "pending" (the plan is accepted, execution awaits a driver).
+        assert r2.status_code == 202
         assert r2.json()["ok"] is True
+        assert r2.json()["disposition"] == "pending"
 
 
 # ── SSE stream: initial snapshot + live delta ────────────────────────────

@@ -3225,3 +3225,47 @@ Agent FF 接手 F 的未竟事业（07_FINAL_BENCHMARK_AGENT 任务书，F 交�
 - 证明了：最终基准的六条合同（隔离/无泄漏/复现/注入安全/聚合诚实/词汇卫生）+ 分类学完整性在当前代码真实成立；论文矩阵数字可复核（270 trial JSON 落盘）；FF 改动零回归（隔离实验）。
 - 没证明：fakes 数字不是任何真实模型成绩（结构问题证据，非模型能力证据）；no-verifier 消融无解释力（世界无拒绝信号）；真实底座（MobileGym/OSWorld）上未跑。
 - 移交：D 的在途 RFC-D1 返工（surface_observed 注册 + composition.py 债务登记/RFC）由 D 自行收尾；E 的 T1 第二棒前置条件之一（F 脚本删除提交）本条落地。
+
+---
+
+## E46（2026-08-16，Agent D 审计终局返工 D-F1..D-F4 收官 + RFC-D1 落盘）
+
+**背景**：Oracle 审计（base 7b4ad1d→a63570a 期间）判 projection 层四项 doc-vs-code lie 成立；D-F1 选 (b) 路径（以 RFC 形式化文档↔代码偏差，文档对齐代码）。本条覆盖跨两次会话（网络中断续接）的完整返工。
+
+### 交付明细
+
+1. **D-F3（events.py，SSE 词汇单一真源）**：`KERNEL_EVENT_SSE` 23 项（全 EventKind）+ `RUNTIME_EVENT_SSE` 8 项（**删 3 个从未是 RuntimeEventKind 值的 dead key、补 5 个真 kind**——旧表靠自由字符串 fallback 掩盖缺口）+ `TRANSPORT_EVENT_SSE` 2 项（snapshot / governance.applied 首次注册为一等词汇）= `SSE_TYPE_VOCABULARY` 33 项。两道执法：totality 测试（EventKind+RuntimeEventKind 全扫）+ `format_sse` 单一 emission chokepoint 断言（未注册 sse_type ⇒ ValueError，自由字符串零容忍）。
+2. **D-F2（driver.py）**：旧代码调用不存在的 `AutonomyRuntime.step()`（死接线——没有任何测试曾让 driver 跑在真 runtime 上）→ 改 `run(step_budget=1)`（每 tick 一节点保 pause/stop 响应）+ 每 tick `_forward_new_events`（runtime_events() 增量推 SSE）+ `execute_compensation` 回报 **runtime 的真 disposition**（complete/partial/failed），不再报 driver 内部状态。
+3. **D-F2（app.py）**：新增 `/sessions/<sid>` 页路由（SPA 未接线时诚实回 JSON snapshot）+ `/governance/start`（409 pending-recompose / 409 未注册 runtime，绝不 500）；per-route 成功码 201（checkpoint 资源创建）/202（goal_patch 两阶段、rollback 计划受理）/200；typed class-based 错误映射（UnknownCheckpointError→404、PatchSemanticsError→422、ValidationError→409、其余→400，零字符串匹配）；rollback 响应带 entries/uncompensatable/disposition，driver 存在时经 `execute_compensation` **真执行**并回报 disposition，无 driver 时诚实 `pending`。
+4. **D-F2（workspace_ui/composition.py 组合根，T1 leg-1）**：五端口组装（architect `ActionContractSerializer` 真 serializer / `HttpCUAModel`（HttpModelPort 适配，1 次 predict=1 次 provider 请求=1 条 ledger，no-leak gate）/ `VisibleLabelExtractor`（label 恰出现一次才观测，歧义诚实跳过）/ E 的 `VisibleVerifier` 真 verifier / 共享 `ModelCallLedger` 统一三角色计量）+ `compose_task_runtime` 唯一生产 `compose_runtime` 调用点；server.py 切到组合根，legacy operator-write 路由全部 409 退役（`_legacy_write_retired`）。
+5. **§6-clean 修复（E44/FF 预警的债务违规，本会话消除而非登记）**：composition.py 初版 import `builtin_web.launcher.app_url` + `mobilegym.evaluation.DEFAULT_BRIDGE_PORT` → `tests/substrate/test_no_api_backdoor.py::test_transitional_debt_register_may_not_grow` 正确红（463 passed / 1 failed）。修复：**registry 纯名路由**——builtin_web 的 URL 由 provider 自己从 (app, host[, base_url]) 解析（`BuiltinWebProvider.create_session` 本来就调 app_url，上层 import 纯属冗余）；mobilegym bridge_url 改 `TASKVM_MOBILEGYM_BRIDGE_URL` env 操作员显式提供，缺省回落 provider 自身默认（localhost:3019）。**债务表零新增项**（加项需 RFC；直接消除违规优于登记），债务门转绿（66 passed / 1 skipped）。server.py 上层从此零 provider 知识。
+6. **D-F4 oracle 校准**：`test_twenty_data_deltas_zero_model_calls` 原 oracle 混淆 probe 计数与模型调用计数（probe 是 governance bar 的**账本读取**，每次 snapshot 恰 1 次——同文件旧测试 test_read_routes_no_model_calls 已确立该语义）。校准为两段断言：20 个真 `apply_observation` 后 probe==0（**delta 数据面零模型调用**，§3 核心 oracle）+ 5×(snapshot+events) 后 probe==5（恰 1/snapshot，events 路由零加成）。
+7. **RFC-D1 落盘（D-F1(b)）**：`docs/contracts/projection_rfc_backlog.md` 新建（六条逐项偏差 + 证据 + 裁决理由：实现已被 135+ 测试锁定且语义更诚实，§0 本就声明冻结 OUTCOMES 而非拼写；rollback"执行+回报 disposition"正是审计要求的方向，改回 fire-and-forget 是倒退）+ `projection.md` §6/§7 修订（§6 = 16 读路由 + 6 命令路由的实拼写矩阵 + typed 错误映射段；§7 = 33 项词汇逐项列出 + 单一真源指向 `SSE_TYPE_VOCABULARY` + envelope 形状；文件头标注 REVISED-by-RFC-D1）。
+8. **E2E 证明（test_runtime_e2e.py，真 HTTP 真 TCP）**：全弧 = checkpoint cp0 → start（state=="running"）→ ACTION a1 COMMITTED（CUA 真 type 手势落地可见世界 `release_date=2026-08-18`，act_log 有 type 记录）→ stop → checkpoint cp1 → rollback cp0 **EXECUTED**（disposition ∈ {complete,partial}，绝非永挂 pending）→ SSE 收到 `compensation.requested` + disposition 帧 + `checkpoint.committed`；补偿后 observed 恢复 2026-08-14。附 409 pending-recompose 用例 + 无 runtime 会话 rollback disposition=="pending" 诚实用例。verifier/ledger 用 E 的**真生产对象**（VisibleVerifier/ModelCallLedger），substrate/CUA/extractor 用自包含确定性 fake（刻意不 import E 的 tests/runtime/conftest.py）。
+9. **Playwright 真浏览器首次真跑通**：浏览器实际在 taskvm env 自带 `opt/ms-playwright/chromium-1117`（非 ~/.cache，非 .links 指向的 senseact 包）；设 `PLAYWRIGHT_BROWSERS_PATH=<env>/opt/ms-playwright` + `LD_LIBRARY_PATH=.chromelibs/lib` 后 **4/4 passed**（E40/E44/E45 时均为 4 skipped——本会话超出基线的增量验证）。浏览器端 checkpoint oracle 同步 201（RFC-D1 语义贯穿到真浏览器 JS fetch）。
+
+### 本会话关键纠错
+
+- **lifecycle 竞态**：`ThreadedRuntimeDriver.start()` 返回 `self._status` 在 fake CUA（毫秒级 tick）下必输竞态——worker 首 tick 先把 _status 覆写为 "step_budget"。修复：lifecycle 方法（start/pause/resume/stop）返回**确定字面量**（"running"/"paused"/"running"/"stopped"），per-tick disposition 只经 `status()` 与 SSE 观测；start 对已暂停 driver 诚实回 "paused"（start≠resume）。HTTP 响应从此确定可测。
+- **E44/E45 移交的"surface_observed 未注册"核实为不存在**：`RuntimeEventKind` 只有 8 个取值（ports.py L184-196 逐行核对）且全部已映射，totality 测试锁定；残留仅 test_events.py 帮手的死默认参数字符串，已清理为合法值。教训同 E38：移交事项要 exact-SHA 核实，别按传闻修。
+- **server.py 15 个 linter 报错全为预先存在**（flask 解析 / queue / legacy 适配器签名 / EvaluationEnvironment.health），均在未触碰区域；该文件本就是 T1 待删目标，不追。
+- **ModelCallLedger vs CallLedger 静态协议不兼容** = RFC-001 已裁决的 duck-typing 情形（字段逐字相同、运行时兼容、物理合并留 follow-up），非新债。
+
+### 验收数字（全部实跑落盘于本会话终端记录）
+
+- `pytest tests/ -q`（除 playwright）→ **464 passed / 1 skipped / 0 failed**（E44 基线 446/5/0；差异 = 本返工净增测试 + FF 并行改动，零回归）
+- `pytest tests/e2e_ui/test_playwright_e2e.py`（真浏览器）→ **4 passed**（基线 4 skipped）
+- `pytest tests/substrate/ + tests/test_imports.py` → **66 passed / 1 skipped**（债务门绿）
+- `TASKVM_SUBSTRATE_LOCK_AUDIT=1 pytest tests/substrate/test_no_api_backdoor.py` → 1 failed = **诚实 FAIL 在 T1**（gui_driver，E 的删除目标，设计内可见 PENDING）
+- `compileall taskvm/projection taskvm/workspace_ui tests/projection tests/e2e_ui` → exit 0
+- 单面：tests/projection + test_runtime_e2e = 131 passed；test_http_e2e = 22 passed
+
+### 证明了什么 / 没证明什么
+
+**证明**：(1) projection 读路径与 delta 数据面零模型调用（probe oracle 两段锁定）；(2) start→ACTION COMMITTED→checkpoint→rollback EXECUTED→SSE disposition 全弧在真 HTTP 服务上可走通（含真 type 手势落地可见世界、补偿恢复 observed 平面）；(3) SSE 词汇 total（33 项）且 chokepoint 执法；(4) 上层零具体 substrate import（§6 债务门绿，债务表零新增）；(5) Playwright 真浏览器 4/4（页面加载/API fetch/SSE EventSource/无内部 id 泄漏）。
+
+**没证明**：(1) 真实模型 provider 在线时的全弧（CUA/serializer 是确定性 fake——HttpCUAModel 的真 provider 路径需模型在线，属 benchmark 层验证）；(2) SPA 静态前端（`/sessions/<sid>` 目前诚实回 JSON snapshot，SPA 接线是后续工作）；(3) gui_driver 物理删除（T1 owner E/G——server.py legacy 写路由 409 是退役不是删除，登记表 T1 仍在）；(4) MobileGym bridge 在线时的 eval env 真连（bridge_url 走 provider 默认值路径仅静态验证）。
+
+### 下一里程碑（不变）
+
+E 第二棒 T1 清账（物理删 gui_driver）+ G Wave-3 删 legacy execution → 登记表清空 → `TASKVM_SUBSTRATE_LOCK_AUDIT=1` 全绿 → B/C 双双正式 LOCK。D 的 T2 责任已清（E41 时），本条后 D 无挂账债务。

@@ -12,6 +12,8 @@ from taskvm.domain import EventKind
 from taskvm.projection.events import (
     KERNEL_EVENT_SSE,
     RUNTIME_EVENT_SSE,
+    SSE_TYPE_VOCABULARY,
+    TRANSPORT_EVENT_SSE,
     format_sse,
     sse_envelope,
 )
@@ -53,9 +55,64 @@ class TestRuntimeEventSSEMapping:
         values = list(RUNTIME_EVENT_SSE.values())
         assert len(values) == len(set(values))
 
+    def test_runtime_mapping_total_over_runtime_event_kinds(self):
+        """D-F3: EVERY ``RuntimeEventKind`` value must be mapped (the old
+        table carried three dead keys and missed five real kinds — the
+        free-form fallback masked the gap)."""
+        from taskvm.runtime.ports import RuntimeEventKind
+        for kind in RuntimeEventKind:
+            assert kind.value in RUNTIME_EVENT_SSE, (
+                f"RuntimeEventKind.{kind.name} missing from RUNTIME_EVENT_SSE")
+
     def test_runtime_sse_types_use_dot_notation(self):
         for sse_type in RUNTIME_EVENT_SSE.values():
             assert "." in sse_type
+
+
+# ── D-F3: transport frame types + vocabulary totality ──────────────────────
+
+class TestSSEVocabulary:
+    def test_transport_types_registered(self):
+        """The two transport-level frame types the app emits must be
+        registered vocabulary (D-F3: 'snapshot' / 'governance.applied'
+        were free-form strings before the repair)."""
+        assert TRANSPORT_EVENT_SSE["snapshot"] == "snapshot"
+        assert TRANSPORT_EVENT_SSE["governance.applied"] == "governance.applied"
+        assert "snapshot" in SSE_TYPE_VOCABULARY
+        assert "governance.applied" in SSE_TYPE_VOCABULARY
+
+    def test_vocabulary_is_superset_of_all_envelope_outputs(self):
+        """Totality: every EventKind + RuntimeEventKind + transport type
+        yields an envelope whose sse_type is inside the frozen
+        vocabulary (contract §7; no free-form strings)."""
+        from taskvm.runtime.ports import RuntimeEventKind, RuntimeEvent
+        for kind in EventKind:
+            ev = _KernelEvent(kind)
+            assert sse_envelope(ev)["sse_type"] in SSE_TYPE_VOCABULARY
+        for kind in RuntimeEventKind:
+            ev = RuntimeEvent(kind=kind, epoch=1)
+            assert sse_envelope(ev)["sse_type"] in SSE_TYPE_VOCABULARY
+        for sse_type in TRANSPORT_EVENT_SSE.values():
+            assert sse_type in SSE_TYPE_VOCABULARY
+
+    def test_format_sse_rejects_unregistered_type(self):
+        """The single emission chokepoint refuses frames whose sse_type
+        is not in the vocabulary (the free-form-string gate)."""
+        with pytest.raises(ValueError):
+            format_sse({"sse_type": "totally.made_up", "detail": {}})
+
+
+class _KernelEvent:
+    """Minimal structural kernel event for totality sweeps."""
+    def __init__(self, kind):
+        self.kind = kind
+        self.event_id = "evt-x"
+        self.session_id = "s1"
+        self.epoch = 1
+        self.revision = 1
+        self.correlation_id = ""
+        self.payload = {}
+        self.timestamp = 0.0
 
 
 # ── sse_envelope for kernel events ────────────────────────────────────────
@@ -118,7 +175,7 @@ class TestSSEEnvelopeKernel:
 # ── sse_envelope for runtime events ───────────────────────────────────────
 
 class TestSSEEnvelopeRuntime:
-    def _make_runtime_event(self, kind="surface_observed", epoch=1,
+    def _make_runtime_event(self, kind="action_observed", epoch=1,
                             payload=None):
         class FakeEvent:
             def __init__(self, k, e, p):
@@ -131,14 +188,17 @@ class TestSSEEnvelopeRuntime:
         return FakeEvent(kind, epoch, payload)
 
     def test_runtime_envelope_sse_type(self):
-        ev = self._make_runtime_event("surface_observed")
+        ev = self._make_runtime_event("action_observed")
         env = sse_envelope(ev)
-        assert env["sse_type"] == "surface.observed"
+        assert env["sse_type"] == "action.observed"
 
-    def test_runtime_unknown_kind(self):
+    def test_runtime_unknown_kind_raises(self):
+        """D-F3: the mapping is total — an unmapped kind is a programming
+        error (a new kind was added without registering its SSE type),
+        never a free-form 'runtime.unknown' string on the wire."""
         ev = self._make_runtime_event("nonexistent_kind")
-        env = sse_envelope(ev)
-        assert env["sse_type"] == "runtime.unknown"
+        with pytest.raises(ValueError):
+            sse_envelope(ev)
 
     def test_runtime_envelope_is_json_serializable(self):
         ev = self._make_runtime_event("action_landed",
