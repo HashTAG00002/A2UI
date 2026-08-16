@@ -6,17 +6,31 @@
 
 ---
 
-## 合并顺序
+## 启动状态与阅读顺序（2026-08-16，E47–E49 裁决后注入；本节取代原"合并顺序"节）
 
-1. Agent A：domain/kernel/contracts
-2. Agent B：substrate
-3. Agent C：architect/governance
-4. Agent E：runtime/verification/rollback
-5. Agent D：projection/frontend
-6. Agent F：benchmark/evaluation
-7. Optional Agent H：cross-device bonus
+**原"合并顺序"节已作废**：各波次（A→B→C→E→D→F）已顺序落在 main 分支
+（`git log` 可证，无分支合并步骤）。开工前置条件"各模块基本完成"已满足。
 
-每一步合并后运行该模块测试和 architecture gate，不要等全部合完一次性 debug。
+各层当前状态：
+- **A kernel / C architect / D projection**：达 FORMAL LOCK 条件（E47 裁决，
+  exact SHA `2c85379`），零在途义务；
+- **E runtime**：T1 删除义务已移交你（见下文⭐节），现代面冻结；
+- **B substrate**：OWNER-COMPLETE / CODE-FROZEN，FORMAL LOCK 仅等你的
+  Wave-3 簇删清空 §8 登记表（机械盖章，B 无新工作）；
+- **F benchmark/evaluation**：主体完成（E45），尚未审计，可与你的 wave
+  并行（约束见⭐节末）。
+
+阅读顺序：
+1. `.mrules` —— 现行仓库纪律（多 agent 提交纪律 / 证据落盘 eval_results /
+   开发环境路径）。**你的工作全程适用**；其中"精简替换 .mrules"（见本文
+   权威文档清理节）是你的**收尾**步骤，不是开工第一步。
+2. 本文件 —— 你的完整 mandate；⭐ 与 ⭐⭐ 两节最高优先。
+3. `docs/contracts/`：`substrate.md`（§8 债务登记表——你要把它清空）、
+   `audit_charter.md`（冻结/审计语义）、`runtime.md`、`projection.md`。
+4. `docs/A2UI_开工大纲_v0_心智模型对齐版.md` —— 心智模型总纲。
+5. `11_CURRENT_REPOSITORY_AUDIT.md` —— **仅作历史背景**：那是波次启动前
+   的审计快照（页首自证"B/C/D/E 尚未启动"），其缺陷清单绝大多数已由
+   E19–E46 修复；禁止当作当前缺陷清单重修一遍。
 
 ---
 
