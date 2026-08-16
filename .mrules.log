@@ -3487,3 +3487,20 @@ gui_driver 的**三处活 import 宿主全是 G Wave-3 的 legacy 删除对象**
 **等价性验收（E44 worktree 先例，证据 eval_results/dir_split_equivalence.json）**：HEAD（e95d8dc，E52 后）worktree 基线 `pytest tests/ -q` = **429p/5s/0f** vs 工作区迁移后 `pytest tests/ taskvm_bench/tests/ -q` = **429p/5s/0f**；junitxml 逐测试比对：434/434 node ID 完全一致（唯一合法差异 = 迁移文件路径前缀，已归一化），零结果差异 → verdict=**EQUIVALENT**。`compileall taskvm/ taskvm_bench/` exit 0。CLI 冒烟 `python -m taskvm_bench.evaluation.cli --help` 四子命令正常。依赖方向 grep：`taskvm/` 零引用 taskvm_bench；bench 正向引用 prototype 恰 3 文件（evaluation/actors+world+harness，被测系统方向，合法）。
 
 **没证明什么**：paper_matrix 全矩阵未重跑（等价性由逐测试比对 + 确定性世界保证，E45 落盘数字仍有效）；e2e 真浏览器属 ⑥ 独立验收。
+
+---
+
+## E55（2026-08-16，Agent G）⑤ 可移植启动套件：run.sh 重写 + scripts/dev.sh + scripts/stop.sh + workspace_ui/demo.py
+
+**做了什么**：旧 `run.sh` 还在调用 E52 已删除的幽灵入口（`workspace_ui.server`、`--executor`、`--genui`）+ 硬编码个人 conda/浏览器绝对路径 + `fuser -k` 全端口 carpet-kill + Flask debug reloader——按 handoff 08 §可移植启动 全部重写：
+
+1. **`scripts/dev.sh`**（新）：repo root 从脚本自身位置解析；解释器 `TASKVM_PYTHON`（默认 python3）；零 `/mnt/...` 硬编码；Playwright 标准发现 + 唯一**派生**回退（解释器所在 env 自带 `opt/ms-playwright` 才用，显式 `PLAYWRIGHT_BROWSERS_PATH` 永远优先；`.chromelibs/lib` 存在才设 LD_LIBRARY_PATH）；端口占用**拒绝启动**并指向 stop.sh（绝不 carpet-kill）；每服务 PID+log 落 `.run/`；健康检查失败→自动 stop.sh 清场并指认日志路径。
+2. **`scripts/stop.sh`**（新）：pidfile 驱动优雅停机（TERM→25×0.2s 等待→KILL 兜底）；Linux 上 `/proc cmdline` 守卫防 PID 复用误杀；幂等；绝不碰无 pidfile 的进程。
+3. **`run.sh`**（重写）：薄包装 `exec scripts/dev.sh`，保留文档化单命令入口。
+4. **`taskvm/workspace_ui/demo.py`**（新，生产形态 demo 引导）：真实 `compose_task_runtime`（五真端口：serializer/HttpCUAModel/VisibleLabelExtractor/VisibleVerifier/ledger）+ registry 名路由 builtin_web 底座 + projection store 注册 + `workspace_ui.serve`。`--offline` = 确定性占位 CUA **诚实 FAIL**（绝不假称成功）；默认真实 HttpCUAModel（OPENAI_BASE_URL/OPENAI_API_KEY/TASKVM_MODEL）。
+
+**关键纠错（写入时被预判捕获）**：demo.py 初版直接 `from taskvm.substrate.builtin_web.launcher import app_url`——`_UPPER_SCAN_DIRS` 扫描面**包含 workspace_ui**，该 import 会让已清空的 TRANSITIONAL_DEBT_REGISTER 重新变红（E46 D-F1 同型教训）。改为 `taskvm.apps.<app>.app.DEFAULT_PORT` 解析（apps 不在扫描面，且每个 app 本就自持端口常量，无跨层知识复制）。
+
+**真实验收（证据 eval_results/scripts_wave_g.json）**：`./scripts/dev.sh` exit 0——5 app + UI 全健康、`/api/sessions` 返回 `{'sessions':['demo']}`、日历 `/api/events/demo` 可见种子事件「产品发布」、snapshot 返回真实 governance 状态、离线横幅诚实打印；端口占用拒绝路径真跑（首次启动被旧 run.sh 时代遗留进程 PIDs 48175-48179 占用——cmdline 鉴别后清除，未动 3019 mobilegym_bridge）；`stop.sh` 6 服务优雅停 + 6 端口全释放 + 二次运行幂等；`bash -n` 三脚本过；`TASKVM_SUBSTRATE_LOCK_AUDIT=1 pytest tests/substrate` **35 passed**（债务门零新增）；全量 **429p/5s/0f 零回归**。
+
+**诚实边界**：demo kernel 计划是手工装配的 2 节点 fixture（真 intent→architecture 管线属 architect 平面，⑥ smoke 的职责）；`label: value` 快路径 extractor 在 table/dl 页面零命中（诚实 fail-closed，完整 handle-cache 编译产品才是生产观测路径）；`--offline` 自治永不完成（by design）；dev.sh APPS 端口表镜像各 app DEFAULT_PORT（注释已标注同步义务）。
