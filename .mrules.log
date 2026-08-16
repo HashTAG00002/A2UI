@@ -3152,3 +3152,46 @@ stale-response epoch gate / soft pause atomic boundary / model-call budget / inv
 ### commit 范围（本轮）
 
 只 add E 自己的文件：`taskvm/runtime/autonomy.py` + `tests/runtime/test_autonomy.py` + `docs/contracts/runtime.md` + `docs/contracts/runtime_rfc_backlog.md` + `.mrules`/`.mrules.log`（含 F 的 staged E42 竞态带入）。**未触碰** F 的 benchmark/evaluation 在制品、D 的 projection/workspace_ui、C/A 的冻结域。
+
+---
+
+## E44（Agent E 审计终局交付：E-F1 TEST-ONLY 测试补齐 + T1 第二棒登记等待，2026-08-16）
+
+> 用户委托（两段）：① 依 audit_charter.md **独立裁决**审计 agent（exact SHA 7b4ad1d，CONDITIONAL PASS，唯一阻塞 finding E-F1）是否合理合规；② 执行工单第一棒（E-F1 测试补齐 → commit），第二棒（gui_driver 物理删除）在 D-F2 + F 脚本清理双落地前**依法 WAIT**。
+
+### ① 审计裁决：CONDITIONAL PASS 合理，E-F1 为 charter 合规的 DEFECT(TEST-ONLY)
+
+- **Exact-SHA 协议（charter §5A）**：`git rev-parse HEAD` == `7b4ad1de49cdb91e5c974c7f43e90569384abe57` == 审计所指 SHA，Level 1 证据成立。E43 三修复 blob 逐项确认：① `_land_fail` started 分支 land 前 `finish_action`（autonomy.py L558-563）；② runtime.md §1 已改引 `test_import_boundaries.py`；③ RFC-005 措辞（runtime_rfc_backlog.md L121-123 路径类 vs event-only 区分）。
+- **E-F1 事实断言独立复现（§5.3 ground-truth）**：runtime.md §14 明文承诺 "Fan-out / Fan-in：lane 独立；required lane 全部 verified → barrier 才通过" 与 "Bounded Loop：termination=true/false/max_iterations" 属 `tests/runtime/`、`tests/integration/test_runtime_trace.py`、`tests/verifier/` 至少覆盖范围；grep 实证该三目录对 `FAN_OUT|BOUNDED_LOOP|barrier|begin_loop_iteration|evaluate_loop_termination` **零命中**（全部命中在 tests/kernel、tests/domain、tests/architect、tests/projection、tests/fakes、tests/test_imports.py——别层或 legacy smoke）；实现行号 `autonomy.py:486/:505/L124` 在 exact blob 逐行核对为真。→ §14 是冻结合同条款，缺测试覆盖违反 charter §6.1（每个 frozen invariant 至少一个有效 test 钉死），分类 DEFECT(TEST-ONLY) 诚实准确，非 PREFERENCE 非新 invariant category（§4.1 不触发）；TEST-ONLY 修复边界援引 E33 先例，最小。**Owner=E 路由正确（§5C）；无越权、无 treadmill（§4.2/§4.7）、无 hostile-caller（§4.3）。**
+- **裁决保留意见（诚实标注）**：本会话只见到审计交付的工单（§8 模板摘要），未见到原始报告全文；但 E-F1 的全部事实基础（SHA、行号、零覆盖 grep、§14 原文）均由本会话独立复现，结论不依赖对审计 agent 的信任。
+
+### ② E-F1 执行：新增 `tests/runtime/test_control_flow.py`（4 测试，零生产代码改动）
+
+- **BOUNDED_LOOP 正常终止**：`root(seq)→lp(loop, predicate "synced == yes", max=3)→poll(body ACTION)→term`；iteration 1（type tick=1+DONE→body COMMITTED→evaluate(False)→continue）、iteration 2（type synced=yes+DONE→evaluate(True)→lp COMMITTED）→term COMMITTED→run()==done；断言 kernel 快照 + LOOP_ITERATION_STARTED 恰 [1,2] + EVALUATED [continue, committed] + runtime LOOP_TICK [terminated=False, terminated=True] + cua.calls==4。终止由可见状态驱动（iteration 2 手势翻转 synced 标志），非脚本技巧。
+- **BOUNDED_LOOP max_iterations 诚实失败**：max=2、谓词永假→第 2 轮 evaluate(False) 触发 kernel max guard→lp FAILED（reason=max_iterations_exceeded）+ poll 末轮 COMMITTED + term PENDING；断言 LOOP_ITERATION_STARTED 恰 2 次（无第三次 begin）+ 再 pulse run() 仍 NO_READY 无自愈重试。
+- **barrier 门控**：`fo(fan-out)→(l1,l2)→b1(barrier)→term`；step_budget=1 仅 l1 COMMITTED 时断言 b1 **PENDING（连 READY 都不进，depends_on 未齐）**且 NODE_COMMITTED 事件无 b1；l2 COMMITTED 后 b1 恰一次 advance→COMMITTED→term COMMITTED→run()==done。
+- **lane 独立**：l2 首预测 CUA FAIL→`_land_fail`（E43 修复路径）→l2 FAILED；断言 l1 **COMMITTED 不被改写**、其可见世界写入 p=1 存活、b1/term PENDING、VERIFICATION_FAILED 含 l2、无 ACTION_REQUEUED（无热重试）、runtime NODE_FAILED 仅 l2 无 l1。
+- 全部断言落在 kernel 快照 + kernel 事件 + runtime 事件双平面（工单要求）。
+
+### ③ T1 第二棒：WAIT（前置条件未齐，依法不强删）
+
+- **D-F2 未落地**：`compose_runtime` 在 `taskvm/workspace_ui/` **零命中**；server.py（HEAD blob L50/51/586/589/604）仍 import `make_task_adapters`/`mobilegym_bridge_url`。
+- **F 的脚本清理在未提交态**：工作区 13 个 `run_*_killtest.py`/`run_four_step_arc.py` 等已删（porcelain `D`，未 staged 未 commit）+ test_imports.py 的 9 个 killtest smoke 已移除 + 新增 tests/benchmark/test_taxonomy.py(4) + tests/evaluation/test_final_contract.py——**全部未提交，且 test_final_contract.py 当前 3 failed（F 在途，断言 "runtime plane imports benchmark/evaluation"，与本会话改动零交集）**。
+- 判定：按工单"E41 判例：honestly PENDING 优于强删断链"，第二棒维持登记等待；待 D-F2 与 F 清理双双 commit 后，依工单执行 `git rm gui_driver.py` + 删 smoke + 收缩 TRANSITIONAL_DEBT_REGISTER + LOCK audit 全绿（机械 LOCK，B 解锁）。
+- **与 F 的对接约束（按工单显式交接）**：若 F 选择迁移而非删除 killtest 写路径，迁移目标必须是 `MobileGymSubstrateSession` 经 bridge 正式路由 + B-1 单活跃会话语义（评测面先 POST /api/reset/<sid> 激活 sid，mismatch→诚实 409，绝不绕 bridge 守卫）。
+
+### ④ 验证（本会话独立复跑，落盘 eval_results/e44_ef1_control_flow_tests_7b4ad1d.json）
+
+- `pytest tests/runtime tests/integration tests/verifier -q`：**57 passed**（基线 53 + 4 新）。
+- 全量归因三跑：HEAD 纯净 worktree（git worktree @7b4ad1d）**439 passed / 5 skipped**（E43 基线复核）；HEAD + 仅本文件 **443 passed / 5 skipped / 0 failed**（439+4，**零回归隔离证明**）；工作区（含 F 在制品）443 passed / 5 skipped / **3 failed 全在 F 未提交的 tests/evaluation/test_final_contract.py**（collect 对比：-9 killtest smoke + 16 F 新测试 + 4 本会话，逐 ID 列表归因，零交集）。
+- 规则 2：验收原始字段已落盘 `eval_results/e44_ef1_control_flow_tests_7b4ad1d.json`（不入 git）。
+
+### 证明了什么 / 没证明什么
+
+**证明了**：审计 CONDITIONAL PASS 与 E-F1 分类 charter 合规（SHA/行号/零覆盖/条款四要素独立复现）；runtime.md §14 的 Fan-out/Barrier/Bounded-Loop 三行为测试缺口已补齐（4 测试双平面断言全绿）；本会话 delta 对 439/5 基线零回归（worktree 隔离实验）。
+**没证明**：T1 物理删除（前置 D-F2 + F commit 双未齐，WAIT 中）；B 的 FORMAL LOCK（机械跟随 T1 清空，未到）；F 在制品 3 failed 的收敛（F 自有修复责任，非本会话 scope）；D 的 compose_runtime 接线质量（D-F2 未交付无从验）。
+
+### commit 范围（本轮）
+
+只 add E 自己的文件：`tests/runtime/test_control_flow.py` + `.mrules` + `.mrules.log`。**未触碰** F 的 benchmark/evaluation 在制品与其未提交删除、D 的 workspace_ui/projection、A/B/C 冻结域；`eval_results/` 不入 git（规则 3）。
+
