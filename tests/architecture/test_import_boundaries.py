@@ -171,20 +171,6 @@ def test_import_boundaries(pkg_dir: str):
     if not (REPO_ROOT / pkg_dir).is_dir():
         pytest.skip(f"{pkg_dir} does not exist yet (future wave)")
     problems = gate_violations(pkg_dir, _RULES[pkg_dir])
-    if pkg_dir == "taskvm/substrate" and problems:
-        # KNOWN DEBT, loudly marked (not silently green): the LEGACY
-        # substrate package currently reverse-imports taskvm.execution
-        # (gui_executor in base.py, gui_executor_async in
-        # mobilegym/bridge.py). Owned by Agent B
-        # (03_SUBSTRATE_ISOLATION_AGENT) — this wave must not touch
-        # substrate. Only THAT exact known violation is xfail-tolerated;
-        # any new/different substrate violation fails hard, and once
-        # Agent B removes the debt this gate goes green on its own.
-        known = all("taskvm.execution.gui_executor" in p for p in problems)
-        if known:
-            pytest.xfail(
-                "legacy substrate reverse-imports taskvm.execution."
-                "gui_executor; owner: Agent B substrate isolation")
     assert not problems, "import boundary violations:\n" + "\n".join(problems)
 
 

@@ -40,7 +40,7 @@ from pathlib import Path
 from flask import (Flask, jsonify, redirect, render_template, request,
                    url_for)
 
-from taskvm._shim.web_helpers import reap_sessions, session_state_payload
+from taskvm.apps.web_helpers import reap_sessions, session_state_payload
 
 _SCENARIO_DIR = Path(__file__).parent
 logger = logging.getLogger(__name__)

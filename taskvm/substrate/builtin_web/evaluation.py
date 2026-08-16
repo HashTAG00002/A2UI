@@ -183,6 +183,6 @@ def make_evaluation_environments(
         apps: list[str] | None = None, **kwargs
         ) -> dict[str, WebEvaluationEnvironment]:
     """``{app: WebEvaluationEnvironment}`` for an app set. This replaces the
-    legacy ``make_adapters()`` oracle/seed surface; the runtime write
-    surface replaced by it lives in ``taskvm.execution.gui_driver``."""
+    legacy ``make_adapters()`` oracle/seed surface (the runtime write
+    surface lives in the runtime plane, ``taskvm.runtime``)."""
     return {a: make_evaluation_environment(a, **kwargs) for a in (apps or [])}

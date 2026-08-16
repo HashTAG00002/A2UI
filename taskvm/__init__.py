@@ -1,12 +1,14 @@
 """TaskVM — compile live state of multiple existing applications into an editable,
 executable, verifiable task interface.
 
-Four anchors (all must be present): existing applications / live state /
-executable binding / round-trip verification. First-class contribution =
-Executable Projection Fidelity. Verifier always reads hidden canonical sandbox
-state; the binding-generating model never self-judges.
+VM five properties (docs/A2UI_开工大纲_v0_心智模型对齐版.md §3):
+bottom-up live projection, bidirectional executability, substrate
+independence, governance over autonomy, independent verification with
+honest reversibility. The runtime-visible verifier judges completion from
+fresh visible observation (never hidden canonical state); the
+binding-generating model never self-judges.
 
-W1 = kill-test on Calendar + TaskBoard in replay-mode. See
-docs/A2UI_开工大纲_v0_心智模型对齐版.md (单一权威文档·锁定版) and the W1 plan.
+Layered plane: domain → kernel → architect → runtime / projection over the
+substrate port (see docs/contracts/*.md).
 """
-__version__ = "0.1.0-w1"
+__version__ = "0.2.0"

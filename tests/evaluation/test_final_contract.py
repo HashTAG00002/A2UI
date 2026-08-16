@@ -39,18 +39,15 @@ REPO = os.path.abspath(
 #: the runtime E-wave (deletion targets). This register may only SHRINK;
 #: a new offender fails the test below (E36 TRANSITIONAL_DEBT_REGISTER
 #: discipline — the test pins the debt instead of pretending it away).
+#: Wave-3 (2026-08-16) deleted nine of the eleven registered entries
+#: (governance/vm_state + checkpoint_graph, verifier/cross_app_checks +
+#: round_trip_checks, execution/gui_executor + gui_executor_async +
+#: grounding_backend, workspace_ui/genui_decoder + server). The two
+#: survivors are bench-plane infrastructure (baselines dependencies)
+#: that migrate with the taskvm_bench directory split.
 LEGACY_BENCHMARK_IMPORTERS = frozenset({
-    "taskvm/governance/checkpoint_graph.py",
-    "taskvm/governance/vm_state.py",
-    "taskvm/verifier/cross_app_checks.py",
-    "taskvm/verifier/round_trip_checks.py",
-    "taskvm/execution/gui_executor.py",
-    "taskvm/execution/gui_executor_async.py",
-    "taskvm/execution/grounding_backend.py",
     "taskvm/harness/replay_engine.py",
     "taskvm/task_state/compiler.py",
-    "taskvm/workspace_ui/genui_decoder.py",
-    "taskvm/workspace_ui/server.py",
 })
 
 

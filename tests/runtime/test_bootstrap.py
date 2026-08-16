@@ -2,8 +2,9 @@
 
 ``compose_runtime`` is the clean composition entry point that assembles a
 real ``AutonomyRuntime`` over a real ``SubstrateSession`` with injected ports
-— the interface workspace_ui (D) calls instead of the legacy
-``gui_driver.make_task_adapters`` operator-write adapters. This test proves
+— the composition seam (the legacy
+``gui_driver.make_task_adapters`` operator-write adapters were deleted by
+the Wave-3 cluster deletion). This test proves
 the seam builds a working runtime end-to-end (with the test fakes) that
 drives ActionContract → CUA → GuiAction → SubstrateSession.act → fresh
 observe → verify, NOT ``adapter.mutate``.

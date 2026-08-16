@@ -99,38 +99,32 @@ fingerprint invalidation, MobileGym honest-irreversibility (no cua loop →
 501, never a hidden restore), portable browser paths (no user absolute
 paths in repo), OSWorld contract. Gate file: `tests/substrate/test_no_api_backdoor.py`.
 
-## 8. Transitional Debt Register — FORMAL LOCK PENDING (audit B-F1)
+## 8. Transitional Debt Register — EMPTY (Wave-3 landed 2026-08-16)
 
 > **This section does NOT amend the contract.** §6 stays frozen exactly as
-> written. This register records KNOWN, STILL-STANDING §6 violations that
-> predate the freeze and are scheduled for DELETION (not for permission).
-> Every entry below is a violation today, remains a violation until its
-> exit criterion lands, and no test may interpret its presence here as
-> contract satisfaction. Adding an entry requires an explicit RFC accepted
-> by the governance owner — a test allowlist may not silently amend this
-> contract (Oracle audit B-F1, 2026-08-16).
+> written. This register recorded KNOWN, STILL-STANDING §6 violations that
+> predated the freeze and were scheduled for DELETION (not for permission).
+> Adding an entry requires an explicit RFC accepted by the governance
+> owner — a test allowlist may not silently amend this contract (Oracle
+> audit B-F1, 2026-08-16).
 
-| # | Violation (file) | What violates §6 | Owner | Exit criterion |
-|---|---|---|---|---|
-| T1 | `taskvm/execution/gui_driver.py` | upper layer imports concrete substrate impls; keeps `_WEB_APPS`/`_MOBILEGYM_APPS`/`_OP_FIELD`/`_ENTITY_KIND` platform tables; legacy task-level `POST /api/{app}/{sid}/{entity_id}` transport | Agent G (reassigned from E by E47 audit, 2026-08-16 — all three live import hosts `governance/vm_state.py` / `execution/action_dispatcher.py` / `execution/rollback.py` are G Wave-3 deletion targets; E's leg-1 wiring landed in E46, F's leg-2 killtest scripts landed in E45) | file DELETED together with its three live import hosts (G Wave-3 cluster deletion — see handoff 08 ⭐ section); runtime consumes `SubstrateSession` + ActionContract→CUA→GuiAction; killtest write paths migrated or the scripts deleted (F — DONE E45) |
+**Register: EMPTY.** Both entries are resolved:
 
-**Formal LOCK procedure** (mechanical, no judgment call):
+| # | Violation (file) | Resolution |
+|---|---|---|
+| T1 | `taskvm/execution/gui_driver.py` | DELETED 2026-08-16 by Agent G Wave-3, together with its three live import hosts (`governance/vm_state.py` / `execution/action_dispatcher.py` / `execution/rollback.py`) and the whole legacy execution / governance / workspace_ui / verifier cluster (one commit). Runtime consumes `SubstrateSession` + ActionContract→CUA→GuiAction. |
+| T2 | `taskvm/workspace_ui/server.py` | RESOLVED 2026-08-16 by Agent D (anchor_lookup deleted; targeting via Observation → State Compiler → SurfaceHandle); the whole legacy server followed in Wave-3. |
+
+**Formal LOCK condition** (mechanical, no judgment call):
 
 ```bash
-# 1. shrink the register in tests/substrate/test_no_api_backdoor.py
-#    (TRANSITIONAL_DEBT_REGISTER) to {} as T1 lands
-# 2. run the explicit lock audit — must be ALL GREEN before anyone stamps
-#    the substrate contract as formally LOCKED:
+# 1. the register in tests/substrate/test_no_api_backdoor.py
+#    (TRANSITIONAL_DEBT_REGISTER) is {}  — DONE (Wave-3)
+# 2. the explicit lock audit — ALL GREEN as of Wave-3:
 TASKVM_SUBSTRATE_LOCK_AUDIT=1 pytest tests/substrate -q
+#    → 35 passed (2026-08-16, Agent G; evidence eval_results/)
 ```
 
-The lock-audit test FAILS while any register entry remains (default CI
-skips it so parallel waves are not blocked; skipping is visibility, not
-silence — the register itself is asserted to mirror this table).
-
-Agent B status per audit: **OWNER-COMPLETE / CODE-FROZEN / FORMAL LOCK
-WAITING ON G ONLY** (T1 reassigned E→G by the E47 audit, 2026-08-16; E's
-leg-1 composition-root wiring DONE in E46, F's leg-2 killtest-script
-deletion DONE in E45 — the only remaining work is G's Wave-3 cluster
-deletion). B does not reopen substrate scope; the LOCK
-stamps mechanically when the register is empty.
+Agent B status: **OWNER-COMPLETE / CODE-FROZEN / FORMAL LOCK CONDITION
+MET — register empty, lock audit green; Oracle stamp pending.** B does not
+reopen substrate scope.

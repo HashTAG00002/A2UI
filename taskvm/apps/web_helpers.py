@@ -1,19 +1,14 @@
-"""Session-state helpers for the TaskVM apps.
+"""Session-state helpers shared by the TaskVM builtin apps.
 
 Contract shape (in-memory ``user_sessions`` dict keyed by a fresh random sid
 per episode, + a FIFO cap, + a summary-only state payload) adapted from
 SenseAct's ``senseact/web_helpers.py`` — but only the generic session-state
-machinery TaskVM actually uses. SenseAct's price/review Jinja filters, its
-``tick_session`` belief-over-time clock (for time-sensitive cancel windows /
-shipping stages), and its submit-mode ``done``/``reward`` fields are
-SenseAct-specific and NOT ported (TaskVM has no time-sensitive app state and
-no submit-answer scoring — success is judged by ``verifier/round_trip_checks``
-reading canonical state).
+machinery TaskVM actually uses.
 
-Load-bearing: ``session_state_payload`` returns ONLY a summary (counts/status) —
-it must NEVER include oracle_answer / canonical task graph / expected_diff. The
-canonical state is verifier-only (see ``benchmark/fixtures.py`` +
-``verifier/canonical_state.py``).
+Load-bearing: ``session_state_payload`` returns ONLY a summary (counts/status)
+— it must NEVER include oracle answers / canonical task graph / expected
+diff. Ground-truth state is evaluation-plane-only (see the substrate
+evaluation adapters).
 """
 from __future__ import annotations
 

@@ -11,8 +11,8 @@ A thin HTTP client over the resident MobileGym bridge
   * ``capture`` → screenshot artifact.
 
 The bridge's legacy operator-mutate routes (wechat send_message, X toggle)
-are NOT used by this session — those wrap an L2 CUA loop and belong to the
-execution layer's transition adapter (``taskvm.execution.gui_driver``).
+are NOT used by this session — those wrap an injected L2 CUA loop; the
+runtime reaches MobileGym only through this session's observe/act port.
 """
 from __future__ import annotations
 

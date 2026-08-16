@@ -31,10 +31,10 @@ import requests
 from taskvm.benchmark.fixtures import CanonicalTaskGraph, get_task
 # GG: translation layer — entity_id ↔ visible locator. The parser now keys
 # entities by their VISIBLE TITLE (screen-visible), never by entity_id. The
-# title↔entity_id map (control-plane) lives in governance.translate.
-from taskvm.governance.translate import (TITLE_FIELD, ID_FIELD,
-                                         build_locator_index,
-                                         build_locator_index_strict)
+# title↔entity_id map (control-plane) lives in harness.locator.
+from taskvm.harness.locator import (TITLE_FIELD, ID_FIELD,
+                                    build_locator_index,
+                                    build_locator_index_strict)
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ from taskvm.harness.observations import StepObservation, TraceFixture  # noqa: F
 # input. The DOM no longer carries ``data-{kind}-id`` row attrs (entity_id) nor
 # a visible ID column. Instead each entity row is keyed by its VISIBLE TITLE
 # (the screen-visible identity column: title / name / subject / peer_name /
-# counterpartyName — see governance.translate.TITLE_FIELD).
+# counterpartyName — see harness.locator.TITLE_FIELD).
 #
 # ``data-field`` is kept on cells as the parser's field-key contract. It is an
 # HTML attribute (NOT rendered on screen) and the raw DOM HTML is NO LONGER fed
@@ -109,7 +109,7 @@ def parse_dom_entities(dom_html: str) -> dict[str, dict[str, Any]]:
 
     GG: entities are keyed by their **visible title** (screen-visible), NOT by
     ``entity_id``. The title↔entity_id translation is the harness control
-    plane (``governance.translate.build_locator_index``); this function's
+    plane (``harness.locator.build_locator_index``); this function's
     output is the model-visible form. ``data-field`` cells supply exact field
     keys (control-plane parser contract; not fed to the model).
 

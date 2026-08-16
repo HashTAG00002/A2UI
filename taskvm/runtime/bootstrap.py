@@ -9,9 +9,10 @@ INJECTED by composition (runtime_rfc_backlog.md RFC-001). The runtime gate
 forbids ``taskvm.runtime`` from importing architect/verifier/concrete-
 substrate, so the composition root — NOT the runtime — wires concrete ports.
 
-This module is the **clean public interface** composition / workspace_ui (D)
-call instead of the legacy ``taskvm.execution.gui_driver.make_task_adapters``
-operator-write adapter (substrate.md §8 T1 — Agent E's deletion target). It
+This module is the **clean public interface** composition (workspace_ui /
+integration) calls. The legacy operator-write adapter
+(``taskvm.execution.gui_driver.make_task_adapters``, substrate.md §8 T1)
+was deleted by the Wave-3 cluster deletion (2026-08-16). It
 bundles the injected ports into one typed ``RuntimePorts`` object and exposes
 ``compose_runtime`` as the single entry point that assembles a real
 ``AutonomyRuntime`` over a real ``SubstrateSession`` driven by ActionContract

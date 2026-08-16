@@ -3422,3 +3422,24 @@ gui_driver 的**三处活 import 宿主全是 G Wave-3 的 legacy 删除对象**
 **用户直接 approve，无返工 prompt 下发**。G 既有启动 prompt（E50 定稿）已覆盖 E-LOCK 的唯一机械前提（T1 删除）与 F 两边界的继承方。
 
 **证据落盘**：eval_results/audit_def_lock_6ba9cf1.json（不入 git，规则 3）。
+
+---
+
+## E52（Agent G Wave-3，2026-08-16）：legacy 簇一体化删除 + 双债务表收缩 + substrate FORMAL LOCK 条件达成（L3443-3497）
+
+**base**：6ba9cf1（E50 后 HEAD，工作树干净）。
+
+**做了什么（一次提交簇内完成，遵守 08 ⭐ 禁单删禁令）**：
+
+1. **删除生产文件 32 个**：`taskvm/execution/` 整目录 11 文件（gui_driver[T1 核心] + 宿主 action_dispatcher/rollback + workflow_executor/gui_executor/gui_executor_async/patch_compiler/replanner/shadow_txn/grounding_backend/__init__）；`taskvm/governance/` legacy 4 文件（vm_state[宿主]/subgoal/translate/checkpoint_graph，保留现代 events+service）；`taskvm/workspace_ui/` legacy 5 文件（server/renderer/editable_components/genui_decoder/live_sync，保留 __init__[STATIC_DIR+serve]+composition.py+static/）；`taskvm/verifier/` legacy oracle 6 文件（canonical_state/non_interference/round_trip_checks/cross_app_checks/reconciliation/rollback_verify，保留 visible.py）；`taskvm/vm_state/`、`taskvm/_migration/`、`taskvm/_shim/`（整目录）、`taskvm/harness/trace_capture.py`（零引用判死）。
+2. **删除测试 8 文件**：tests/test_imports.py、tests/fakes/ 六个 legacy 事件源 fixture、tests/kernel/test_migration_adapters.py（仅 legacy 耦合测试随簇亡，合同锁全留）。
+3. **移动 2 处**：_shim/web_helpers.py → taskvm/apps/web_helpers.py（5 个自建 app 活依赖）；governance/translate.py 的 4 个 bench 侧符号（TITLE_FIELD/ID_FIELD/build_locator_index[_strict]）→ 新建 taskvm/harness/locator.py。**关键纠错：初版删除漏了 harness/replay_engine.py:35 的活 import（模块级但只被 baselines 运行时走到，第一轮全量测试绿没有暴露），grep 复查抓出后最小内联修复**；生产 locator 平面仍是 SurfaceHandle，不复活 translate。
+4. **双债务表收缩（shrink-only）**：TRANSITIONAL_DEBT_REGISTER → {}（T1 exit 达成）；LEGACY_BENCHMARK_IMPORTERS 11→2（幸存 replay_engine + task_state/compiler = baselines 依赖，随 bench 分离迁移）；substrate.md §8 权威表同步清空（合同-测试镜像 1:1）。
+5. **xfail 死分支清理**：tests/architecture/test_import_boundaries.py 的 substrate gui_executor 豁免（B 已偿还、execution 包已不存在）。
+6. **B 层仅注释级触碰**（E45/E48 先例，零逻辑改动）：substrate/__init__、builtin_web/evaluation、mobilegym/session docstring 去 gui_driver 指向；mobilegym/bridge 两处错误提示字符串去 taskvm.execution.gui_executor_async 指向（改通用 --cua-loop 表述）。另 taskvm/__init__.py 版本号 0.1.0-w1→0.2.0 与 pyproject 一致、删 W1/hidden-canonical 陈旧文案（08 路由债务节）；governance/verifier/harness/workspace_ui __init__、runtime/bootstrap、workspace_ui/composition docstring 去 legacy 指向。
+
+**验证（证据 eval_results/wave3_cluster_deletion_g.json）**：全量 `pytest tests/ -q` 基线 464p/5s/0f → **429p/5s/0f**（-35 = 删除的 legacy 测试，零新增失败）；`TASKVM_SUBSTRATE_LOCK_AUDIT=1 pytest tests/substrate -q` **35 passed**（登记表空——substrate FORMAL LOCK 机械条件达成，**通知 Oracle 盖章 B**）；`compileall taskvm` exit 0；全平面 walk_packages import smoke OK。
+
+**没证明什么**：本步骤无真模型 GUI 弧（确定性套件）；B 层触碰全部为 docstring/错误提示字符串级。
+
+**教训（元原则 12 候选）**：dead-code 删除的引用扫描必须模块级 grep 全量 import 图——测试绿 ≠ import 图干净（bench/延迟路径的模块级 import 只有运行到才炸）；删除类改动的必要验收 = grep import 图 + 全平面 import smoke + 全量测试三件套。

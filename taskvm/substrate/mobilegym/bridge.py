@@ -541,8 +541,8 @@ class MobileGymBridge:
                 # hardcoded gesture sequence NOR a set_state backdoor).
                 raise web.HTTPNotImplemented(text=(
                     "wechat send_message requires a CUA loop; this bridge was "
-                    "started without --cua-loop. Start it with e.g. "
-                    "--cua-loop taskvm.execution.gui_executor_async, or drive "
+                    "started without --cua-loop. Start it with a --cua-loop "
+                    "module exposing gui_write_async, or drive "
                     "the L1 observe/act port (substrate/mobilegym/session.py) "
                     "from the runtime."))
             gui_write_async = self.cua.gui_write_async
@@ -1031,7 +1031,7 @@ def main(argv=None):
                              "deliverable — works headless.")
     parser.add_argument("--cua-loop", default=None,
                         help="dotted module path of the L2 CUA loop module to "
-                             "INJECT (e.g. taskvm.execution.gui_executor_async; "
+                             "INJECT (any module "
                              "must expose gui_write_async / gui_act_async / "
                              "GuiExecutorFailure). Without it the legacy "
                              "mutate routes answer 501 — the bridge never "

@@ -1,8 +1,10 @@
 """taskvm.workspace_ui.composition — the D-side composition root for the
 real runtime (substrate.md §8 T1 leg-1; D audit rework D-F2, 2026-08-16).
 
-This module REPLACES the legacy ``taskvm.execution.gui_driver`` import in
-``workspace_ui/server.py``. It is the **single production call site** of
+This module is the production composition root (the legacy
+``taskvm.execution.gui_driver`` import and the legacy
+``workspace_ui/server.py`` write routes were deleted by the Wave-3 cluster
+deletion, 2026-08-16). It is the **single production call site** of
 Agent E's ``taskvm.runtime.bootstrap.compose_runtime`` (RFC-001): the
 five injected ports are assembled HERE, by composition — the runtime gate
 forbids ``taskvm.runtime`` from importing architect/verifier/concrete

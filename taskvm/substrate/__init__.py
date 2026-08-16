@@ -22,9 +22,9 @@ What changed vs. the legacy package (E17-C → Agent B rework):
     factory) is DELETED. Its oracle/seed surface moved to
     ``builtin_web/evaluation.py`` / ``mobilegym/evaluation.py``
     (EvaluationEnvironment — a physically separate object); its runtime
-    write surface was already GUI-only and now lives above the port in
-    ``taskvm.execution.gui_driver`` (operator→gesture composition is an
-    execution-layer concern; the substrate answers observe/act/capture).
+    write surface lives above the port in the runtime plane
+    (``taskvm.runtime`` + composition: operator→gesture composition is an
+    upper-layer concern; the substrate answers observe/act/capture).
   * ``harness/state_adapter.py``, ``harness/mobilegym_bridge.py`` and
     ``harness/browser_controller.py`` shims/files are DELETED (Web and
     MobileGym specifics live in their substrate subdirectories).
