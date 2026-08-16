@@ -3,70 +3,130 @@
 **Compile live state of multiple existing applications into an editable,
 executable, verifiable task interface.**
 
-人操作任务，Agent 操作应用。Agent 把多个正在运行的**既有应用**的实时状态，
-反向编译成一个可编辑、可执行、可验证的任务界面；用户改一个任务变量，Agent
-把改动可靠写回多个真实应用，独立 verifier 读 ground-truth 判定"改的发生、
-没改的不动、界面重新同步"。
+人治理任务，Agent 自治应用。TaskVM 将分散在多个应用、设备与交互环境中的
+任务相关状态，组织成一个持续存在、可操纵、可验证的任务层。用户直接治理任务
+要达到的状态；Agent 在治理边界内自主完成具体的软件操作；独立 verifier 读
+ground-truth 判定"改的发生、没改的不动、界面重新同步"。
 
-Four anchors (all must be present): `existing applications` / `live state` /
-`executable binding` / `round-trip verification`. First-class contribution =
-**Executable Projection Fidelity**. Verifier always reads hidden canonical
-sandbox state; the binding-generating model never self-judges.
+五条结果性性质（权威定义见
+[`docs/A2UI_开工大纲_v0_心智模型对齐版.md`](docs/A2UI_开工大纲_v0_心智模型对齐版.md) §3）：
+自底向上的实时投影 · 双向可执行性 · substrate independence · governance over
+autonomy · 独立验证与诚实可逆性。
 
-- Authority doc: [`docs/A2UI_开工大纲_v0_心智模型对齐版.md`](docs/A2UI_开工大纲_v0_心智模型对齐版.md) (单一权威文档·锁定版)
-- W1 plan: `~/.claude/plans/mellow-roaming-quilt.md`
+---
 
-## W1 kill-test
+## 架构
 
-2 apps (Calendar :3013 + TaskBoard :3014) → frontier compiler → task surface →
-user edits one task variable → agent cross-applies via app-API → independent
-verifier reads hidden canonical state → score (changed-happened /
-non-interference / interface-re-synced). Replay-mode: the compiler's INPUT is
-a frozen hand-authored trace; execute + verify are live.
+```text
+taskvm/                        ← prototype（枪 + 靶场）
+  domain/                      语义类型：Patch / Node / ObservedValue
+  kernel/                      历史驱动执行引擎：event_index / compensation / checkpoint
+  architect/                   State Compiler + Task Architect（意图→架构，一次模型调用）
+  governance/                  GovernanceService：LocalPatch / GoalPatch / Rollback 路由
+  runtime/                     AutonomyRuntime：bounded loop / verifier / compensation
+  projection/                  Flask API + SSE + SPA 前端
+  substrate/                   底座隔离 port（builtin_web / MobileGym / OSWorld）
+  apps/                        五个自建 web 应用（calendar / taskboard / drive / mail / outlook_cal）
+  thirdparty/                  外部底座适配器
+  workspace_ui/                生产组合根 + 静态前端 + demo 入口
 
-### Install
+taskvm_bench/                  ← 计量（论文测量仪；与 prototype 物理隔离）
+  benchmark/                   考场定义：12 Family × 5 Split × 15 任务
+  evaluation/                  隐藏判卷 Oracle + harness + runner + statistics
+  baselines/                   direct-CUA / planner-CUA 对照
+  task_state/                  replay compiler（冻结输入绑定）
+  harness/                     locator + replay engine
+```
+
+### 六层依赖方向（禁止逆流）
+
+```
+domain ← kernel ← architect ← governance ← runtime ← projection
+                                      ↘ substrate port ↗
+```
+
+- `taskvm/` 零引用 `taskvm_bench/`（架构门 `_ALWAYS_BANNED` 锁定）。
+- benchmark 层单向导入 prototype（仅 SUT 方向）。
+
+---
+
+## 快速启动
 
 ```bash
 pip install -e .
-pip install playwright && playwright install chromium   # only needed for W2 live CUA
-export OPENAI_API_KEY=...   # or rely on the default proxy key in taskvm/benchmark/model_client.py
+pip install playwright && playwright install chromium   # 浏览器测试
+
+./scripts/dev.sh       # 启动 5 个 builtin app + projection UI
+# UI: http://127.0.0.1:3016
+# stop: ./scripts/stop.sh
 ```
 
-### Run the apps
+环境变量：
+- `TASKVM_PYTHON`：解释器路径（默认 `python3`）
+- `TASKVM_UI_PORT`：projection UI 端口（默认 3016）
+- `TASKVM_DEMO_APP`：demo 会话使用的 builtin app（默认 `calendar`）
+- `TASKVM_DEMO_OFFLINE`：设为非空 → 使用确定性 placeholder CUA（不调用 provider，诚实 FAIL）
+- `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `TASKVM_MODEL`：真实 CUA provider 配置
+
+---
+
+## 用户 Workflow
+
+1. **启动**：`./scripts/dev.sh` → 5 个 app + projection UI 就绪
+2. **创建会话**：POST `/api/sessions` → 获得 session_id
+3. **输入目标**：通过 UI 或 API 提交自然语言任务目标
+4. **State Compiler**：architect 从可见 GUI 观测编译任务架构（一次模型调用）
+5. **自治推进**：`/api/sessions/<sid>/governance/start` → runtime bounded loop
+6. **实时投影**：SSE `/api/sessions/<sid>/events` 推送状态更新
+7. **治理操作**：
+   - LocalPatch：修改局部目标
+   - GoalPatch：重构任务终点（旧 in-flight response 自动失效）
+   - Checkpoint：标记可回退点
+   - Rollback：经 GUI compensation 回退到 checkpoint
+8. **独立验证**：verifier 从 fresh visible observation 判定完成（不自证）
+9. **诚实边界**：不可逆动作诚实标记 PARTIAL / IRREVERSIBLE
+
+---
+
+## Final Benchmark
 
 ```bash
-docker compose up        # calendar :3013, taskboard :3014
-# or, without docker:
-python -m taskvm.apps.calendar.app --port 3013 &
-python -m taskvm.apps.taskboard.app --port 3014 &
+# 列出可用 suite
+python -m taskvm_bench.evaluation.cli list --what suites
+
+# 冒烟（15 任务 × 6 条件 × 1 seed）
+python -m taskvm_bench.evaluation.cli run --suite final --seeds 1 \
+    --budget smoke --run-id smoke --out eval_results
+
+# 论文矩阵（15 × 6 × 3 seeds）
+python -m taskvm_bench.evaluation.cli compare --config configs/paper_matrix.json
+
+# 从落盘产物重新渲染报告
+python -m taskvm_bench.evaluation.cli report --input eval_results/<run-id> --format paper
 ```
 
-### Run the kill-test
+条件矩阵：`taskvm`（完整栈）/ `direct-cua`（无任务结构）/ `planner-cua`（静态计划）/
+`taskvm-oracle-upper-bound`（诊断专用）/ `taskvm-no-verifier`（消融）/ `taskvm-no-replan`（消融）。
 
-```bash
-python -m taskvm_bench.evaluation.cli run --suite smoke
-python -m taskvm_bench.evaluation.cli run --suite final --condition taskvm --seeds 3
-```
+诚实边界（详见 [`docs/benchmark.md`](docs/benchmark.md)）：
+- fakes 不是真模型——数字回答的是"结构问题"，不是任何具体大模型的成绩。
+- world 是确定性模拟考场，不是 MobileGym/OSWorld。
+- oracle 上界是诊断量，永不进 headline。
 
-Results → `eval_results/w1_<ts>.json`: per-sample round-trip score, per-check
-fractions, binding-accuracy, which-link-broke, neg-control score.
+---
 
-### What W1 tests (vs. does NOT)
+## 局限
 
-The gate-critical claim is the **model's binding discovery** — can a frontier
-model, given only rendered app observations, compile a correct typed
-task-state graph + binding (`task_state/compiler.py`)? The PASS criterion "no
-hand-written binding" tests THIS. `execution/patch_compiler.py`'s patch
-generation (applying an edit to the now-fixed binding's known operators) is
-deterministic engineering — rule-based is fine, it is NOT what's tested.
+- **真模型**：benchmark 使用确定性 fakes；真 provider 全弧未在 CI 验证。
+- **SPA 前端**：当前是 honest JSON snapshot，非完整 SPA。
+- **真实底座**：MobileGym/OSWorld 底座接入已有 substrate port，但 benchmark 未覆盖。
+- **不可逆动作**：系统诚实标记 PARTIAL/IRREVERSIBLE，不假装所有动作可撤销。
 
-### Load-bearing invariants (violating any voids the kill-test)
+---
 
-1. **Read-path-is-GUI / write-path-is-API split** — compiler reads rendered
-   GUI observations; executor writes via app-API. Never let the compiler read
-   the DB/session directly.
-2. **No-leak canonical state** — `benchmark/fixtures.py` is verifier-only GT;
-   never imported by `task_state/` or `execution/`.
-3. **Negative-control** — broken-dispatcher run must score ≤0.3.
+## 文档
 
-See the W1 plan for exit criteria + the three sub-kill triggers.
+- [心智模型总纲](docs/A2UI_开工大纲_v0_心智模型对齐版.md)
+- [Benchmark 运行手册](docs/benchmark.md)
+- [合同文档](docs/contracts/)：kernel / architect / runtime / projection / substrate / governance
+- [审计章程](docs/contracts/audit_charter.md)

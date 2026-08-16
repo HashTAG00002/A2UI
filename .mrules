@@ -1,114 +1,101 @@
-# TaskVM · 项目规则与心智模型索引
+# TaskVM · Repository Contract
 
-> **完整纠错历史**见 `.mrules.log`（2404行）。本文件只保留强制规则 + 每个 Episode 的一句话摘要 + 行号索引。
-> **关键文档动态链接**（精确到行）：
-> - 大纲/VM五性质/开放场景判据：`docs/A2UI_开工大纲_v0_心智模型对齐版.md:9-48`
-> - GG 阶段红线（内部信息零暴露）：`docs/A2UI_GG阶段开工目标.md:9-30`
-> - EE 阶段开工目标：`docs/A2UI_EE阶段开工目标.md`
-
-其中 `docs/A2UI_开工大纲_v0_心智模型对齐版.md` 是非常非常非常关键的文件，请尽量锚定其最重要的特性。
+> 本文件是 TaskVM 仓库的最终规则文件，所有 coding agent 必读。
+> 完整纠错历史见 `.mrules.log`（已冻结，不再追加）。
+> 心智模型总纲见 `docs/A2UI_开工大纲_v0_心智模型对齐版.md`。
 
 ---
 
-## 🔴 强制规则（所有 agent 必读，优先级最高）
+## 1. 五条结果性原则
 
-1. **每完成一个小目标立即将摘要（即，按照本文件的写作风格续写本文件）以索引的形式写入本文件 + `git commit`**；不攒到会话末尾回忆式补写（E9 教训） + 将完整的详细说明写入 `.mrules.log` 中并正确建立行数的索引。commit 前确认 `eval_results/`、截图等产物不在 staging。
-2. **验证性结论必须附 `eval_results/*.json` 原始字段**，不接受口头汇报或 memory 文件替代（E8/E9 教训）。
-3. **`eval_results/`、`*.png`、截图目录不进 git**；若已进入用 `git rm -r --cached` 清除。
-4. **发现失败必须诚实报告**，禁止用 mock/api 路径数字掩盖真实 GUI 失败（E11 教训）。
-5. **写/回退路径必须经过真实浏览器 + 真实手势**；任何脱离渲染页面的写操作都是后门（E7/E10/§12.16）。
-6. **内部信息零暴露判定口令**：*"这个字符串，真实用户能在渲染屏幕上肉眼看到吗？"* 看不到 → 禁止进入任何模型输入（E16/E21/GG §0）。具体禁止：entity_id、data-\*-id、get_state 产物、operator 内部词汇、深链 URL。
-7. **Gate 判据必须用 mean/majority，不用 max**；1 次幸运 ≠ PASS（E4 教训）。
-8. **审计时主动问"同类问题是否跨模块存在"**，不能因为用户只问 A 就默认 B/C/D 没问题（E10/E21 元原则）。
+1. **自底向上的实时投影**——展示的必须是"世界现在是什么样"，不是"Agent 打算做什么"。
+2. **双向可执行性**——用户改任务变量 → Agent 写回真实应用 → 底层变化重新反映到投影。
+3. **Substrate independence**——同一任务意图在不同软件栈上语义一致，底层执行轨迹可以不同。
+4. **Governance over autonomy**——人治理目标/约束/checkpoint/方向，Agent 在边界内持续自治。
+5. **独立验证与诚实可逆性**——verifier 读 fresh visible observation 判定完成；不可逆动作诚实标记。
 
 ---
 
-## 开发环境规范
+## 2. 六层依赖方向（禁止逆流）
 
-- **标准 conda 环境**：`taskvm`（`/mnt/dolphinfs/.../conda/envs/taskvm`，Python 3.10，从 senseact clone）
-- **运行命令前缀**：`/mnt/dolphinfs/.../conda/envs/taskvm/bin/python -m ...`（直接用绝对路径，`conda run -n taskvm` 可能解析到 codelab）
-- **Playwright 截图**：需设 `PLAYWRIGHT_BROWSERS_PATH=.../opt/ms-playwright` + `LD_LIBRARY_PATH=.chromelibs/lib`
-- **MobileGym 服务**：在 `mobilegym` 环境里启动，TaskVM 通过 HTTP 连接，两个进程各用各环境
-- 详见 `.mrules.log:L1129-1171`（开发环境规范完整节）
+```
+domain ← kernel ← architect ← governance ← runtime ← projection
+                                     ↘ substrate port ↗
+```
+
+- `taskvm/` 零引用 `taskvm_bench/`（架构门锁定）。
+- benchmark 层单向导入 prototype（SUT 方向）。
+- 每层只通过公开 port 与相邻层交互，不跨层 import。
 
 ---
 
-## Episode 纠错摘要索引（E1-E26）
+## 3. GUI-only · 无内部 ID 暴露
 
-| # | 一句话摘要 | .mrules.log 行 |
+**判定口令**：*"这个字符串，真实用户能在渲染屏幕上肉眼看到吗？"*
+
+- 看不到 → 禁止进入任何模型输入。
+- 禁止：entity_id、data-\*-id、get_state 产物、operator 内部词汇、深链 URL。
+- 写/回退路径必须经过真实 GUI 手势，任何脱离渲染页面的写操作都是后门。
+
+---
+
+## 4. Runtime / Evaluation 权限隔离
+
+- `taskvm/` = prototype（枪 + 靶场）。
+- `taskvm_bench/` = 计量仪器（benchmark / evaluation / baselines）。
+- 评测环境的 reset / seed 权限不能成为 runtime 正常运行能力的一部分。
+- `eval_results/` 目录不进 git。
+
+---
+
+## 5. Owned Paths
+
+| 层 | Owner path | 冻结状态 |
 |---|---|---|
-| **E1** | 人的角色从"低频授权节点"改为"governance者"——人在事前设定 checkpoint，不在执行中审核 | L24-45 |
-| **E2** | 从"四锚点"升级为"VM 五性质"框架（加入 rollback/reconciliation/substrate-independence），项目正式更名 TaskVM | L47-71 |
-| **E3** | 交接文档必须区分"确定性工程"和"模型验证"：后者不能因为前者跑完就假设通过 | L74-92 |
-| **E4** | OOD gate 判据不能用 max（1次幸运≠稳定），必须用 mean/majority；`[0.0,1.0,0.0]` 被 max 判为 PASS 是虚报 | L95-113 |
-| **E5** | 技术贡献和实验对象真实性是两个独立轴；接入 MobileGym/OSWorld 解决真实性问题，不削弱已有 VM 贡献 | L115-135 |
-| **E6** | 交接文档必须显式标注"这次改动证明了什么、没有证明什么"，防止虚假的"问题已解决感" | L137-154 |
-| **E7** | MobileGym 写路径用了 `set_state` 后门（非侵入性违规）；修复为真实 GUI 手势；不可逆操作诚实返回 409 | L156-208 |
-| **E8** | 验证数字只落在 Claude memory 里不算落盘；必须是仓库内 `eval_results/*.json` 才算可复核证据 | L210-259 |
-| **E9** | 会话窗口结束前必须把完整状态快照写入 `.mrules`；8项 TODO 逐条核实 + "以诚实为本的回退"构念首次提出 | L261-329 |
-| **E10** | GUI 执行器和 GenUI 解码器从 W1 起就是占位符，从未真实实现；所有旧数字作废；正确架构：截图→模型→坐标动作→执行→重新截图 | L331-392 |
-| **E11** | 技术上没造假，但选择性组合/省略真实数字制造了乐观故事；`doc_handoff` 真实 GUI 0.3 被 mock 1.0 掩盖 | L394-443 |
-| **E12** | 审计 agent 越界开始写代码被纠正；同轮固化：var_id 匹配根因（精确字符串匹配）、A2UI 集成差距、MobileGym 迁移范围 | L445-477 |
-| **E13** | var_id 映射修复（direction-a：按 binding-set 语义对齐）+ 重试效率优化代码就位 + GenUI 接入 server + A2UI 正式 schema 校验 | L479-638 |
-| **E14-core** | ⭐E14 的"涌现"叙事被诚实拆解：posts.json 修复是主导(+83.3pp)，坐标 only +11.1pp；没有消融实验的多修复打包是叙事风险 | L640-687 |
-| **E14** | MobileGym X app toggle 写路径从 0%→94.4%；三个修复（坐标管线/posts路径/instruction验证）耦合打包，无消融 | L689-754 |
-| **E14-honest** | 94.4% 仅对前3个可见帖子成立（无需滚动）；移动端 grounding 能力边界的诚实标注 | L756-782 |
-| **E15** | 消融实验落盘 + wechat CSS 布局修复（textarea视口外是sim布局bug非模型能力边界）+ X rollback bridge方向感知bug修复 | L784-885 |
-| **E16** | X app 有两处"远端数据库泄露进模型prompt"（posts.json + get_state）；E15 的消融框架本身的假设就错了 | L887-969 |
-| **E17** | 流水线被拦腰截断（从意图层而非 GenUI 界面开始）+ ill-posed 任务 + MobileGym VM五性质缺失；引入 UserBehaviorDriver 架构（L0-L4 网络协议栈类比） | L971-1127（含E17实施结果） |
-| **E18** | `run_mg_vm_killtest` 落盘 + verify_mode=any_new SR 从38.9%→100% + rollback NL 路径验证（LLM 正确提到不可逆性） | L1174-1257 |
-| **E19** | EE 阶段（EE.1-EE.10）全部完成：默认执行器改 gui_agent / 4-App fanout / 四步弧 / substrate invariance / reconciliation / GroundingBackend ABC / GenUI form-wired / SSE 动态重投影 / interaction_compression / vision 编码器 | L1259-1537（含10个EE.X详情） |
-| **E20** | FF 阶段完整交接文档（UI重设计/UISimDriver/milestone建议/WorkflowPlanner/动画/benchmark），FF.1-FF.8 全部执行结果附后 | L1539-2239 |
-| **E21** | 内部数据库 ID 渗入四层（渲染/观测/指令/执行）；FF.7 的 4/4 PASS 数字在开放场景证明力为零；GG 阶段开工文档已交付 | L2241-2276 |
-| **E22** | GG 阶段完成：entity_id 零暴露契约落地（GG.1-GG.6 全 PASS）；locator(visible title)替代 entity_id 进模型；open-world killtest 证明真泛化 | L2278-2329 |
-| **E23** | Wave 1 Agent A：taskvm/domain + taskvm/kernel 落地（三类 Patch 类型即语义、三 primitive workflow、7 不变量测试锁定、AST 架构 gate）；平行结构逻辑合并为唯一真源 | L2333-2364 |
-| **E24** | Wave-A 评审打回后 12 条全修：节点推进协议分立、observed/desired 双平面、ObservedValue 证据合同、patch 原子性、compensation 全量对账+spoof 面消除、recompose 结构入口、projection authoritative replace、stdlib 白名单 gate、SurfaceHandle 只留 handle_id、事件语义统一；66 全绿 | L2368-2404 |
-| **E25** | Wave-A.1 对抗硬化（v3）：handle 单次落地、compensation epoch 绑定+单次落地、checkpoint 升级 logical checkpoint、bounded loop 可执行协议、组合边界交叉校验、kernel facade 封装 | L2408-2440 |
-| **E26** | Wave-A.2 审计 13 组全修（v4 冻结）：GoalPatch 两阶段封闭（recompose 唯一闭环+split-brain guard）、LocalPatch 单一真源+确定性 retarget、补偿改已提交动作历史驱动（IRREVERSIBLE 诚实上报、拒绝逻辑删除）、frontier 确定性倒回、checkpoint 稳定边界+自包含、set_plan one-shot、三 primitive validator 锁死；对抗套件先红（29/30）后绿（113+37 全过） | L2444-2483 |
-| **E27** | Wave-A.5 Kernel 瘦身（v5）：内容校验全部下放 domain 构造器+typed result（TaskArchitecture/VerificationResult/CompensationResult/ObservationBatch、ID namespace、deepcopy 瘦身）；probe 实证并补齐 3 处 doc-vs-code 缺口（pending-comp gate、COMPLETE 截断、PARTIAL disposition）；145 全绿；≤600 行指标与冻结范围不兼容，诚实挂起并登记 RFC-001 | L2487-2543 |
-| **E28** | v5 rollback closure（Oracle 收敛审计 3 组修复）：不可逆存留不再虚假 COMPLETE（诚实 PARTIAL）、COMPLETE 恢复全部 checkpoint desired+确定性 retarget 幸存未来合同+重置 rewind 的 loop counter、跨结构恢复变量 observed=unknown 不伪造现实；5 新测试先红后绿 + 2 旧测试语义迁移；187 全绿；RFC-001 裁决落盘（≤600 废止为 soft diagnostic）；Kernel contract 冻结前置条件全部满足 | L2547-2596 |
-| **E29** | Wave-B/C 落地（底座隔离+角色合并）：taskvm/architect 七模块（State Compiler fast/slow + TaskArchitect 一次调用 + CUA 序列化 + ModelCallLedger 计量 + no-leak）+ GovernanceService 六事件路由（LocalPatch 0 调用 / GoalPatch 恰 1 次 / Rollback 纯历史驱动）；旧 governance 角色全迁 tests/fakes；关键纠错：GoalPatch 历史闭包不再携带已作废 lane（否则 split-brain 误报）+ architect 首道校验补 exempt_node_ids（与 kernel 同源豁免）；4 个旧 killtest 脚本迁移双 plane；28 failed→**210 passed / 2 skipped** | L2598-2633 |
-| **E30** | Wave-B 收尾：三个 MobileGym killtest 脚本双 plane 迁移（写走 MobileGymTaskAdapter.mutate_raw / reset-seed-oracle 走 MobileGymEvaluationEnvironment）+ workspace_ui 删 --executor 后门旋钮并修 main() 双 bug（executor= 传参 + 二元组解包三元组，demo 入口当时是坏的）+ gui_driver 端口知识下放 port 按名路由（builtin_web_app_url/mobilegym_bridge_url，DEFAULT_PORTS 移出 execution 层）；验收 grep 全净（无 executor=api / 上层零实现导入）；关键纠错：字面量 grep 假阴性漏 argparse choices 形式、"N 绿≠入口可用"、config 键静默忽略（bridge_url vs host）；**211 passed / 1 skipped**；多 agent 提交纪律固化（只 add 自己的文件） | L2636-2677 |
-| **E31** | Agent C fix round（Oracle 裁决三 Finding 全修，NEAR-FROZEN→修复）：C-1 repair-path no-leak——每轮实际发送 message 过 gate（移入循环内）+ leak 错误 repair note 只述类别不复述 offending token（noleak.LEAK_REPAIR_GUIDANCE）；C-2 ledger 真实性——HttpModelPort 删内部 retry，一次 complete_json = 一次 provider request = 一条 ledger record，parse 失败返 parsed=None 由 L4 语义 repair 唯一 owner 重问；C-3 合同对齐——recompose_future 签名改 RecomposeProposal（经 kernel.recompose 安装）+ §5/§6 同步；测试缺口修复：echo 反例补 actual-message 断言 + 新增 architect leak counterexample + provider==ledger monkeypatch 测试；**213 passed / 1 skipped** | L2679-2725 |
-| **E32** | Oracle 复审 fix round（2 BLOCKER 全修）：C-4 repair-note 内部 ID 零回传——domain 校验错误（如 fan-out lane 依赖 sibling，validator 用 n001 报错）的 repair note 永不携带原文，noleak.repair_guidance 13 条业务级分类表 + generic fallback，architect/compiler 两侧同修（元原则 9：被报 A 主动查 B），原文降级 logger.debug；C-5 token 记账闭环——HttpModelPort.complete_json 把 _chat 已读的 usage 填入 ModelReply（缺失诚实保持 None），ledger 不再全记 None；两测试先红（n00x 在二轮消息 / assert None==123）后绿；**215 passed / 1 skipped**（排除 untracked 在制品目录 tests/runtime、tests/substrate，其 7 failed 为 Agent B/E/G 并行波次自有问题，依赖 grep 零交集）；revision=0 与 legacy governance debt 依克制原则不立项，路由 RFC/D/E/F/G | L2727-2760 |
-| **E33** | Agent C final freeze closure（TEST-ONLY）：补 architect.md §9 三 primitive 中缺失的 Sequence producer test（test_scenario_1b）——真实 compose() 一次调用断言 NodeKind.SEQUENCE 落图 + 3 children 按模型 listed order 连单链 + exactly-one sink TERMINAL；生产代码零改动；Oracle 指定双命令绿（三目录 **38 passed / 1 skipped** + compileall exit 0）；Agent C 冻结退出主开发路径 | L2762-2773 |
-| **E34** | Oracle 裁决 B 波次三 BLOCKER 全修：B-1 bridge 单活跃会话——runtime observe/act/mutate 四路由改 _require_active 守卫（mismatch→409 诚实报错且零 env 调用，_activate 收归评测面，"session context switching"自辩叙事删除）；B-2 facade 纯净——substrate 根删 builtin_web_app_url/mobilegym_bridge_url（假端口面藏 import 泄漏），URL 知识回 provider，gui_driver/server 显式过渡债务形态（E 删除目标）；B-3 tests/substrate/ 六文件 34 测试（合同点名 test_no_api_backdoor + port contract/visibility scrubbing/handle cache/runtime purity/osworld contract）+ test_imports 去 isinstance 锁定 + 冻结债务门（gui_driver→E、anchor_lookup→D/E/G，只可缩不可涨）+ scrubber 连属性值一并 redact + 未知底座 KeyError→SubstrateUnavailable；B 面全绿（**91 passed/1 skipped**），全量 276 passed/1 failed 属 E 在途 runtime（导入面零交集） | L2774-2828 |
-| **E35** | Agent E runtime operationalization（GLM 5.2→5.3 交接）：修复 autonomy.py 五处 critical bug（pending-comp 死循环→blocked 返回 / repair loop 缺失→context-preserving repair 实现 / invalid-prediction 预算缺失→小预算 ceiling / BUDGET_EXHAUSTED 语义滥用→safe pause / surface=None 崩溃→escalate）+ compensation.py 修复（任务级预算缺失→model_calls_base 传入 / CUA 引用失同步→execute_compensation 前重绑 / is_repair 记账 / 异常吞噬范围收窄）+ runtime.md 合同冻结 + 14 verifier 测试（CUA done≠verified / evidence_ref / irreversible / multi-key / frozen dataclass）+ 4 compensation 测试（real GUI rollback / irreversible / stale plan discard / CUA done≠compensated）+ sync 测试（active/inactive heartbeat / structure invalidation / conflict detection）+ 端到端 trace（autonomy→checkpoint→hot LocalPatch→stale discard→retargeted execution→compensation）；关键纠错：compensation executor 持有 CUA 引用在测试 swap 后失效（execute_compensation 前重绑 self._cua）；全量 **292 passed / 1 skipped**；详录 2026-08-16 回补（规则 1 补账，E36 会话点名） | L2875-2901 |
-| **E36** | Oracle 终审 fix round（B-F1+C-F1 双修，用户授权 B 会话代交付 C 项）：C-F1（BLOCKER）——needs_slow_path 不再无条件把 fingerprint 变化判为慢路径，接入 handoff 四级阶梯：指纹变但全部 handle 可确定性恢复（label 恰出现一次）→ needed=False 0 model；新增共享谓词 _recovery（recovered/lost/ambiguous，同名歧义→慢路径）；test_scenario_2 错误 oracle 纠正（旧断言把 recoverable fp-B+label 仍在锁成 needed=True）+ 新增 unrecoverable/ambiguous case；B-F1（BLOCKER）——测试私改合同问题根治：substrate.md 新增 §8 Transitional Debt Register（T1 gui_driver→E / T2 anchor_lookup→D，登记的是仍成立的 §6 违规而非豁免，加项需 RFC），测试改名 TRANSITIONAL_DEBT_REGISTER + 隔离测试明确"非满足性检查" + 新增 test_formal_lock_audit（TASKVM_SUBSTRATE_LOCK_AUDIT=1 显式跑，登记非空则诚实红；默认 CI skip 保持可见 PENDING）；handoff 05/06 追加 T2/T1 债务拆除节；C 验收命令 **38 passed/1 skipped** + compileall 过，tests/substrate **34 passed/1 skipped**，LOCK 审计诚实红（FORMAL LOCK PENDING），全量 **292 passed/2 skipped**（第 2 个 skip 即 LOCK 审计的可见 PENDING，零回归）；C 达 LOCK 条件，B 维持 OWNER-COMPLETE/CODE-FROZEN/LOCK WAITING E+G | L2833-2873 |
-| **E37** | Agent E runtime 硬化收尾 + E35 详录回补（规则 1 清账），taskvm/runtime/ 包+VisibleVerifier+runtime.md 合同首次入库：kernel 门控拒绝全面类型化传播（loop 收口/非 ACTION 推进/ACTION request 三路 ValidationError→BLOCKED，无热重试）+ 外部 pause 闭环（_governance_says_paused 只读 kernel 事件日志）+ _stop_reason 类型化停止原因 + _land_fail 全生命周期（CUA FAIL 也让节点离开 READY）+ no-surface 升级 escalate + 补偿循环无效预测记账（ok=False ledger+ceiling）+ execute_compensation facade 内重绑 CUA（E35 教训升格为实现侧修复）+ 三处测试 oracle 纠正（VariableUpdate new_value= 字段名 / 回退域=checkpoint 边界后提交 / 心跳首次建立基线指纹）；runtime 合同面 **42 passed**（10+4+8+5+14+1），全量 **292 passed/2 skipped** 零回归；_debug_ft/_debug_rt 临时脚本零引用不入库并删除 | L2902-2939 |
-| **E38** | 远端审计 agent 证据链自纠（C PASS→EVIDENCE HOLD）本地 exact-SHA 取证闭环：HEAD==fca4ea4==审计所指 SHA（origin 同为 HashTAG00002/A2UI），compiler.py blob 三方一致 a1c7b911…（fca4ea4==6a168c4==工作区，SHA-1 内容寻址逐字节等价），C-F1 由 6a168c4(E36) 引入且 exact blob 命中 _recovery 三态/零模型快路径，旧逻辑 `if changed or gone or new or lost:` 不存在；独立复现四项验收（38 passed/1 skipped + compileall exit 0 + substrate 34 passed/1 skipped + 全量 292 passed/2 skipped）零偏差；根因=web.run 的 GitHub main 页面 E32-era 旧缓存，审计 agent 情况 A 成立，C EVIDENCE HOLD 解除；教训候选元原则 11：网页快照≠内容寻址对象库；证据落盘 eval_results/audit_fca4ea4_*（不入 git） | L2943-2966 |
-| **E39** | Audit Charter v2（E38 Evidence Protocol Amendment）替换落盘：三类审计失败新增 0.3 Evidence-channel drift + §5A Exact-SHA Evidence Protocol（六级证据等级/冲突五步处置/EVIDENCE HOLD 语义/跨环境宿主取证包十项/解除后不借题扩审/audit-evidence-defect 与 product-defect 分流）+ §5B 四分类（增 EVIDENCE HOLD）+ §5C OWNER-COMPLETE vs FORMAL LOCK（吸收 E36 B-F1）+ §6.7 Evidence Gate（正式 LOCK 前必须 exact SHA + 无未决 HOLD）+ §7.3 stale evidence 不得重开 frozen 层 + §8 审计输出模板 + §10 七步元原则链；替换前3核查：projection.md 不存在放 D 行保持"将来"（否则章程自犯 doc-vs-code lie）、跨文档章节号引用零破坏（§2/§3/§4 顶层语义保持）、恢复 layered_ownership_protocol/RFC 队列/RFC-001 链接锚点；normative 内容逐字保留用户原稿 | L2970-2996 |
-| **E40** | Agent D Projection Layer 落地（D1-D8 全完成）：projection 包（store/app/view_models/events/services/governance）+ 16 路由矩阵（10 GET + 6 POST + SSE 流 + artifact 二进制）+ KernelGovernancePort（HTTP→Kernel 翻译 8 命令）+ architecture gate（projection 零导入 substrate）+ 读路径零模型调用（ModelCallProbe 断言）+ 135 单元/E2E 测试（4 Playwright skip）；关键纠错：test_rollback 400 根因=模块级 fixture 共享 Kernel→goal_patch 设 _pending_recompose→checkpoint 校验失败，修复用独立 session s2；全量 **428 passed / 5 skipped / 0 failed** 零回归 | L2998-3046 |
-| **E41** | Agent E bounded repair（Runtime 最终窄返工，base e36e1caa；D 的 32460b7 并发叠加其下）：P0-1 active-surface per-gesture sync（每 atomic action act→observe→extract→`apply_observation`→`ACTION_OBSERVED` event+artifact；fresh-before fold 让 action history `before` 真值而非 stale cache；`fold_action_observation` 从 dead API 接入）+ P0-2 VisibleVerifier completion_condition（`_verify_action` 现查 desired_state AND completion_condition；RFC-003 minimal `key==value` form 复用 §11 loop predicate 同一 parse 非NLP，non-conforming 诚实 fail-closed；negative-control test：desired 全match BUT completion 不满足⇒passed=False）+ T1 bootstrap seam（`taskvm/runtime/bootstrap.py` `compose_runtime`+`RuntimePorts` gate-clean；**gui_driver.py 物理删除 honestly PENDING，gated D/F per §13，未强删未hide register**）+ P1 RFC-004 emergency-stop（Option B：frozen §4 soft-pause+epoch-invalidation 已subsume，不新增facade method）+ RFC-005 requires_confirmation（三方ALIGNED，无代码变更）；commit 00ac9b3/7965d3c/804fc6b（msg 子标号 E40a/b/c）；全量 **437 passed / 5 skipped / 0 failed** 零回归；`TASKVM_SUBSTRATE_LOCK_AUDIT=1` 诚实 FAIL 在 T1（T2 已被 D 清） | L3048-3076 |
-| **E42** | Agent F final benchmark 主落地（F1-F7）：benchmark 层（schema 12 Family×5 Split/tasks 15 任务/registry 4 suite×6 Condition）+ evaluation 层（world 确定性考场/actors 确定性 fakes/oracle 隐藏判卷/harness 6 条件含两个消融/runner/statistics wilson CI/aggregation failure taxonomy+report schema/cli 统一入口）；F6b 三修（goalpivot：historical_node_ids 排除 TERMINAL——C 冻结域；localpatch：workflow_store._retarget_completion RFC-003 锁步——A kernel 域；conflict：WorldExtractor handle_id==obs_surface 删 "world" fallback + surface_conflict desired 相同级联 retarget），governance taskvm 基线 0.571→三任务全过；全量 **437 passed / 5 skipped 零回归**；遗留：loop-inbox-zero（architect 孤儿节点）+ drift-relabel（恢复链未接）为预先存在失败；⚠规则 2 缺口：修复后数字未落盘 eval_results（接手第一件事重跑落盘）；交接文档 handoffs/12_AGENT_F_SESSION_HANDOFF.md | L3080-3108 |
-| **E43** | Agent E 复核会话（审计合理性裁决 + GLM 5.2 E41 修复独立验证 + 接手修复，base ed076d0）：审计五项 finding **全部 charter 合理**（P0-1/P0-2=§3.1 DEFECT、T1=gated debt 处置正确、P1×2=SPEC-GAP 走 RFC 正确，无过度防御）；GLM 5.2 五项修复**全部合格零次生回归**（437 基线独立复现）；接手修三处：① `_land_fail(started=True)` verdict 被静默吞→节点永卡 RUNNING（E35/E37 既有 DEFECT：kernel 要求 FINISHED handle 而 mid-contract 失败时是 STARTED，except-pass 吞掉；红探针实证→land 前 finish_action→+2 回归测试）② runtime.md §1 引用不存在的 test_runtime_architecture（E41e 修 §14 漏 §1，元原则 9）③ RFC-005 "所有 governance 动作 bump epoch" 措辞过度概括→改道类才 bump；全量 **439 passed / 5 skipped 零回归** + compileall 过 + grep 违禁词零命中 + LOCK audit 诚实 FAIL 在 T1（预期） | L3112-3154 |
-| **E44** | Agent E 审计终局交付（E-F1 TEST-ONLY + T1 第二棒 WAIT 登记，exact SHA 7b4ad1d==HEAD）：审计 CONDITIONAL PASS **独立裁决合规**（§5A SHA 四要素/行号 486/505/124/三目录零覆盖 grep 全部独立复现；E-F1=§6.1 DEFECT(TEST-ONLY) 分类准确，E33 先例）；新增 tests/runtime/test_control_flow.py 4 测试补齐 §14 缺口（BOUNDED_LOOP 两轮终止+max_iterations 诚实 FAILED 无自重试 / barrier 单 lane 不放行双 lane 齐一次 advance / lane 独立 FAILED 不改写 sibling COMMITTED，双平面断言）；验收：scope 57 passed + worktree 隔离实验 HEAD+仅本文件 **443/5/0 failed**（零回归铁证）；工作区 3 failed 全在 F 未提交 tests/evaluation/test_final_contract.py（逐 ID collect 对比归因零交集）；T1 第二棒 **WAIT**（D-F2 compose_runtime 零命中 + F 13 脚本删除未 commit）+ 与 F 对接约束（迁移须走 bridge + B-1 单活跃会话）；证据落盘 eval_results/e44_*.json | L3156-3197 |
-| **E45** | Agent FF 收官 F 波次（F6b 后半/F8/F9/F10/F11/F12 全清）：六条最终合同测试落地（tests/evaluation/test_final_contract.py：现代 runtime 五包 import graph 零 benchmark/evaluation + 11 个 legacy 文件 benchmark 导入登记为只可收缩债务表 / canary spec 零泄漏 / 同 seed 完全复现 / 注入只走公共缝（AST 扫描）/ 聚合不丢失败 trial / 词汇卫生）+ tests/benchmark/test_taxonomy.py（15×12×5 + holdout 诚实性）；论文矩阵 **270 trials 0 eval-error 0 crash** 落盘 eval_results/paper-matrix（taskvm 1.000 [0.92,1.00] 351 calls vs direct/planner 0.800 各 3 false-done 711/1422 calls；no-replan 0.867 全败在 seed-noise split；no-verifier 平坦=确定性世界无拒绝信号，诚实标注不可解释）；隔离归因：工作区 8 failed 全属 D 在途未提交（projection 6 文件 surface_observed 未注册 SSE + composition.py 未登记债务），屏蔽 D 文件后 **446 passed / 5 skipped 零 FF 归因失败**；交付 configs/paper_matrix.json + docs/benchmark.md + 14 个 W 期脚本删除 + README/pyproject/全仓词汇清理 | L3199-3227 |
-| **E46** | Agent D 审计终局返工收官（D-F1..D-F4 + RFC-D1，跨两次会话）：D-F3 SSE 词汇单一真源（23 EventKind + 8 RuntimeEventKind 删 3 dead key 补 5 真 kind + 2 transport 帧 = 33 项 SSE_TYPE_VOCABULARY，totality 测试 + format_sse chokepoint 断言）；D-F2 driver 死接线修复（不存在的 step()→run(step_budget=1)）+ lifecycle 确定性返回（start 返回 self._status 在 fake CUA 下必输竞态→改确定字面量，per-tick disposition 只走 status()/SSE）+ rollback 经 driver 真执行回报 disposition；app.py 增 /sessions/<sid> + /governance/start（409 pending-recompose/no-runtime）+ 201/202/409/422 typed 错误映射；composition.py 组合根五端口（T1 leg-1，server.py 切离 gui_driver，legacy 写路由 409 退役）；**§6-clean 修复：composition 初版 import 具体 provider 被债务门正确红（E44/FF 预警）→ registry 纯名路由 + TASKVM_MOBILEGYM_BRIDGE_URL 操作员显式提供，债务表零新增、门转绿**；D-F4 oracle 校准（probe=账本读取非模型调用，两段断言：20 真 delta 后==0 / 5 snapshot 后==5）；RFC-D1 落盘（projection_rfc_backlog.md + projection.md §6/§7 修订，文档对齐代码）；全弧 E2E（start→ACTION COMMITTED 真手势→checkpoint→rollback EXECUTED→SSE disposition）+ **Playwright 真浏览器首次真跑通 4/4**（浏览器在 taskvm env 自带 opt/ms-playwright，E40-45 时均 4 skipped）；关键纠错：E44 移交的 surface_observed 经核实不存在（RuntimeEventKind 8 值全映射）；全量 **464 passed / 1 skipped / 0 failed 零回归** + compileall 过 + LOCK 审计诚实 FAIL 在 T1（预期）；没证明：真 provider 在线全弧 / SPA 前端 / gui_driver 物理删除（T1 owner E/G） | L3228-3271 |
-| **E47** | A–E 冻结裁决审计（exact SHA 2c85379==HEAD）：A/C/D 达 FORMAL LOCK 条件（各自冻结点后零提交 + 封闭性干净 + 分目录基线 84/16/127 绿）；B 维持 CODE-FROZEN、LOCK 机械等 T1（显式 audit 红点恰为唯一条目，T2 已由 D 清偿，E45 的 B 层触碰仅注释级词汇清理）；E 现代面可冻结但 **T1 leg-3 需先归属裁决**——新发现：gui_driver 三处活 import 宿主（vm_state/action_dispatcher/rollback）全是 G Wave-3 删除对象（F 的 LEGACY_BENCHMARK_IMPORTERS 实证），E 孤立删除会连锁断裂 legacy 栈 → 推荐 T1 移交 G 并 §8 登记 owner 变更；B/C 联动（C 零 substrate 依赖，B 不阻塞 C）+ D/E 联动（compose_runtime 单一调用点 + SSE totality + 五包图 9/9）双向验证干净；全量 439 非 e2e + 29 e2e 真浏览器全绿零失败；证据 eval_results/freeze_audit_2c85379.json | L3272-3317 |
-| **E48** | T1 移交落地（E→G）：G 交接文档注入⭐节（三宿主交叉表 + 禁单删禁令 + 三棒接力状态 + 双债务表收缩编排 + F 并行约束）+ substrate.md §8 owner 显式修正 E→G（B 状态改 WAITING ON G ONLY）+ 测试镜像注释同步（dict 零改动）；BC↔DE 组间联动纠正重析：两条 port 中介稳定缝（B→E：registry/SubstrateSession port，E46 纯名路由；C→(D/E)：零直接 import，只经 A 的 kernel 触达）+ B→D 合同性零耦合，T1 违规本质=绕开 B→E 缝故 B 待决不阻塞 D/E；全量 439p/1s/0f 零回归；E 现可冻结 | L3318-3347 |
-| **E49** | G 职能扩展：prototype/bench 物理分离注入交接文档⭐⭐节——用户裁定 substrate/apps/thirdparty 均属 prototype（靶场），benchmark/evaluation/baselines 迁出为独立顶层 taskvm_bench；终态树 + 五条约束（先簇删后迁移 / prototype 保留 taskvm 包名保冻结合同 / 纯机械迁移 / substrate evaluation.py 不动 / 等价性验收逐位一致）；E49 全仓 grep 实证导入面已分离（prototype 侧 benchmark 导入者恰为 LEGACY_BENCHMARK_IMPORTERS 11 文件，现代五包零命中）→ 是迁移非重构；tests/ 处置裁定：合同锁不可删（84/34/16/127/37/五包图/no-leak/LOCK 审计本身），仅 legacy 耦合测试随 Wave-3 簇亡，G 另新增 integration/smoke；全量 439p/1s 零回归（文档级改动） | L3348-3369 |
-| **E50** | G 启动 prompt 定稿：08 过时"合并顺序"节（分支合并叙事）替换为"启动状态与阅读顺序"节（E47-E49 后各层状态 + 11 审计历史性标注 + .mrules 全程适用/收尾替换时序澄清）；会话交付可直接粘贴的 launch prompt（阅读顺序→Wave-3 执行序→硬约束→环境事实→汇报纪律）；纯文档零代码 | L3370-3385 |
-| **E51** | D/E/F 锁定裁决返工审计（exact SHA 6ba9cf1）：三层验收全部独立复现（D 152p+真浏览器 4/4；E 73p；F 13p+CLI；全量 468p/1s/0f）；E47 后窗口生产代码零改动（次生回归 exact-SHA 级排除）；F 遗留 loop-inbox-zero/drift-relabel 已修复（矩阵 3/3 seeds 原始 JSON 证实）；裁决 **D PASS/FORMALLY LOCKED、E PASS/OWNER-COMPLETE/LOCK PENDING T1(owner G)、F PASS/FORMALLY LOCKED**；2 条非阻塞 SPEC-GAP（条件矩阵 6/8、world-only 底座）均已诚实披露走 RFC；证据 eval_results/audit_def_lock_6ba9cf1.json | L3386-3441 |
-| **E52** | G Wave-3 簇删落地：legacy 40 文件一次提交删除（execution 整目录 + governance legacy 4 + workspace_ui legacy 5 + verifier oracle 6 + vm_state/_migration/_shim 整目录 + trace_capture；tests 侧 test_imports + 6 fakes + migration adapters）+ web_helpers 迁 apps + translate 四符号内联 harness/locator（关键纠错：replay_engine 活 import 漏删被 grep 复查抓出）+ 双债务表收缩（REGISTER→{} / IMPORTERS 11→2）+ substrate.md §8 同步清空；全量 464p→**429p/5s/0f** 零新增失败 + LOCK 审计 **35 passed**（substrate FORMAL LOCK 机械条件达成，待 Oracle 盖章 B）+ compileall 过；B 层仅注释级触碰 | L3428-3445 |
-| **E53** | Agent F 锁定后次生回归复审（charter §7.1 唯一合法重开面，exact SHA qe95d8dc）：次生回归窗口 6ba9cf1→HEAD 内 F 生产面零字节改动（唯一 diff 为预授权 shrink-only）；F 验收在 archive 提取树独立复跑 30p + CLI exit 0；残留 gate 零命中；paper-matrix 270 trial 复核与 E45/E51 台账逐项一致；裁决 **F：PASS / FORMALLY LOCKED（维持）**，F 名下零未清偿义务；顺手点名 E52 行号漂移（G 侧已修正）；证据 eval_results/audit_f_lockcheck_qe95d8dc.json | L3449-3477 |
-| **E54** | ④ prototype/bench 目录分离：benchmark/evaluation/baselines/harness/task_state 五包 + tests/{benchmark,evaluation} 纯机械迁出为顶层 `taskvm_bench/`（39 文件 import 前缀重写）；pyproject += taskvm_bench*；架构门 _ALWAYS_BANNED=taskvm_bench 整包直禁；IMPORTERS 收缩至 **{}**（prototype 零 bench import）；关键纠错：test_final_contract REPO 相对深度差一层致 3 红（迁移类改动的 `__file__` 路径基准是教科书级回归点）；等价性验收（worktree 基线 vs 工作区，junitxml 逐测试比对）：**434/434 node ID 一致、429p/5s/0f 双侧逐位一致、verdict=EQUIVALENT** + compileall 过 + CLI 冒烟 OK；证据 eval_results/dir_split_equivalence.json | L3479-3489 |
-| **E55** | ⑤ 可移植启动套件：旧 run.sh 调 E52 已删幽灵入口（server/--executor/--genui）+个人路径硬编码+fuser carpet-kill 全废；scripts/dev.sh（脚本位置解析 repo root / TASKVM_PYTHON / 端口占用拒绝不 carpet-kill / PID+log 落 .run/ / 健康检查失败自动清场）+ scripts/stop.sh（pidfile 优雅停 + /proc 防 PID 复用 + 幂等）+ workspace_ui/demo.py（真实 compose_task_runtime 五真端口，--offline 诚实 FAIL）；关键纠错：demo.py 初版 import substrate launcher 会被债务门（扫描面含 workspace_ui）打红→改 apps.DEFAULT_PORT；真跑验收：dev 全栈起+会话注册+种子事件+governance 快照、stop 6 端口全释放幂等；substrate 门 35p + 全量 429p/5s/0f；证据 eval_results/scripts_wave_g.json | L3493-3506 |
+| domain / kernel | `taskvm/domain/` `taskvm/kernel/` | FROZEN |
+| architect | `taskvm/architect/` | FROZEN |
+| substrate | `taskvm/substrate/` | FROZEN |
+| governance | `taskvm/governance/` | FROZEN |
+| runtime | `taskvm/runtime/` | FROZEN |
+| projection | `taskvm/projection/` | FROZEN |
+| workspace_ui | `taskvm/workspace_ui/` | ACTIVE |
+| benchmark | `taskvm_bench/` | FROZEN |
+| scripts / configs / docs / README / pyproject | 根目录文件 | ACTIVE |
+
+修改冻结层需 RFC + exact-SHA 审计证据。不越层修改。
 
 ---
 
-## 元原则总结（E1-E22 蒸馏，任何 agent 接手前必读）
+## 6. 测试与诚实汇报
 
-1. **人是 governance 者不是审核者**（E1）——禁止任何"人确认后才能继续"的设计。
-2. **框架必须锋利到能分清与竞品的本质差距**（E2）——VM五性质 > 四锚点，因为前者包含 rollback/substrate-independence。
-3. **确定性工程 ≠ 模型验证，时间表和汇报方式必须分开**（E3）。
-4. **Gate 标准本身也要被审视**；用 max 代替 mean 在诚实实现上制造虚假稳定性（E4）。
-5. **技术贡献 ≠ 实验真实性，解决一个不等于解决另一个**（E5）。
-6. **每次交接必须显式说明"证明了什么/没证明什么"**（E6/E3 推论）。
-7. **功能能跑通 ≠ 实现方式正确**；参照该领域公认最佳实践作客观标尺（E7）。
-8. **验证性结论必须有仓库内可复查的落盘产物**，聊天记录/memory 文件不算（E8）。
-9. **被问到 A 时主动检查 B/C/D**，不要因用户只问一处就默认其余没问题（E10/E21）。
-10. **内部信息零暴露**：entity_id / data-\* / get_state 产物 / 深链 URL / operator 黑话全禁进模型输入（E16/E21/E22）——泄露的总源头在渲染层，不能只在"最后一环"堵。
+- **验证性结论必须附 `eval_results/*.json` 原始字段**，不接受口头汇报替代。
+- **发现失败必须诚实报告**，禁止用 mock/api 路径数字掩盖真实 GUI 失败。
+- **Gate 判据用 mean/majority，不用 max**；1 次幸运 ≠ PASS。
+- **被问到 A 时主动检查 B/C/D**（元原则 9）。
+- 合同锁测试是系统的质检章，不是脚手架——枪造好后每次改装仍要过规。
 
 ---
-*本文件最后更新：2026-08-16（E55：⑤可移植启动——run.sh/scripts/dev.sh/scripts/stop.sh/workspace_ui.demo 四件套，旧幽灵入口与个人路径硬编码全废，端口拒绝不 carpet-kill，真实 compose 根 + 诚实 offline；关键纠错 substrate launcher import 会被债务门打红；真跑全栈验收 + 429p/5s/0f 零回归；证据 eval_results/scripts_wave_g.json。下一步：⑥ Smoke Journey + 前端 crawler + 真浏览器 e2e → ⑦ docs/.mrules 收尾。下一次更新时在此修改日期并在 Episode 表格追加新行。）*
+
+## 7. Git 提交纪律
+
+- 多 agent 并行工作时，commit 时只 `git add` 自己本会话修改的文件。
+- 不用 `git add -A` 或 `git add .`。
+- `eval_results/`、`*.png`、截图目录不进 staging。
+- 一个 commit 一个性质（纯 move / 纯 fix / 纯 doc），不混入"顺手改进"。
+
+---
+
+## 8. 开发环境
+
+- **标准 conda 环境**：`taskvm`（Python 3.10）。
+- **运行命令**：通过 `TASKVM_PYTHON` 环境变量指定解释器，或使用 `scripts/dev.sh`。
+- **Playwright 浏览器**：标准安装发现 + interpreter-derived `opt/ms-playwright` fallback。
+- **启动**：`./scripts/dev.sh` / 停止：`./scripts/stop.sh`。
+
+---
+
+## 9. 不再追加
+
+本文件是最终 repository contract。不再追加 episode、phase、gate、killtest 历史。
+后续 issue 进入正常 issue tracker，不扩写本文件。
+历史纠错记录保留在 `.mrules.log`（已冻结）。
