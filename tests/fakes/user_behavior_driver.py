@@ -2,7 +2,7 @@
 
 The user-behavior layer of the protocol stack (handoff §1.1). A
 ``UserBehaviorDriver`` is an abstract source of user-behavior events: a
-programmatic script (``ScriptedUserDriver``, for killtests/evaluation) and a
+programmatic script (``ScriptedUserDriver``, for evaluations) and a
 real human (``HumanWebSocketDriver``, via the workspace_ui WebSocket endpoint)
 are two interchangeable implementations. L3 (``GovernanceInterpreter``) and
 below are completely transparent to which driver produced an event — that is
@@ -75,7 +75,7 @@ class UserBehaviorDriver(ABC):
 
     Two implementations:
       - ``ScriptedUserDriver`` (tests.fakes.scripted_driver): programmatic,
-        for killtests/evaluation. Generates events from a CanonicalTaskGraph.
+        for evaluations. Generates events from a CanonicalTaskGraph.
       - ``HumanWebSocketDriver`` (tests.fakes.human_driver): real human,
         via the workspace_ui WebSocket endpoint.
 

@@ -3195,3 +3195,33 @@ stale-response epoch gate / soft pause atomic boundary / model-call budget / inv
 
 只 add E 自己的文件：`tests/runtime/test_control_flow.py` + `.mrules` + `.mrules.log`。**未触碰** F 的 benchmark/evaluation 在制品与其未提交删除、D 的 workspace_ui/projection、A/B/C 冻结域；`eval_results/` 不入 git（规则 3）。
 
+
+## E45 (2026-08-16, Agent FF): F 波次收官——最终合同测试 + 论文矩阵落盘 + 工作区失败隔离归因
+
+### 背景
+Agent FF 接手 F 的未竟事业（07_FINAL_BENCHMARK_AGENT 任务书，F 交接文档 12）。前半会话（已由 E44 侧面记录"工作区 3 failed 全在 F 未提交 test_final_contract.py"）完成 F6b 两修（loop-inbox-zero：parse_goal_program 双解析 + architect.py desired_by_key 含 loop 变量 + targets 纯 set；drift-relabel：harness 走公共 gov.recompile_structure + actors._parse_state_lines 保留 label）、F8（14 个 W 期 run_*.py 脚本删除 + 全仓 killtest 词汇清理，含 README/pyproject/tests/fakes/governance/substrate/task_state/workspace_ui/execution 的注释级 scrub）、F9（sync 心跳/快路径比、observed-plane 失配、GoalPatch 复用率三指标：harness 捕获 + runner 记账 + aggregation 渲染）。
+
+### 本段完成（F10/F11/F12）
+1. **F10 六条最终合同测试** tests/evaluation/test_final_contract.py（9 测试）：
+   - ① 现代五包（runtime/kernel/architect/domain/projection）子进程导入后 sys.modules 零 benchmark/evaluation——首跑即抓真问题：老扫描（含 governance/verifier/execution 全包）失败，定位 11 个 legacy 文件仍 import taskvm.benchmark.*（governance/checkpoint_graph+vm_state、verifier/cross_app_checks+round_trip_checks、execution/gui_executor+gui_executor_async+grounding_backend、harness/replay_engine、task_state/compiler、workspace_ui/genui_decoder+server），登记为 LEGACY_BENCHMARK_IMPORTERS 只可收缩债务表（E36 TRANSITIONAL_DEBT_REGISTER 纪律），静态 grep 锁定零新增；
+   - ② canary spec（success 值 ZZSECRET-* 全程不可见）monkeypatch 录制 ModelPort/CUA 全部 prompt + trace，断言零泄漏；
+   - ③ 同 (task,condition,seed) 两次 run_trial，除 elapsed_ms 外逐字段相等；
+   - ④ 物理隔离（world.py/oracle.py 零生产 import）+ AST 扫描 harness 对 kernel 只有只读面 + 注入必经 GoalPatchRequested 等 typed 事件 + 环境写入不推进注入里程碑；
+   - ⑤ 合成 4 trial（成功/cua-fail/eval-error/harness-crash）聚合，n=4 全计入、taxonomy 无丢弃；
+   - ⑥ 词汇卫生（needle 运行时拼装避免自引用；docs/oracle/** 与 .mrules* 为历史记录豁免；DEMO_RUNBOOK 的 E15 产物文件名改为目录指代）。
+   另 tests/benchmark/test_taxonomy.py（4 测试）：15 任务唯一 id、12 Family、5 Split 全覆盖、ID split 零 venues/rsvp 泄漏（holdout 诚实性）、registry 4 suite + 4 primary + 2 ablation + oracle 上界 diagnostic-only。
+2. **F11 论文矩阵**：configs/paper_matrix.json（与 CLI 真实合同对齐：seeds=次数、budget=预设名、条件用 registry 真名 direct-cua/planner-cua/taskvm-oracle-upper-bound/taskvm-no-verifier/taskvm-no-replan——首次草稿写错被自己验证命令抓出）；docs/benchmark.md（运行手册+公平合同+诚实边界：fakes 非真模型/world 非 MobileGym/oracle 上界诊断专用/no-verifier 平坦不可解释/stale-response 未计量）。
+   **落盘数字（eval_results/paper-matrix/，270 trials 0 eval-error 0 crash）**：
+   - taskvm 1.000 [0.92,1.00]，351 model calls，3.5 GUI 动作/trial，0 false-done
+   - direct-cua 0.800 [0.66,0.89]，711 calls，14.9 动作，3 false-done（全在 ID split 0.73）
+   - planner-cua 0.800，1422 calls（计划生成翻倍），14.9 动作，3 false-done
+   - taskvm-no-replan 0.867：6 败全在 task_holdout(seed-noise) split 0.00 → 重规划是 seed 漂移的挽救机制（唯一有分离度的消融）
+   - taskvm-no-verifier 1.000 平坦：确定性世界验证器零拒绝信号，诚实标注"不可由此解释验证器价值"
+   - sync：taskvm 189 心跳、快路径 1.00、plane 失配 0、GP 复用 0.47；governance：6 rollback + 6 compensation + 3 conflict、0 pause（direct/planner 各 3 pause trial）
+3. **工作区 8 failed 隔离归因（诚实报告）**：全量首跑 8 failed（基线 E44=0）。git stash 全清后 113 projection 全绿 → 逐步定位：taskvm/projection/ 4 文件（+333/-66，文件头自证 "REVISED by RFC-D1 — D audit rework order 2026-08-16"）+ tests/projection/ 2 文件（均未提交、会话开始快照后新出现=并行在途）+ workspace_ui/composition.py（?? 未跟踪，substrate 债务违规）。失败机理：D 在途 events.py 尚未注册 runtime event kind 'surface_observed'（§7 冻结守卫正确红）+ test_events.py 已 import D 新符号 SSE_TYPE_VOCABULARY。**屏蔽 D 的 7 个在途文件后：446 passed / 5 skipped / 0 FF 归因失败**（老 git 无 stash push pathspec，用 diff 备份+checkout+apply 三段式，D 工作已完整恢复并核验 git status）。
+4. **F12**：本条目 + .mrules E45 行 + 尾注更新 + 定向 git add（只加 FF 自有文件，绝不触碰 D 的 projection/tests_projection/composition.py 与 E 的 runtime 测试）。
+
+### 证明了什么 / 没证明什么
+- 证明了：最终基准的六条合同（隔离/无泄漏/复现/注入安全/聚合诚实/词汇卫生）+ 分类学完整性在当前代码真实成立；论文矩阵数字可复核（270 trial JSON 落盘）；FF 改动零回归（隔离实验）。
+- 没证明：fakes 数字不是任何真实模型成绩（结构问题证据，非模型能力证据）；no-verifier 消融无解释力（世界无拒绝信号）；真实底座（MobileGym/OSWorld）上未跑。
+- 移交：D 的在途 RFC-D1 返工（surface_observed 注册 + composition.py 债务登记/RFC）由 D 自行收尾；E 的 T1 第二棒前置条件之一（F 脚本删除提交）本条落地。

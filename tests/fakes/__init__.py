@@ -8,7 +8,7 @@ collapse, 2026-08-14):
   the legacy L4 event-source stack that fed the scripted-event planner.
 - governance_interpreter — the legacy rule-based workflow classifier +
   subgoal interpreter (killed as the PRODUCTION planner; survives here as
-  test fixture machinery for the legacy evaluation killtests until Agent F
+  test fixture machinery for the legacy evaluation entries until Agent F
   replaces them).
 - subgoal_generator — the legacy LLM NL candidate generator (killed as the
   production CUA-instruction path; the deterministic replacement is

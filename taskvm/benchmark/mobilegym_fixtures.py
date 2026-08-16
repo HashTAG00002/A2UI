@@ -12,7 +12,7 @@ Playwright-driven React phone sim) accessed via ``harness/mobilegym_bridge.py``.
 
 **No-leak boundary (load-bearing)**: same as ``fixtures.py`` / ``ood_fixtures.py``
 — imported ONLY by the verifier path + the orchestrator
-(``evaluation/run_mobilegym_killtest``). MUST NOT be imported by the compiler
+(the now deleted legacy MobileGym entry). MUST NOT be imported by the compiler
 path (``task_state/``, ``execution/``). The compiler sees only rendered
 observations (the bridge's HTML view). The ``CanonicalBinding.operator`` field
 (``send_message``) is verifier-only GT; the compiler-visible
@@ -104,7 +104,7 @@ TOP3_EXPENSE_TO_WECHAT = CanonicalTaskGraph(
 #   - cross-app fanout: ONE task drives writes on 2 apps (x.toggle_like +
 #     wechat.send_message) in one governance flow.
 #   - governance + checkpoint: C1 (liked), C2 (messaged) — the driver advances
-#     C0→C1→C2 and the killtest exercises rollback_to C1 (un-like) which is
+#     C0→C1→C2 and the evaluation exercises rollback_to C1 (un-like) which is
 #     reversible, vs rollback_to C0 from C2 (un-send) which is honest-409.
 #   - reversibility spectrum: toggle_like is reversible (re-tap), send_message
 #     is honest-irreversible (bridge 409). Both tested in one task.
@@ -126,7 +126,7 @@ TOP3_EXPENSE_TO_WECHAT = CanonicalTaskGraph(
 # content "扣除食物和能源的核心CPI意外下降 哈哈哈哈哈" — visually unique among the
 # 3 default timeline posts (the others are 加班-mobilization and an X-app tip).
 # The post_id is verifier-only GT; the instruction (built by the governance
-# killtest / GovernanceInterpreter) names the content token, never the id.
+# evaluation / GovernanceInterpreter) names the content token, never the id.
 #
 # HONEST DEVIATION from HANDOFF §2.2 MG-1: the handoff's seed_state included
 # {"alipay": {"portfolio_value": 52860}} and a wechat message containing that
@@ -203,17 +203,17 @@ SOCIAL_MORNING_BRIEF = CanonicalTaskGraph(
 # The two checkpoints carry DIFFERENT expected message texts (V1 vs V2) so the
 # verifier can distinguish "still V1 (rollback honestly failed)" from "now V2
 # (resend succeeded)". The honest-409 between C1 and C2 is recorded in the
-# killtest report as vm_properties_covered.reversibility_negative=true (it is
+# evaluation report as vm_properties_covered.reversibility_negative=true (it is
 # an execution-history property, NOT a canonical-state criterion).
 #
 # HONEST NOTE on append-semantics: wechat send_message APPENDS. After sending
 # V1 then V2, the chat holds [V1, V2]. The exact-equality `messages` field
 # check (field_matches) cannot express "contains V2 among appended messages".
 # So C2's criterion uses the _contains semantics (a new criterion mode the
-# governance killtest's criterion-checker implements; check_round_trip does
+# governance criterion-checker implements; check_round_trip does
 # NOT). C1 uses exact equality (chat was empty before, so messages == [V1]
 # exactly after the first send). This asymmetry is honest: C1 is verifiable
-# via the existing verifier; C2 requires the new governance killtest.
+# via the existing verifier; C2 requires the governance criterion-checker.
 EXPENSE_NOTIFY_V1 = "本月top3支出: 520, 168, 42。先发一版。"
 EXPENSE_NOTIFY_V2 = "本月top3支出: 520, 168, 42。省着点，重新发一下。"
 
@@ -253,7 +253,7 @@ EXPENSE_AND_NOTIFY = CanonicalTaskGraph(
                 "(reversibility_negative); the resend proves a forward write path "
                 "still works after a failed undo (reversibility_positive). C1 uses "
                 "exact-equality; C2 uses _contains (append-semantics) — the latter "
-                "requires the new governance killtest's criterion-checker.",
+                "requires the governance criterion-checker.",
 )
 
 

@@ -496,7 +496,7 @@ class MobileGymBridge:
     async def x_state(self, sid: str) -> dict:
         """Read-only: the X app's toggle lists (liked/retweeted/bookmarked
         post ids) for the given session. Used by ``run_x_toggle_rollback_
-        killtest.py`` (Task E, .mrules E15) to independently VERIFY that a
+        evaluation script`` (Task E, .mrules E15) to independently VERIFY that a
         toggle write/rollback actually landed via ``get_state`` — the same
         trusted read path ``mutate_x`` itself uses. This is a plain read (no
         mutation, no set_state), so it does not touch the non-invasive
@@ -682,7 +682,7 @@ class MobileGymBridge:
             # read is SERVER-SIDE ONLY (verification) — it is NEVER placed in
             # the instruction/prompt (that was the E16 leak; this does not
             # repeat it). 'specific' mode skips this read entirely → zero
-            # change to the existing rollback-killtest path (zero regression).
+            # change to the existing rollback-evaluation path (zero regression).
             before_ids: set[str] | None = None
             if verify_mode == "any_new":
                 _st = await self.env.get_state(required_apps=APPS)
@@ -717,7 +717,7 @@ class MobileGymBridge:
             # Convention (same as other adapters):
             #   value=True  → target end-state is ACTIVE/FILLED  (write path)
             #   value=False → target end-state is INACTIVE/OUTLINE (rollback)
-            # The caller (run_x_toggle_killtest / rollback_killtest) already
+            # The caller (the evaluation entry point) already
             # encodes this: write uses value=True, rollback uses value=False.
             _want_active = bool(value)  # True=filled, False=outline
             if _want_active:
@@ -781,9 +781,9 @@ class MobileGymBridge:
             # now_in_list=False). On rollback the gesture genuinely
             # succeeded (post correctly left the list) but this stale check
             # still raised, turning a real success into a spurious HTTP 500
-            # — caught by the Task E killtest: every rollback call returned
+            # — caught by the Task E evaluation: every rollback call returned
             # http_status=500 even though the independent trusted-read
-            # verification (``run_x_toggle_rollback_killtest.py``'s own
+            # verification (the legacy phase entry point's own
             # get_state check) confirmed the post really left the list.
             state = await self.env.get_state(required_apps=APPS)
             self._sid_live[sid] = state
@@ -806,8 +806,8 @@ class MobileGymBridge:
             # ── E17-A Option B: branch the verifier on verify_mode ──────────
             # 'specific' (default, zero-regression): the specific `eid` post's
             #   membership must match _want_active. This is what the rollback
-            #   killtest (run_x_toggle_rollback_killtest) relies on — unchanged.
-            # 'any_new' (Option B, x_toggle killtest): the instruction says
+            #   evaluation path (x-toggle rollback) relies on — unchanged.
+            # 'any_new' (Option B, x-toggle evaluation): the instruction says
             #   "find ANY un-toggled post and tap it", so the verifier checks
             #   that the toggle list GREW (write) or SHRANK (rollback) by ≥1
             #   vs the before-snapshot — i.e. SOME post transitioned. This
@@ -878,7 +878,7 @@ class MobileGymBridge:
         with ``<td data-field="...">`` cells — the SAME DOM contract the core
         apps use (``replay_engine.parse_dom_entities`` matches
         ``data-(event|task|file|mail|appointment|chat|transaction)-id`` rows +
-        ``data-field`` cells). This lets ``run_mobilegym_killtest`` capture obs
+        ``data-field`` cells). This lets evaluation scripts capture obs
         via the standard ``GET /<sid>`` route + feed it to ``compile_binding``
         for REAL model-discovered binding (task-4 — the alipay→wechat binding
         was previously GT-given; now a frontier model discovers it from this
@@ -992,8 +992,8 @@ def build_app(bridge: MobileGymBridge) -> web.Application:
         sid = request.match_info["sid"]
         eid = request.match_info["eid"]
         data = await request.json()
-        # E17-A Option B: verify_mode='any_new' (x_toggle killtest) vs
-        # 'specific' (default — rollback killtest, unchanged).
+        # E17-A Option B: verify_mode='any_new' (x-toggle evaluation) vs
+        # 'specific' (default — rollback evaluation, unchanged).
         # E17-B: instruction_override (governance-supplied NL — de-segmentation).
         return web.json_response(await bridge.mutate_x(
             sid, eid, data.get("operator"), data.get("value"),

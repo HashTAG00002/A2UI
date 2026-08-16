@@ -65,7 +65,7 @@ class MobileGymEvaluationEnvironment:
         return {"entities": {row[idf]: dict(row) for row in rows}}
 
     def x_state(self, sid: str | None = None) -> dict:
-        """X toggle lists (verifier read for the X killtests)."""
+        """X toggle lists (verifier read for the X evaluation scenarios)."""
         s = sid or self.sid
         r = requests.get(f"{self._bridge}/api/x_state/{s}",
                          timeout=self.timeout)

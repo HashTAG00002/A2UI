@@ -46,10 +46,13 @@ from taskvm.execution.action_dispatcher import dispatch
 from taskvm.execution.patch_compiler import compile_patch
 from taskvm.execution.rollback import RollbackLog, SagaResult
 from taskvm.harness import replay_engine as replay
-from taskvm.execution.gui_driver import (
-    make_task_adapters,
-    mobilegym_bridge_url,   # TRANSITIONAL (B-2): moves/deletes with gui_driver (Agent E)
-)
+# T1 leg-1 (D audit rework D-F2, 2026-08-16): the legacy operator-write
+# adapters (gui_driver.make_task_adapters) are NO LONGER imported here.
+# The real runtime composition now lives in workspace_ui.composition
+# (compose_task_runtime → taskvm.runtime.bootstrap.compose_runtime).
+# The legacy operator-write routes below honest-fail while this file
+# awaits its gated deletion (substrate.md §8 T1 / Agent F).
+from taskvm.workspace_ui.composition import mobilegym_bridge_url
 from taskvm.substrate import evaluation_registry
 from taskvm.task_state.entity_binding import TaskBinding
 from taskvm.workspace_ui.editable_components import (
@@ -575,15 +578,18 @@ def seed_session(fixture, adapters: dict, oracle: dict | None = None,
 def _get_fixture_and_adapters(task_id: str, host: str = "localhost"):
     """Resolve a task_id to (fixture, task_adapters, evaluation_envs).
 
-    Agent B (substrate isolation): there is no ``executor`` knob anymore —
-    the API write path is deleted; every write goes through real GUI
-    gestures (task drivers). Seeds/oracle go through the physically
-    separate evaluation environments (the exam room)."""
+    T1 leg-1 (D-F2): the server no longer constructs legacy operator-write
+    adapters — the adapter slot is an EMPTY dict and every write route that
+    needs one honest-fails (see ``_legacy_write_retired``). Real writes go
+    through the projection governance routes over a runtime composed by
+    ``taskvm.workspace_ui.composition.compose_task_runtime``.
+    Seeds/oracle still go through the physically separate evaluation
+    environments (the exam room)."""
     from taskvm.benchmark.mobilegym_fixtures import MOBILEGYM_TASKS
     if task_id in MOBILEGYM_TASKS:
         from taskvm.benchmark.mobilegym_fixtures import get_mobilegym_task
         return (get_mobilegym_task(task_id),
-                make_task_adapters(apps=["wechat", "alipay"], host=host),
+                {},
                 {a: evaluation_registry.create(
                     "mobilegym", {"app": a, "sid": "",
                                   "bridge_url": mobilegym_bridge_url(host)})
@@ -596,12 +602,12 @@ def _get_fixture_and_adapters(task_id: str, host: str = "localhost"):
     # launch_full (needs mail) was serving 4/5 apps (n_applied=4, no mail card)
     # — exposed by FF.1's launch_full render evidence, and a blocker for FF.8
     # (the four-step arc serves launch_full). Same union pattern EE.2 applied
-    # to run_w1_killtest. For 3-app tasks (release_reschedule/design_review/
+    # to the (now deleted) phase entry points. For 3-app tasks (release_reschedule/design_review/
     # doc_handoff) the union is unchanged (byte-identical regression).
     apps = sorted(set(fixture.seed_state.keys())
                   | {b.app for b in fixture.bindings})
     return (fixture,
-            make_task_adapters(apps=apps, host=host),
+            {},
             {a: evaluation_registry.create(
                 "builtin_web", {"app": a, "host": host}) for a in apps})
 
@@ -617,6 +623,24 @@ def _wants_json() -> bool:
         return True
     accept = request.headers.get("Accept", "")
     return "application/json" in accept and "text/html" not in accept
+
+
+_LEGACY_WRITE_RETIRED_MSG = (
+    "此写入口已随 T1 第一棒接线退役：operator-write 组合（gui_driver）"
+    "不再被 workspace_ui 引用。请使用 TaskVM 投影 UI 的治理命令"
+    "（POST /api/sessions/<sid>/governance/*，经真实 runtime 执行）。")
+
+
+def _legacy_write_retired():
+    """T1 leg-1: the legacy operator-write surface (gui_driver adapters)
+    is retired from this server. Honest 409 — never a silent no-op, never
+    a 500."""
+    if _wants_json():
+        return jsonify({"ok": False, "error": _LEGACY_WRITE_RETIRED_MSG,
+                        "retired": True}), 409
+    return Response(
+        f"<div class='notice resolve'>{_LEGACY_WRITE_RETIRED_MSG}</div>",
+        status=409, mimetype="text/html")
 
 
 @app.route("/health")
@@ -773,6 +797,8 @@ def edit(sid: str):
     sess = user_sessions.get(sid)
     if sess is None:
         return ("session not found", 404)
+    if not sess.adapters:
+        return _legacy_write_retired()
     var_id = request.form.get("var_id")
     new_value = request.form.get("new_value")
     if not var_id or new_value is None:
@@ -816,6 +842,8 @@ def undo_latest(sid: str):
     sess = user_sessions.get(sid)
     if sess is None:
         return ("session not found", 404)
+    if not sess.adapters:
+        return _legacy_write_retired()
     saga_id = sess.rollback_log.latest_saga_id()
     if saga_id is None:
         empty = SagaResult(saga_id="(none)", n_targets=0, n_reverted=0,
@@ -852,6 +880,8 @@ def undo(sid: str, app: str):
     sess = user_sessions.get(sid)
     if sess is None:
         return ("session not found", 404)
+    if not sess.adapters:
+        return _legacy_write_retired()
     # E9.2 wiring fix: route the per-app undo button through ``undo_saga`` (the
     # W3 cross-app mechanism that produces a ``SagaResult`` with
     # ``partial_failure`` + per-step revert/lock outcomes), NOT the W2
@@ -1036,6 +1066,8 @@ def rollback_to(sid: str):
     sess = user_sessions.get(sid)
     if sess is None:
         return ("session not found", 404)
+    if not sess.adapters:
+        return _legacy_write_retired()
     data = (request.get_json(silent=True) if request.is_json
             else request.form) or {}
     target_cp = data.get("target_checkpoint_id")
@@ -1207,6 +1239,8 @@ def resolve(sid: str):
     sess = user_sessions.get(sid)
     if sess is None:
         return ("session not found", 404)
+    if not sess.adapters:
+        return _legacy_write_retired()
     var_id = request.form.get("var_id")
     option = request.form.get("option")
     resolved_value = request.form.get("resolved_value")

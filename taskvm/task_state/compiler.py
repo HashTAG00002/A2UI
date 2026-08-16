@@ -68,7 +68,7 @@ def compile_binding(trace: TraceFixture, observed_entity_ids: dict[str, set[str]
         {"text_response", "a2ui", "task_binding", "raw", "parsed", "ok", "error"}
     ``task_binding`` is the gate-critical output (None on parse/structure failure).
     ``ok`` is True iff a binding was parsed (structural validation is the caller's
-    job via ``render_check.validate_binding``).
+    job via the (now deleted) legacy W1 validation entry).
 
     ``binding_only=True`` (W1 default) directs the model to emit task_binding
     FIRST and treat a2ui as optional/minimal — the documented W1 fallback when

@@ -12,7 +12,7 @@ legacy API mutation executor (``requests.post`` to
 ``/api/<resource>/<sid>/<eid>`` as a runtime WRITE path) is deleted for
 good (task brief §一; handoff 03 §删除 API Executor). The one exception on
 this plane is ``force_write`` — an exam-room injection that simulates an
-EXTERNAL actor's edit for reconciliation killtests. It is reachable only
+EXTERNAL actor's edit for reconciliation scenarios. It is reachable only
 through an EvaluationEnvironment, never a SubstrateSession, and the static
 gate (``tests/substrate/test_no_api_backdoor.py``) fails any attempt to
 bring an app-mutation ``requests.post`` back into the runtime.
@@ -87,7 +87,7 @@ class WebEvaluationEnvironment:
                     value: Any, **payload_extra: Any) -> dict:
         """Exam-room ONLY write: inject a change AS IF an external actor
         (another human / another system) edited the app behind TaskVM's back.
-        Used by reconciliation killtests to manufacture the concurrent-modify
+        Used by reconciliation scenarios to manufacture the concurrent-modify
         conflict. This is the one sanctioned use of the app's mutation HTTP
         route — it lives on the evaluation plane precisely so the runtime
         can never reach it. The static gate (tests/substrate/

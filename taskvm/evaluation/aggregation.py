@@ -153,6 +153,23 @@ def aggregate_trials(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         aap = [f["actions_after_pause"] for f in flags
                if f["actions_after_pause"] is not None]
         total_calls = sum(v[0] for v in roles.values())
+        # sync-cost + projection + goalpatch metrics (None-safe: text-only
+        # conditions have no governance plane; they honestly stay null)
+        hb = [int(r["heartbeats"]) for r in recs
+              if r.get("heartbeats") is not None]
+        mhb = [int(r["model_heartbeats"]) for r in recs
+               if r.get("model_heartbeats") is not None]
+        mism = [int(r["observed_plane_mismatches"]) for r in recs
+                if r.get("observed_plane_mismatches") is not None]
+        gp = [d for d in (r.get("goalpatch_reuse") for r in recs)
+              if isinstance(d, dict)]
+        gp_committed = [int(g.get("committed", 0)) for g in gp]
+        gp_total = [int(g.get("total", 0)) for g in gp]
+        gp_fired = sum(
+            1 for r in recs
+            if any(e.get("event") == "external"
+                   and str(e.get("kind")) == "goal_patch"
+                   for e in (r.get("trace") or [])))
         out = {
             "n_trials": n,
             "graded": len(graded),
@@ -202,6 +219,40 @@ def aggregate_trials(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
                     1 for f in flags if f["false_done"]),
                 "mean_actions_after_pause": (mean(aap) if aap else None),
                 "pause_trials": len(aap),
+            },
+            "sync_cost": {
+                "note": ("heartbeats = inactive-surface polls; a poll is "
+                         "model-free when the ledger shows zero new calls "
+                         "across it (fast-path ratio answers 'do most "
+                         "heartbeats need no model?')"),
+                "heartbeat_trials": len(hb),
+                "total_heartbeats": sum(hb),
+                "model_invoking_heartbeats": sum(mhb),
+                "fast_path_heartbeat_ratio": (
+                    safe_div(sum(hb) - sum(mhb), sum(hb)) if hb else None),
+            },
+            "projection": {
+                "round_trip_mismatch_trials": len(mism),
+                "total_observed_plane_mismatches": sum(mism),
+            },
+            "goalpatch": {
+                "goal_patch_fired_trials": gp_fired,
+                "reuse_samples": len(gp),
+                "committed_work_preserved": sum(gp_committed),
+                "plan_nodes_after_recompose": sum(gp_total),
+                "mean_committed_reuse_ratio": (
+                    safe_div(sum(gp_committed), sum(gp_total))
+                    if gp_total else None),
+            },
+            "stale_response_execution": {
+                "measured": 0,
+                "note": ("NOT YET MEASURABLE from the public runtime "
+                         "surface: a stale discard (epoch bump vs in-flight "
+                         "verdict) publishes no typed runtime event. The "
+                         "required interface (a STALE_DISCARDED event kind) "
+                         "is registered in docs/benchmark.md as a runtime "
+                         "dependency gap; per handoff §15 the benchmark "
+                         "does not patch the runtime to emit it."),
             },
         }
         return out
@@ -304,6 +355,23 @@ def render_paper_tables(report: Mapping[str, Any]) -> str:
         cells = [f"{row[s]['success_rate']:.2f} ({row[s]['n_trials']})"
                  if s in row else "—" for s in splits]
         lines.append(f"| {cond} | " + " | ".join(cells) + " |")
+    lines.append("")
+    lines.append("## sync & projection (taskvm-conditions only)")
+    lines.append("| condition | heartbeats | fast-path ratio | plane "
+                 "mismatches | GP reuse |")
+    lines.append("|---|---|---|---|---|")
+    for cond in order:
+        b = report["by_condition"][cond]
+        sc = b["sync_cost"]
+        fpr = (f"{sc['fast_path_heartbeat_ratio']:.2f}"
+               if sc["fast_path_heartbeat_ratio"] is not None else "—")
+        gp_ = b["goalpatch"]
+        gpr = (f"{gp_['mean_committed_reuse_ratio']:.2f}"
+               if gp_["mean_committed_reuse_ratio"] is not None else "—")
+        lines.append(
+            f"| {cond} | {sc['total_heartbeats']} | {fpr} | "
+            f"{b['projection']['total_observed_plane_mismatches']} | "
+            f"{gpr} |")
     lines.append("")
     gov = {c: report["by_condition"][c]["governance"]
            for c in order if c in report["by_condition"]}

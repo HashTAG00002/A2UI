@@ -96,7 +96,12 @@ def parse_visible_kv(text: str) -> dict[str, str]:
 def parse_goal_program(goal: str) -> GoalProgram:
     """Parse the supported dialects into a GoalProgram (deterministic,
     order-preserving). Raises ValueError on an unparseable goal — the
-    fake's honest boundary."""
+    fake's honest boundary.
+
+    A matched ``Repeat: ...`` block is REMOVED from the text before the
+    plain-set scan: its inner ``Set g to v`` is the loop body's gesture,
+    not a standalone instruction (double-parsing it once produced a bogus
+    ``('gk', 'sweep until uk is 0')`` set that broke loop planning)."""
     if not goal or not goal.strip():
         raise ValueError("empty goal")
     restore = None
@@ -108,18 +113,20 @@ def parse_goal_program(goal: str) -> GoalProgram:
         if m:
             restore = (m.group(1), m.group(2))
     repeat = None
+    rest = goal
     m = _REPEAT_RE.search(goal)
     if m:
         repeat = ((m.group(1), m.group(2)), (m.group(3), m.group(4)))
+        rest = goal[:m.start()] + " " + goal[m.end():]
     sets: list[tuple[str, str]] = []
     # serializer dialect first: one "Set: k = 'v', k2 = 'v2'." line
-    m = _SER_SET_RE.search(goal)
+    m = _SER_SET_RE.search(rest)
     if m:
         for k, v in _SER_PAIR_RE.findall(m.group(1)):
             sets.append((k, v))
     else:
         # plain dialect: every "Set k to v." in order
-        for k, v in _SET_TO_RE.findall(goal):
+        for k, v in _SET_TO_RE.findall(rest):
             v = v.strip().rstrip(".").strip()
             sets.append((k, v))
     if not sets and repeat is None and restore is None:
@@ -188,14 +195,23 @@ class TemplateCUA:
 
 # ── the model port (global composition capability) ────────────────────────
 
-def _parse_state_lines(user: str) -> dict[str, str]:
+_STATE_LINE_RE = re.compile(
+    r"-\s+([a-z][a-z0-9_.]*)\s+\(\s*([a-z][a-z0-9_.]*)\s*,\s*type="
+    r"[^)]*?observed=('?)([^'()]*)\3\)")
+
+
+def _parse_state_lines(user: str) -> dict[str, tuple[str, str]]:
     """Architect prompt's observed-state lines:
-    ``- key (label, type=..., mutability=..., observed='v')``."""
-    out: dict[str, str] = {}
-    for m in re.finditer(
-            r"-\s+([a-z][a-z0-9_.]*)\s+\([^)]*observed=('?)([^'()]*)\2\)",
-            user):
-        out[m.group(1)] = m.group(3)
+    ``- key (label, type=..., mutability=..., observed='v')``.
+
+    Returns ``{semantic_key: (label, observed)}`` — the LABEL is the
+    reading a frontier model makes of the same prompt (a compiler-level
+    rebind keeps the old semantic key under the new visible label); a
+    fake that drops it would undo the rebind and desynchronize the
+    CUA from the drifted screen."""
+    out: dict[str, tuple[str, str]] = {}
+    for m in _STATE_LINE_RE.finditer(user):
+        out[m.group(1)] = (m.group(2), m.group(4))
     return out
 
 
@@ -288,10 +304,16 @@ class TemplateModelPort:
     # ── task architect ─────────────────────────────────────────────────
     def _architect_reply(self, user: str) -> dict[str, Any]:
         goal = _goal_of(user)
-        observed = _parse_state_lines(user)
+        observed = _parse_state_lines(user)   # key -> (label, observed)
         prog = parse_goal_program(goal)
         fan_out = "at once" in goal.lower()
         checkpoint = "place a checkpoint" in goal.lower()
+
+        def label_of(key: str) -> str:
+            """The CURRENT visible label for a semantic key (the prompt's
+            state line carries it; a goal key the world has not shown yet
+            addresses itself)."""
+            return observed.get(key, (key, ""))[0]
 
         # recompose context: committed labels are frozen — new labels must
         # not collide, and the remaining future chains after the last
@@ -314,16 +336,28 @@ class TemplateModelPort:
                     return cand
 
         # variables: everything observed (desired = observed) + program
-        # targets (desired = target). NO architect-level rebind: a goal
-        # key that left the visible world stays as-is — recovering it is
-        # the State Compiler's job (semantic_key stable, label moves).
+        # targets (desired = target). NO architect-level rebind: the
+        # architect keeps the semantic key the compiler established and
+        # PRESERVES the compiler's visible label (a relabelled screen reads
+        # taskboard_owner UNDER the new label — dropping it would undo the
+        # State Compiler's rebind and desynchronize the CUA).
         variables: list[dict[str, Any]] = []
         desired_by_key: dict[str, str] = {}
         for key, want in prog.sets:
             desired_by_key[key] = want
-        for key, val in observed.items():
+        if prog.repeat is not None:
+            (gk, gv), (uk, uv) = prog.repeat
+            # the desired plane must match the plan's FINAL writers
+            # (kernel split-brain guard): after the loop terminates the
+            # gesture field reads its last pressed value and the
+            # until-condition holds — both are goal state, not just the
+            # plain sets.
+            desired_by_key.setdefault(gk, gv)
+            desired_by_key.setdefault(uk, uv)
+        for key, (label, val) in observed.items():
             variables.append({
-                "semantic_key": key, "label": key, "value_type": "string",
+                "semantic_key": key, "label": label,
+                "value_type": "string",
                 "mutability": "editable", "desired": val,
             })
         for key, want in desired_by_key.items():
@@ -333,7 +367,7 @@ class TemplateModelPort:
                         v["desired"] = want
             else:
                 variables.append({
-                    "semantic_key": key, "label": key,
+                    "semantic_key": key, "label": label_of(key),
                     "value_type": "string", "mutability": "editable",
                     "desired": want,
                 })
@@ -346,7 +380,11 @@ class TemplateModelPort:
             nodes.append({"kind": "checkpoint", "label": ck,
                           "after": prev})
             prev = [ck]
-        targets = tuple(desired_by_key.items())
+        # node targets are the PLAIN SETS only: the loop's gesture and
+        # until variables are carried by the bounded_loop node itself —
+        # giving them chain steps would be planning the loop twice (and
+        # orphaned the real loop body the first time this was written).
+        targets = tuple(prog.sets)
         if prog.repeat is not None:
             (gk, gv), (uk, uv) = prog.repeat
             loop_lbl = fresh("sweep-loop")
@@ -358,13 +396,18 @@ class TemplateModelPort:
             nodes.append({
                 "kind": "action", "label": fresh("sweep-once"),
                 "container": loop_lbl,
-                "semantic_goal": f"perform one {gv} pass",
+                # the loop-gesture instruction a frontier model writes for
+                # a business button: keep pressing until the until-condition
+                # holds (one press per call — the CUA's repeat grammar)
+                "semantic_goal": (
+                    f"perform {gv} passes, one at a time, until {uk} is "
+                    f"{uv} — Repeat: Set {gk} to {gv} until {uk} is {uv}."),
                 "sets": {gk: gv},
                 # RFC-003 deterministic form (the contract the runtime
                 # verifier freezes; a compliant model writes this shape)
                 "completion": f"{gk} == {gv}",
                 "reversibility": "reversible", "risk": "",
-                "target_evidence": [gk],
+                "target_evidence": [label_of(gk)],
             })
         if fan_out and len(targets) > 1:
             lanes_lbl = fresh("lanes")
@@ -380,7 +423,7 @@ class TemplateModelPort:
                     "sets": {key: want},
                     "completion": f"{key} == {want}",
                     "reversibility": "reversible", "risk": "",
-                    "target_evidence": [key],
+                    "target_evidence": [label_of(key)],
                 })
                 lane_labels.append(lbl)
             joined = fresh("joined")
@@ -397,7 +440,7 @@ class TemplateModelPort:
                     "sets": {key: want},
                     "completion": f"{key} == {want}",
                     "reversibility": "reversible", "risk": "",
-                    "target_evidence": [key],
+                    "target_evidence": [label_of(key)],
                 })
                 chain = [lbl]
             sink = chain[0] if chain else (

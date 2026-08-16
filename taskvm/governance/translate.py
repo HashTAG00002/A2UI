@@ -166,7 +166,7 @@ def resolve_locator(binding: dict, locator_index: dict[str, dict[str, str]],
     list of resolution errors (empty iff every locator resolved uniquely).
 
     A binding whose ``locator`` does not resolve gets ``entity_id = None`` — the
-    caller's downstream validate/render_check should treat None entity_id as a
+    caller's downstream validation should treat None entity_id as a
     binding miss (honest). This function does NOT raise; it records errors so the
     orchestrator can report them in the eval JSON (GG §6 honesty).
     """

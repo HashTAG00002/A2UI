@@ -161,7 +161,7 @@ class MobileGymTaskAdapter:
                    value: Any, payload_extra: dict | None = None
                    ) -> tuple[int, "dict | str"]:
         """Non-raising variant of the bridge write for EVALUATION scripts:
-        returns ``(http_status, parsed_json_or_text)`` so killtests can record
+        returns ``(http_status, parsed_json_or_text)`` so evaluation scripts can record
         honest failure bodies (409 irreversible, 500 loop-exhausted…) instead
         of catching exceptions. Same bridge route as ``mutate`` — the bridge's
         operator routes wrap the injected CUA grounding loop (real gestures

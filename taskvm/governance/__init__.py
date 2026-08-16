@@ -11,7 +11,7 @@ NL generator are GONE from production; their test fixtures live in
 Legacy survivors below (vm_state / subgoal types / translate /
 checkpoint_graph) exist ONLY because the not-yet-migrated legacy layers
 (taskvm.workspace_ui, taskvm.execution, taskvm.harness, evaluation
-killtests) still import them; they are staged for deletion by Agents
+phase scripts) still import them; they are staged for deletion by Agents
 B/D/E/F (architect contract §10). New code must not build on them.
 """
 from taskvm.governance.events import (

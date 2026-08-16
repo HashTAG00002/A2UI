@@ -5,7 +5,7 @@ which operator + expected post-edit value) + expected_diff + non_interference_se
 This is what the verifier compares the real post-edit state against.
 
 **No-leak boundary (load-bearing)**: this module is imported ONLY by the
-verifier path (``verifier/``) and the orchestrator (``evaluation/run_w1_killtest``).
+verifier path (``verifier/``) and the (now deleted) legacy orchestrator.
 It MUST NOT be imported by the compiler path (``task_state/``, ``execution/``).
 The compiler sees only rendered observations (screenshot/DOM/a11y/tool-schema)
 captured by ``harness/replay_engine``. The ``CanonicalBinding.operator`` field
@@ -49,7 +49,7 @@ class Checkpoint:
     verifier can check against live canonical state to decide whether the
     milestone has been reached. This is what ``GovernanceInterpreter`` uses to
     infer advance/rollback subgoals (``set_milestone`` / ``rollback_to`` events)
-    and what the VM5-property killtest reports as ``governance_checkpoint``.
+    and what the VM5-property evaluation reports as ``governance_checkpoint``.
 
     ``criterion`` is verifier-only GT (same no-leak boundary as ``expected_diff``):
     it is consumed by the verifier path, NEVER fed to the CUA prompt.
@@ -294,11 +294,11 @@ TASKS: dict[str, CanonicalTaskGraph] = {
 
 
 # ── FF.4 §5.6: workflow tasks (Parallel / Loop) ───────────────────────────────
-# These live in a SEPARATE registry (WORKFLOW_TASKS) so run_w1_killtest --mock
+# These live in a SEPARATE registry (WORKFLOW_TASKS) so the legacy entry
 # stays 4/4 (the regression gate) — batch_task_assign can't pass the sequential
 # dispatch path (only T1 is written, not T2/T3; the LOOP executor writes all 3).
 # They're exercised via GovernanceInterpreter.interpret_as_workflow +
-# WorkflowExecutor (FF.4 §11 dry-run), NOT run_w1_killtest.
+# WorkflowExecutor (FF.4 §11 dry-run), not any benchmark entry.
 
 # Task 5: launch_fanout_parallel — the launch_full 4-App fanout executed as a
 # PARALLEL workflow (§5.6: "实际上就是已有的 launch_full 任务，只是在执行器侧

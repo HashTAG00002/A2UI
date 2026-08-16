@@ -17,7 +17,7 @@ Event protocol (JSON over WS):
 
 This driver is GREENFIELD but functional: it uses the ``socketio`` client
 protocol. If ``flask-socketio`` is not installed in the env, the driver
-raises a clear ImportError on construction (so mock/killtest runs that use
+raises a clear ImportError on construction (so mock/evaluation runs that use
 ScriptedUserDriver are unaffected).
 """
 from __future__ import annotations

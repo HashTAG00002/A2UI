@@ -83,6 +83,10 @@ class TrialRecord:
     required_ops: int = 0
     elapsed_ms: float = 0.0
     system_writes: int = 0
+    heartbeats: int | None = None          # taskvm conditions only
+    model_heartbeats: int | None = None    # heartbeats that invoked a model
+    observed_plane_mismatches: int | None = None   # round-trip projection
+    goalpatch_reuse: dict | None = None    # {committed, total} after a GP
     injections_fired: list[str] = field(default_factory=list)
     trace: list[dict[str, Any]] = field(default_factory=list)
     detail: str = ""
@@ -112,6 +116,14 @@ class TrialRecord:
             required_ops=int(d.get("required_ops", 0)),
             elapsed_ms=float(d.get("elapsed_ms", 0.0)),
             system_writes=int(d.get("system_writes", 0)),
+            heartbeats=(None if d.get("heartbeats") is None
+                        else int(d["heartbeats"])),
+            model_heartbeats=(None if d.get("model_heartbeats") is None
+                              else int(d["model_heartbeats"])),
+            observed_plane_mismatches=(
+                None if d.get("observed_plane_mismatches") is None
+                else int(d["observed_plane_mismatches"])),
+            goalpatch_reuse=d.get("goalpatch_reuse"),
             injections_fired=list(d.get("injections_fired") or []),
             trace=list(d.get("trace") or []),
             detail=str(d.get("detail", "")),
@@ -211,6 +223,28 @@ def run_trial(spec: TaskSpec, condition: Condition, *, seed: int,
     # pure classification over the finished body (keeps the taxonomy a
     # function of the persisted record, not of in-memory side channels)
     body["failure_class"] = classify_failure(body)
+    # sync-cost + goalpatch-reuse fields (None for text-only conditions,
+    # which have no governance plane to instrument)
+    body["heartbeats"] = extras.get("heartbeats")
+    body["model_heartbeats"] = extras.get("model_heartbeats")
+    body["goalpatch_reuse"] = extras.get("goalpatch_reuse")
+    # round-trip projection correctness (eval-plane measurement): the
+    # system-maintained observed plane (keyed by VISIBLE label) vs the
+    # hidden canonical snapshot. A plane entry counts as matching when ANY
+    # surface carries the same key with the same value (multi-surface
+    # copies may legitimately differ — the authoritative register vs the
+    # local copy); a mismatch means the system believes a value the world
+    # nowhere holds. Relabelled keys simply stop matching any world key —
+    # not a projection lie.
+    plane = (extras or {}).get("observed_plane")
+    if isinstance(plane, dict) and plane:
+        world_snap = world.snapshot()
+        mism = 0
+        for lbl, val in plane.items():
+            if not any(lbl in kv and str(kv[lbl]) == str(val)
+                       for kv in world_snap.values()):
+                mism += 1
+        body["observed_plane_mismatches"] = mism
     rec = TrialRecord(**body)
     if progress:
         progress(f"{spec.task_id}/{condition.value}/s{seed}: "

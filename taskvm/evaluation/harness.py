@@ -422,12 +422,38 @@ class TaskVMHarness:
         runtime._comp._budgets = budget.runtime_budgets()
         trace: list[dict[str, Any]] = list(getattr(self, "_hot_events", []))
         stop = "budget"
+        heartbeats = 0
+        model_heartbeats = 0
+        consumed_events = len(runtime.runtime_events())
         for _round in range(budget.max_rounds):
             stop = runtime.run(step_budget=1)
             self._drain(gov, runtime, kernel, substrate, trace)
+            # Active-surface signals (STRUCTURE_INVALIDATED / 
+            # SURFACE_CONFLICT published by the runtime itself) are
+            # consumed INCREMENTALLY from the runtime event log — the
+            # same routing ``poll_inactive_surfaces`` gives the inactive
+            # faces; without this, an active-surface drift lands as a bare
+            # node failure and forward autonomy dies with no_ready_work.
+            evs = runtime.runtime_events()
+            for rdev in evs[consumed_events:]:
+                if rdev.kind.value in ("structure_invalidated",
+                                       "surface_conflict"):
+                    self._on_runtime_event(rdev, gov, kernel, substrate,
+                                           trace)
+            consumed_events = len(evs)
+            # sync-cost accounting: every inactive-surface heartbeat is a
+            # 0-model-call fast path by construction (WorldExtractor);
+            # the ledger differential proves it with numbers (handoff
+            # §同步成本: “大多数 heartbeat 是否无需模型？”)
+            heartbeats += 1
+            calls_before = sum(ledger.counts_by_role().values())
             for rdev in runtime.poll_inactive_surfaces():
                 self._on_runtime_event(rdev, gov, kernel, substrate,
                                        trace)
+            consumed_events = len(runtime.runtime_events())
+            calls_after = sum(ledger.counts_by_role().values())
+            if calls_after > calls_before:
+                model_heartbeats += 1
             if self._comp_plan is not None:
                 plan, self._comp_plan = self._comp_plan, None
                 disp = runtime.execute_compensation(plan)
@@ -455,7 +481,27 @@ class TaskVMHarness:
             gui_actions=counter.gui_actions, trace=trace,
             detail=(f"taskvm stopped: {stop}"
                     + (f"; {self._stop_note}" if self._stop_note else "")),
-            extras={"kernel_epoch": kernel.epoch})
+            extras={"kernel_epoch": kernel.epoch,
+                    "heartbeats": heartbeats,
+                    "model_heartbeats": model_heartbeats,
+                    "observed_plane": self._observed_plane(kernel),
+                    "goalpatch_reuse": getattr(self, "_gp_reuse", None)})
+
+    @staticmethod
+    def _observed_plane(kernel) -> dict[str, str]:
+        """The runtime's maintained observed plane keyed by VISIBLE label
+        (system-side export only — the evaluation plane diffs it against
+        its own hidden snapshot for the round-trip projection metric)."""
+        out: dict[str, str] = {}
+        try:
+            state = kernel.task_state()
+            if state is not None:
+                for var in state.variables:
+                    if var.observed is not None:
+                        out[var.label] = str(var.observed)
+        except Exception:                      # noqa: BLE001 — best effort
+            pass
+        return out
 
     def _grace_round(self, kernel, stop: str,
                      trace: list[dict[str, Any]]) -> bool:
@@ -487,6 +533,19 @@ class TaskVMHarness:
                     gov.handle(GoalPatchRequested(
                         new_intent=TaskIntent(goal=new_goal)
                         if new_goal else None))
+                    # GoalPatch reuse sampling (handoff §治理与恢复:
+                    # 已完成工作复用率 / plan size) — counted from the
+                    # kernel's workflow snapshot right after the recompose
+                    try:
+                        snap = kernel.workflow()
+                        stats = list(snap.statuses.values())
+                        committed = sum(
+                            1 for s in stats
+                            if getattr(s, "name", str(s)) == "COMMITTED")
+                        self._gp_reuse = {"committed": committed,
+                                          "total": len(stats)}
+                    except Exception:              # noqa: BLE001
+                        self._gp_reuse = None
                 elif ev.kind.value == "rollback_request":
                     self._rollback(gov, kernel, trace)
                 elif ev.kind.value == "local_patch":
@@ -566,32 +625,30 @@ class TaskVMHarness:
                 trace.append({"event": "governance_error",
                               "error": f"{type(e).__name__}: {e}"[:160]})
         elif ev.kind.value == "structure_invalidated":
-            # compiler slow path: fresh variables from the drifted world,
-            # then re-organise ONLY the uncommitted future
+            # Active-surface drift recovery through the PUBLIC governance
+            # seam: recompile_structure = incremental State Compiler call
+            # (prior_state handed in so semantic keys survive a relabel)
+            # +, if the variable STRUCTURE changed, ONE architect
+            # recomposition of the uncommitted future (kernel.recompose
+            # keeps committed history). No private attribute reaches, no
+            # oracle knowledge — the runtime-visible world only.
             trace.append({"event": "structure_recovery",
-                          "via": "compiler_slow_path"})
+                          "via": "recompile_structure"})
             try:
                 sid = substrate.list_surfaces()[0].surface_id
                 obs = substrate.observe(sid)
                 view = CompilerObservationView(
-                    revision=2,
+                    revision=(kernel.task_state().revision + 1),
                     regions=(VisibleRegion(
                         surface_label=sid,
                         visible_text=obs.visible_text,
                         structure_fingerprint=obs.fingerprint),))
-                state = kernel.task_state()
-                from taskvm.architect.compiler import CompilerResult
-                compiled = state and CompilerResult(
-                    variables=state.variables,
-                    handle_evidence=(), revision=state.revision)
-                fresh = gov._compiler.compile(
-                    view, state.intent, revision=2,
-                    purpose="drift_recompile") if gov._compiler else None
-                if fresh is not None:
-                    gov.handle(GoalPatchRequested(new_intent=None))
-                    # land the fresh observed plane
-                    kernel.apply_observation(fresh.variables and () or ())
-                del compiled
+                outcome = gov.recompile_structure(view, reason=(
+                    getattr(ev, "detail", "")
+                    or "runtime reported structure_invalidated")[:120])
+                trace.append({"event": "structure_recovery",
+                              "outcome": str(outcome.handled),
+                              "detail": str(outcome.detail)[:160]})
             except Exception as e:            # noqa: BLE001
                 trace.append({"event": "governance_error",
                               "error": f"{type(e).__name__}: {e}"[:160]})

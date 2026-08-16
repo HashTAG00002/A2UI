@@ -10,7 +10,7 @@ Usage (handoff 07):
     python -m taskvm.evaluation.cli report --input eval_results/<run_id>
     python -m taskvm.evaluation.cli compare --config configs/paper_matrix.json
 
-No phase/gate/killtest vocabulary, one report schema, one runner. The
+No phase/gate vocabulary, one report schema, one runner. The
 ``--substrate`` flag accepts only ``world`` today: builtin_web is an
 honest pending dependency (substrate.md transitional debt register),
 never a silent stub.

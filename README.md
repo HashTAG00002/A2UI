@@ -44,8 +44,8 @@ python -m taskvm.apps.taskboard.app --port 3014 &
 ### Run the kill-test
 
 ```bash
-python -m taskvm.evaluation.run_w1_killtest --samples 3 --model gpt-5.5
-python -m taskvm.evaluation.run_w1_killtest --neg-control   # must score ≤0.3
+python -m taskvm.evaluation.cli run --suite smoke
+python -m taskvm.evaluation.cli run --suite final --condition taskvm --seeds 3
 ```
 
 Results → `eval_results/w1_<ts>.json`: per-sample round-trip score, per-check

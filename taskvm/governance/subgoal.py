@@ -6,7 +6,7 @@ A subgoal is the unit of work the CUA executes. It carries:
   - ``patch_ops``: the resolved executable ops (``PatchOp`` from
     ``execution.patch_compiler``) — what the dispatch path applies.
   - ``verification_criterion``: a STRUCTURED criterion (expected_diff-shaped
-    dict, or a checkpoint criterion) the governance killtest's verifier checks
+    dict, or a checkpoint criterion) the governance verifier checks
     against live canonical state. NOT a string — the existing verifier
     (``check_round_trip``) takes a ``CanonicalTaskGraph`` fixture + snapshots,
     not a string; a string criterion would be incompatible (recon area 7).
@@ -102,7 +102,7 @@ class SubgoalInstruction:
       patch_ops: the resolved ops (``PatchOp`` list). Empty for rollback_to
         subgoals (undo_saga handles execution via the adapter, not patch_ops).
       verification_criterion: STRUCTURED criterion (expected_diff-shaped dict
-        OR a checkpoint criterion dict). Consumed by the governance killtest's
+        OR a checkpoint criterion dict). Consumed by the governance
         verifier, NEVER by the CUA prompt.
       source_event_type: which UserBehaviorEvent produced this ("edit_field" |
         "rollback_to" | "set_milestone").

@@ -14,7 +14,7 @@ Holds the GT binding for the two held-out OOD tasks the W4 kill-test measures:
 
 **No-leak boundary (load-bearing)**: same as ``fixtures.py`` — imported ONLY by
 the verifier path + the orchestrator (``evaluation/run_ood_recon`` /
-``run_w4_killtest``). MUST NOT be imported by the compiler path (``task_state/``,
+the legacy W4 entry, now deleted). MUST NOT be imported by the compiler path (``task_state/``,
 ``execution/``). The compiler sees only rendered observations.
 
 These are MINIMAL recon-grade fixtures (2 tasks, ~2-3 bindings each) — enough to

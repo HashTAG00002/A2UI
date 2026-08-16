@@ -1,13 +1,13 @@
 """``ScriptedUserDriver`` — the programmatic L4 implementation (E17-B).
 
 Generates ``UserBehaviorEvent``s from a ``CanonicalTaskGraph`` (for
-killtests/evaluation). The human driver (``HumanWebSocketDriver``) and this
+evaluations). The human driver (``HumanWebSocketDriver``) and this
 driver are interchangeable — L3 cannot tell them apart (handoff §1.1 "无缝切换").
 
 Two construction modes:
   1. AUTO (default): a single ``edit_field`` event from the fixture's
      ``user_edit`` (``{var_id, new}``). This is the minimal "advance to final
-     state" sequence — what a plain round-trip killtest needs.
+     state" sequence — what a plain round-trip evaluation needs.
   2. EXPLICIT ``event_sequence``: a list of ``(event_type, payload)`` tuples,
      for tasks that exercise governance (rollback_to, multi-checkpoint flows).
      E.g. MG-2 ``expense_and_notify``: edit_field(V1) → checkpoint →

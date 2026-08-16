@@ -4,7 +4,7 @@
 Each baseline exposes ``discover_binding(trace, observed_entity_ids, *,
 model=None, cost_model=None) -> dict`` returning the SAME shape the compiler
 emits (``{"task_binding": {...}, "ok": bool, "error": str|None, "raw": str}``),
-so a baseline slots into ``run_w1_killtest.run_one_sample`` via the same
+so a baseline slots into the binding-evaluation path via the same
 ``parse_compiler_output`` / ``binding_accuracy`` path. This lets the benchmark
 score every baseline on the identical honesty contract (no model self-judge;
 binding F1 vs the hidden GT).

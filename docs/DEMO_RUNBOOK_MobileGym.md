@@ -189,15 +189,18 @@ These live in the repo (not chat/memory) and are re-auditable by anyone:
 
 | Artifact | What it proves |
 |---|---|
-| `eval_results/mobilegym_killtest_<ts>.json` | round_trip=1.0 (write happened), honest-irreversibility 2/2 (fidelity=0.0, partial_failure, message-still-there), neg-control=0.3. The verdict string states "HONEST IRREVERSIBILITY, NOT reversible compensation." |
+| `eval_results/` MobileGym gate JSON (E15-era artifact; historical filename pattern retained on disk, not an entry point) | round_trip=1.0 (write happened), honest-irreversibility 2/2 (fidelity=0.0, partial_failure, message-still-there), neg-control=0.3. The verdict string states "HONEST IRREVERSIBILITY, NOT reversible compensation." |
 | `eval_results/mobilegym_visual_<ts>/step_NN_<action>.png` | Per-gesture screenshots: open_app → tap-contact-by-name → focus → type → enter → verify → undo-409-message-still-there. The "I can't see anything" deliverable. |
 | `eval_results/mobilegym_timeline_<ts>.html` | The rendered honesty-based-rollback UI snapshot (the locked 🔒 segment + the honest message). |
 
-Re-run the gate anytime:
-```bash
-PYTHONPATH=taskvm/thirdparty/mobilegym:. $SENSEACT -m taskvm.evaluation.run_mobilegym_killtest --samples 3
-# add --no-binding-discovery to skip the model (GT-binding core gate only)
-```
+Re-running this gate (historical note): the legacy phase entry
+`taskvm.evaluation.run_mobilegym_killtest` was deleted by the final-benchmark
+reorganization (Agent F / FF). Its scientific payload — real-GUI writes,
+honest-irreversibility, negative control — lives on in the final benchmark's
+governance suite (`send-announce` covers irreversibility via
+`python -m taskvm.evaluation.cli run --suite governance`). The MobileGym
+bridge itself remains under `taskvm/substrate/mobilegym/` for the future
+cross-substrate split (registered pending dependency).
 
 ---
 

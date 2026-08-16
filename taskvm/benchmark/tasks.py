@@ -97,7 +97,8 @@ _register(TaskSpec(
           "Repeat: Set taskboard_sweep_action to sweep "
           "until taskboard_unread_count is 0."),
     surfaces=("desktop",),
-    seed={"desktop": {"taskboard_unread_count": "3",
+    seed={"desktop": {"taskboard_sweep_action": "idle",
+                      "taskboard_unread_count": "3",
                       "taskboard_done_count": "0",
                       "taskboard_release_status": "draft"}},
     success={"desktop": {"taskboard_unread_count": "0",
@@ -107,7 +108,9 @@ _register(TaskSpec(
                   "decrement": "taskboard_unread_count",
                   "increment": "taskboard_done_count"},
     notes="state-dependent termination: one sweep clears exactly one "
-          "ticket; the loop bound is the visible unread_count",
+          "ticket; the loop bound is the visible unread_count (the "
+          "sweep button renders as the taskboard_sweep_action field — "
+          "writing 'sweep' to it IS the button press)",
 ))
 
 _register(TaskSpec(

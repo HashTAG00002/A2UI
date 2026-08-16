@@ -21,7 +21,7 @@ Honest design decision (resolved from recon area 7): ``verification_criterion``
 is STRUCTURED (an expected_diff-shaped dict or a checkpoint criterion), NOT a
 string. The existing verifier (``check_round_trip``) takes a fixture +
 snapshots, not a string — a string criterion would be incompatible. The
-governance killtest's criterion-checker consumes this structured dict.
+governance criterion-checker consumes this structured dict.
 
 No-leak boundary: the interpreter receives the user's edit intent (var_id,
 new_value) — allowed. It must NOT receive GT old/expected values through the
@@ -288,7 +288,7 @@ class GovernanceInterpreter:
         graph = CheckpointGraph.from_task(task.checkpoints)
         criterion = graph.criterion_for(target_cp) or {}
         # the milestone's criterion IS the verification; the NL asks the CUA to
-        # reach the state described by the criterion (the killtest's executor
+        # reach the state described by the criterion (the evaluation's executor
         # resolves the concrete ops from the binding).
         nl = (f"Advance the task to milestone {target_cp}: reach the state "
               f"described by {criterion}.")
@@ -328,10 +328,10 @@ class GovernanceInterpreter:
         if llm_generated:
             self._rollback_nl_seen += 1
         # execution is undo_saga (deterministic) — the subgoal records the
-        # intent; the killtest's executor calls undo_saga and attaches the
+        # intent; the evaluation's executor calls undo_saga and attaches the
         # SagaResult to meta. We do NOT call undo_saga here (no sid/adapters
         # execution side-effect inside the interpreter — interpretation is pure
-        # planning; execution happens in the killtest's driver loop).
+        # planning; execution happens in the evaluation's driver loop).
         graph = CheckpointGraph.from_task(task.checkpoints) if task else None
         criterion = graph.criterion_for(target_cp) if graph else {}
         subgoals: list[SubgoalInstruction] = []
@@ -394,7 +394,7 @@ class GovernanceInterpreter:
     # ── checkpoint (record snapshot — no execution) ───────────────────────
     def _interpret_checkpoint(self, event: UserBehaviorEvent,
                               vm_state: VMStateSnapshot) -> list[SubgoalInstruction]:
-        """A checkpoint event records the current state. The killtest's
+        """A checkpoint event records the current state. The evaluation's
         executor takes the canonical_snapshot and appends to
         vm_state.recorded_checkpoints + updates checkpoint_saga_map. The
         subgoal itself is a no-op marker (no CUA work)."""

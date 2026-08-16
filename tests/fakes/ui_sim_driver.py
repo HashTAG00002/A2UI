@@ -16,7 +16,7 @@ really traversed the UI (vs. ``ScriptedUserDriver``'s direct intent).
 
 Transport: the driver is HTTP-shaped (GET /<sid>, POST /<sid>/edit) but
 duck-typed on ``client.get(path)`` / ``client.post(path, data=...)`` so it works
-with a Flask ``test_client`` (in-process, fast — the killtest path) OR a real
+with a Flask ``test_client`` (in-process, fast — the test path) OR a real
 ``requests.Session`` against a live server (swap the transport, same driver).
 """
 from __future__ import annotations
