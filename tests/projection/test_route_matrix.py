@@ -27,6 +27,42 @@ from taskvm.projection.store import (
     ProjectionSessionStore,
     SurfaceDecl,
 )
+from taskvm.projection.services.driver import ThreadedRuntimeDriver
+
+
+# ── A-02: a minimal fake runtime for route-matrix tests ────────────────
+
+class _FakeRuntime:
+    """Minimal duck-typed runtime for route tests — has the lifecycle
+    methods the driver calls (request_pause/resume/stop) and run()."""
+    def __init__(self, kernel):
+        self._kernel = kernel
+        self._paused = False
+        self._stopped = False
+
+    def run(self, step_budget=None):
+        return "done"
+
+    def request_pause(self):
+        self._paused = True
+        self._kernel.request_governance("pause", "test")
+
+    def request_resume(self):
+        if self._stopped:
+            return
+        self._paused = False
+        self._kernel.request_governance("resume", "test")
+
+    def request_stop(self):
+        self._stopped = True
+        self._paused = True
+        self._kernel.request_governance("stop", "test")
+
+    def execute_compensation(self, plan):
+        return "complete"
+
+    def runtime_events(self):
+        return ()
 
 
 # ── fixtures ───────────────────────────────────────────────────────────────
@@ -62,7 +98,12 @@ def app_and_store():
     store = ProjectionSessionStore()
     art = ArtifactStore()
     art.put("ref1", b"fake-png-bytes")
-    store.register("s1", _make_kernel("s1"),
+    kernel = _make_kernel("s1")
+    rt = _FakeRuntime(kernel)
+    driver = ThreadedRuntimeDriver(rt)
+    store.register("s1", kernel,
+                   runtime=rt,
+                   driver=driver,
                    surfaces=[SurfaceDecl(surface_id="surf1", display_name="X平台")],
                    artifacts=art)
     app = create_app(store)
@@ -193,6 +234,7 @@ class TestGovernanceCommands:
         data = r.get_json()
         assert data["ok"] is True
         assert data["action"] == "paused"
+        assert data["state"] == "paused"
 
     def test_pause_with_rationale(self, client):
         r = client.post("/api/sessions/s1/governance/pause",
@@ -204,11 +246,13 @@ class TestGovernanceCommands:
         r = client.post("/api/sessions/s1/governance/resume", json={})
         assert r.status_code == 200
         assert r.get_json()["action"] == "resumed"
+        assert r.get_json()["state"] == "running"
 
     def test_stop(self, client):
         r = client.post("/api/sessions/s1/governance/stop", json={})
         assert r.status_code == 200
         assert r.get_json()["action"] == "stopped"
+        assert r.get_json()["state"] == "stopped"
 
     def test_local_patch(self, client):
         r = client.post("/api/sessions/s1/governance/local_patch",
@@ -252,8 +296,8 @@ class TestGovernanceCommands:
         data = r2.get_json()
         assert data["ok"] is True
         assert data["action"] == "rollback"
-        # no driver registered ⇒ the plan honestly stays pending (§8)
-        assert data["disposition"] == "pending"
+        # s1 now has a driver with execute_compensation ⇒ "complete"
+        assert data["disposition"] == "complete"
 
     def test_checkpoint_unstable_boundary_409(self, client):
         """RFC-D1 §6 (semantics, not spelling): after a GoalPatch the
@@ -373,10 +417,16 @@ class TestSSEEndpoint:
 # ── autonomy start route (D-F2: the HTTP path that begins autonomy) ─────
 
 class TestStartRoute:
-    def test_start_without_runtime_409(self, client):
+    def test_start_without_runtime_409(self):
         """A session registered with NO runtime cannot start autonomy —
         an honest conflict (409), never a 500."""
-        r = client.post("/api/sessions/s1/governance/start", json={})
+        store = ProjectionSessionStore()
+        kernel = _make_kernel("s_no_rt")
+        store.register("s_no_rt", kernel)
+        app = create_app(store)
+        app.config["TESTING"] = True
+        c = app.test_client()
+        r = c.post("/api/sessions/s_no_rt/governance/start", json={})
         assert r.status_code == 409
         assert r.get_json()["ok"] is False
 

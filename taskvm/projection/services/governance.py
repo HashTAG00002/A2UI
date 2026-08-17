@@ -36,19 +36,21 @@ class KernelGovernancePort:
     def __init__(self, kernel: TaskVMKernel) -> None:
         self._kernel = kernel
 
-    # ── autonomy control (request_governance) ─────────────────────────────
+    # ── autonomy lifecycle control (A-02: moved to driver single-owner path) ──
+    # pause / resume / stop are NO LONGER on KernelGovernancePort — they
+    # are routed through the ThreadedRuntimeDriver, which calls
+    # runtime.request_pause/resume/stop, which writes kernel governance.
+    # This ensures ONE HTTP lifecycle request = ONE governance transition
+    # (no double epoch bump). The methods below are retained as thin
+    # kernel-only writes for composition code that needs to record a
+    # governance stop WITHOUT going through the driver (e.g. the
+    # GovernanceService.handle path for StopRequested events).
 
-    def pause(self, rationale: str = "") -> dict[str, Any]:
-        self._kernel.request_governance("pause", detail=rationale)
-        return {"ok": True, "action": "paused", "reason": rationale}
-
-    def resume(self, rationale: str = "") -> dict[str, Any]:
-        self._kernel.request_governance("resume", detail=rationale)
-        return {"ok": True, "action": "resumed", "reason": rationale}
-
-    def stop(self, rationale: str = "") -> dict[str, Any]:
-        self._kernel.request_governance("stop", detail=rationale)
-        return {"ok": True, "action": "stopped", "reason": rationale}
+    def _record_governance(self, action: str, detail: str = ""
+                           ) -> dict[str, Any]:
+        """Record a governance event on the kernel (thin write, no driver)."""
+        self._kernel.request_governance(action, detail=detail)
+        return {"ok": True, "action": action, "reason": detail}
 
     # ── state editing (LocalPatch path) ───────────────────────────────────
 

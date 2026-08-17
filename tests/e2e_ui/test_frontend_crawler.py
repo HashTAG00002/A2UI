@@ -35,6 +35,37 @@ from taskvm.projection.store import (
     ProjectionSessionStore,
     SurfaceDecl,
 )
+from taskvm.projection.services.driver import ThreadedRuntimeDriver
+
+
+# ── A-02: minimal fake runtime for lifecycle routes ────────────────────
+
+class _FakeRuntime:
+    def __init__(self, kernel):
+        self._kernel = kernel
+        self._paused = False
+        self._stopped = False
+
+    def run(self, step_budget=None):
+        return "done"
+
+    def request_pause(self):
+        self._paused = True
+        self._kernel.request_governance("pause", "test")
+
+    def request_resume(self):
+        if self._stopped:
+            return
+        self._paused = False
+        self._kernel.request_governance("resume", "test")
+
+    def request_stop(self):
+        self._stopped = True
+        self._paused = True
+        self._kernel.request_governance("stop", "test")
+
+    def runtime_events(self):
+        return ()
 
 
 def _contract(cid, key, value):
@@ -77,7 +108,11 @@ def server_url():
     store = ProjectionSessionStore()
     art = ArtifactStore()
     art.put("crawl-ref", b"crawl-png-bytes")
-    store.register("crawl", _make_kernel("crawl"),
+    kernel = _make_kernel("crawl")
+    rt = _FakeRuntime(kernel)
+    store.register("crawl", kernel,
+                   runtime=rt,
+                   driver=ThreadedRuntimeDriver(rt),
                    surfaces=(SurfaceDecl(surface_id="surf1",
                                         display_name="X平台"),),
                    artifacts=art)

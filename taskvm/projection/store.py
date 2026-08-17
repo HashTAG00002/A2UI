@@ -82,11 +82,11 @@ class SurfaceDecl:
 
 class GovernancePortLike(Protocol):
     """Structural port implemented by ``KernelGovernancePort`` (default)
-    or a composition adapter around C's GovernanceService."""
+    or a composition adapter around C's GovernanceService.
 
-    def pause(self, rationale: str = "") -> dict: ...
-    def resume(self, rationale: str = "") -> dict: ...
-    def stop(self, rationale: str = "") -> dict: ...
+    A-02: pause / resume / stop are NO LONGER on this port — they route
+    through the ``DriverPortLike`` (driver → runtime → kernel, single owner)."""
+
     def local_patch(self, updates: dict, rationale: str = "") -> dict: ...
     def goal_patch(self, *, goal: str, constraints: Iterable[str] = (),
                    scope: Iterable[str] = (),

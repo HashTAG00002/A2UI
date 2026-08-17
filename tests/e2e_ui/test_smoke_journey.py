@@ -385,7 +385,44 @@ def stack():
     # D — a pristine kernel-only session for the SSE reconnect probe
     # (journey A's goal_patch leaves smoke-arch awaiting recompose)
     kernel_d, _ = _kernel_from_real_architect("smoke-sse")
+
+    # A-02: lifecycle routes require a driver — inject a minimal fake
+    # runtime so pause/resume/stop routes return 200 (not 409).
+    class _SSEFakeRuntime:
+        def __init__(self, kernel):
+            self._kernel = kernel
+            self._paused = False
+            self._stopped = False
+
+        def run(self, step_budget=None):
+            return "done"
+
+        def request_pause(self):
+            self._paused = True
+            self._kernel.request_governance("pause", "test")
+
+        def request_resume(self):
+            if self._stopped:
+                return
+            self._paused = False
+            self._kernel.request_governance("resume", "test")
+
+        def request_stop(self):
+            self._stopped = True
+            self._paused = True
+            self._kernel.request_governance("stop", "test")
+
+        def execute_compensation(self, plan):
+            return "complete"
+
+        def runtime_events(self):
+            return ()
+
+    from taskvm.projection.services.driver import ThreadedRuntimeDriver
+    rt_d = _SSEFakeRuntime(kernel_d)
     store.register("smoke-sse", kernel_d,
+                   runtime=rt_d,
+                   driver=ThreadedRuntimeDriver(rt_d),
                    surfaces=(SurfaceDecl(surface_id="app",
                                          display_name="发布面板"),))
 

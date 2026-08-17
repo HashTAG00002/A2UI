@@ -36,6 +36,43 @@ from taskvm.projection.store import (
     ProjectionSessionStore,
     SurfaceDecl,
 )
+from taskvm.projection.services.driver import ThreadedRuntimeDriver
+
+
+# ── A-02: minimal fake runtime for E2E HTTP tests ──────────────────────
+
+class _FakeRuntime:
+    def __init__(self, kernel):
+        self._kernel = kernel
+        self._paused = False
+        self._stopped = False
+
+    def run(self, step_budget=None):
+        return "done"
+
+    def request_pause(self):
+        self._paused = True
+        self._kernel.request_governance("pause", "test")
+
+    def request_resume(self):
+        if self._stopped:
+            return
+        self._paused = False
+        self._kernel.request_governance("resume", "test")
+
+    def request_stop(self):
+        self._stopped = True
+        self._paused = True
+        self._kernel.request_governance("stop", "test")
+
+    def execute_compensation(self, plan):
+        # A-02: fake runtime reports a completed compensation so the
+        # rollback route's disposition is honest (the plan was accepted
+        # and the driver attempted it).
+        return "complete"
+
+    def runtime_events(self):
+        return ()
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
@@ -81,13 +118,21 @@ def server_url():
     store = ProjectionSessionStore()
     art = ArtifactStore()
     art.put("ref1", b"e2e-png-bytes")
-    store.register("s1", _make_kernel("s1"),
+    kernel1 = _make_kernel("s1")
+    rt1 = _FakeRuntime(kernel1)
+    store.register("s1", kernel1,
+                   runtime=rt1,
+                   driver=ThreadedRuntimeDriver(rt1),
                    surfaces=(SurfaceDecl(surface_id="surf1",
                                         display_name="X平台"),),
                    artifacts=art)
     # s2: pristine kernel for rollback test (s1's goal_patch sets
     # _pending_recompose which blocks checkpoint/rollback on s1)
-    store.register("s2", _make_kernel("s2"),
+    kernel2 = _make_kernel("s2")
+    rt2 = _FakeRuntime(kernel2)
+    store.register("s2", kernel2,
+                   runtime=rt2,
+                   driver=ThreadedRuntimeDriver(rt2),
                    surfaces=(SurfaceDecl(surface_id="surf1",
                                         display_name="X平台"),),
                    artifacts=art)
@@ -237,11 +282,11 @@ class TestGovernanceCommandsE2E:
         r2 = requests.post(f"{server_url}/api/sessions/s2/governance/rollback",
                            json={"target_checkpoint_id": cp_id})
         # RFC-D1 §6: rollback accepts the plan asynchronously ⇒ 202; s2
-        # has no runtime/driver registered, so the honest disposition is
-        # "pending" (the plan is accepted, execution awaits a driver).
+        # now has a driver with execute_compensation, so the honest
+        # disposition is "complete" (the fake runtime reports success).
         assert r2.status_code == 202
         assert r2.json()["ok"] is True
-        assert r2.json()["disposition"] == "pending"
+        assert r2.json()["disposition"] == "complete"
 
 
 # ── SSE stream: initial snapshot + live delta ────────────────────────────

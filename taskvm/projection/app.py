@@ -131,8 +131,9 @@ def create_app(store: ProjectionSessionStore,
             except ValueError:
                 pass
 
-        sess.driver = ThreadedRuntimeDriver(sess.runtime,
-                                            on_event=_on_runtime_event)
+        sess.driver = ThreadedRuntimeDriver(
+            sess.runtime, on_event=_on_runtime_event,
+            kernel=sess.kernel)  # A-03: heartbeat path forwards kernel events
         return sess.driver
 
     # ── helpers ──────────────────────────────────────────────────────────
@@ -277,7 +278,6 @@ def create_app(store: ProjectionSessionStore,
     #: per-route success status (RFC-D1: 201 checkpoint creation, 202
     #: async two-phase goal_patch / plan-accepted rollback, 200 the rest)
     _SUCCESS_STATUS = {
-        "pause": 200, "resume": 200, "stop": 200, "start": 200,
         "local_patch": 200, "goal_patch": 202, "checkpoint": 201,
         "rollback": 202, "resolve_conflict": 200,
     }
@@ -318,15 +318,71 @@ def create_app(store: ProjectionSessionStore,
 
     @app.route("/api/sessions/<sid>/governance/pause", methods=["POST"])
     def gov_pause(sid: str) -> Response:
-        return _gov_cmd(sid, "pause")
+        """A-02: pause routes through the DRIVER (single-owner path):
+        driver.pause() → runtime.request_pause() → kernel governance.
+        No separate KernelGovernancePort.pause() double-write."""
+        sess = _get_session(sid)
+        driver = _driver_for(sess)
+        if driver is None:
+            body = {"ok": False, "action": "pause",
+                    "error": "本会话未注册运行时"}
+            return jsonify(body), 409
+        rationale = (request.get_json(silent=True) or {}).get("rationale", "")
+        event_index = len(sess.kernel.events())
+        state = driver.pause()
+        result = {"ok": True, "action": "paused", "state": state,
+                  "reason": rationale}
+        _notify(sid, {"sse_type": TRANSPORT_EVENT_SSE["governance.applied"],
+                      "detail": _jsonable(result)})
+        _push_kernel_events(sid, sess, event_index)
+        return _json_response(result)
 
     @app.route("/api/sessions/<sid>/governance/resume", methods=["POST"])
     def gov_resume(sid: str) -> Response:
-        return _gov_cmd(sid, "resume")
+        """A-02: resume routes through the DRIVER (single-owner path):
+        driver.resume() → runtime.request_resume() → kernel governance.
+        Resume from stopped returns 409 (stop is persistent)."""
+        sess = _get_session(sid)
+        driver = _driver_for(sess)
+        if driver is None:
+            body = {"ok": False, "action": "resume",
+                    "error": "本会话未注册运行时"}
+            return jsonify(body), 409
+        rationale = (request.get_json(silent=True) or {}).get("rationale", "")
+        event_index = len(sess.kernel.events())
+        state = driver.resume()
+        if state == "stopped":
+            body = {"ok": False, "action": "resume",
+                    "error": "会话已停止（stop 是持久状态），无法恢复",
+                    "state": "stopped"}
+            return jsonify(body), 409
+        result = {"ok": True, "action": "resumed", "state": state,
+                  "reason": rationale}
+        _notify(sid, {"sse_type": TRANSPORT_EVENT_SSE["governance.applied"],
+                      "detail": _jsonable(result)})
+        _push_kernel_events(sid, sess, event_index)
+        return _json_response(result)
 
     @app.route("/api/sessions/<sid>/governance/stop", methods=["POST"])
     def gov_stop(sid: str) -> Response:
-        return _gov_cmd(sid, "stop")
+        """A-02: stop routes through the DRIVER (single-owner path):
+        driver.stop() → runtime.request_stop() → kernel governance.
+        Stop is persistent — start() cannot revive a stopped driver."""
+        sess = _get_session(sid)
+        driver = _driver_for(sess)
+        if driver is None:
+            body = {"ok": False, "action": "stop",
+                    "error": "本会话未注册运行时"}
+            return jsonify(body), 409
+        rationale = (request.get_json(silent=True) or {}).get("rationale", "")
+        event_index = len(sess.kernel.events())
+        state = driver.stop()
+        result = {"ok": True, "action": "stopped", "state": state,
+                  "reason": rationale}
+        _notify(sid, {"sse_type": TRANSPORT_EVENT_SSE["governance.applied"],
+                      "detail": _jsonable(result)})
+        _push_kernel_events(sid, sess, event_index)
+        return _json_response(result)
 
     @app.route("/api/sessions/<sid>/governance/local_patch", methods=["POST"])
     def gov_local_patch(sid: str) -> Response:
@@ -371,6 +427,14 @@ def create_app(store: ProjectionSessionStore,
             state = driver.start()
         except Exception as e:
             return jsonify(_error_body("start", e)), 400
+        # A-02: if the driver is persistently stopped, start() returns
+        # "stopped" — the route must report 409 (cannot revive a stopped
+        # driver; a fresh composition is required).
+        if state == "stopped":
+            body = {"ok": False, "action": "start",
+                    "error": "会话已停止（stop 是持久状态），需要新的组合才能重新启动",
+                    "state": "stopped"}
+            return jsonify(body), 409
         result = {"ok": True, "action": "start", "state": state}
         _notify(sid, {"sse_type": TRANSPORT_EVENT_SSE["governance.applied"],
                       "detail": _jsonable(result)})
