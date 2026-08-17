@@ -403,6 +403,7 @@ def bootstrap_real_full(*, goal: str, sid: str,
                          ledger: ModelCallLedger | None = None,
                          store: Any = None,
                          model: str | None = None,
+                         cua_model: Any = None,
                          app: str | None = None, host: str = "localhost",
                          base_url: str | None = None,
                          surfaces: list[str] | None = None,
@@ -482,15 +483,16 @@ def bootstrap_real_full(*, goal: str, sid: str,
     if ledger is None:
         ledger = ModelCallLedger()
     port = model_port or HttpModelPort()
-    compiler_result = StateCompiler(port, ledger, model=model).compile(
-        view, intent)
-    arch = TaskArchitect(port, ledger, model=model).compose(
-        intent, compiler_result)
+    compiler = StateCompiler(port, ledger, model=model)
+    architect = TaskArchitect(port, ledger, model=model)
+    compiler_result = compiler.compile(view, intent)
+    arch = architect.compose(intent, compiler_result)
     kernel = TaskVMKernel(sid, intent)
     kernel.init_task_state(arch.variables)
     if arch.graph is not None:
         kernel.set_plan(arch.graph)
-    ports = build_runtime_ports(model_port=port, ledger=ledger)
+    ports = build_runtime_ports(model_port=port, ledger=ledger,
+                                cua_model=cua_model)
     runtime = compose_task_runtime(kernel, substrate=substrate,
                                    ports=ports, model=model)
 
@@ -506,5 +508,6 @@ def bootstrap_real_full(*, goal: str, sid: str,
 
     return dict(sid=sid, intent=intent, kernel=kernel, runtime=runtime,
                 substrate=substrate, ledger=ledger,
-                model_port=port, compiler_result=compiler_result,
+                model_port=port, compiler=compiler, architect=architect,
+                compiler_result=compiler_result,
                 architecture=arch, surfaces=surface_infos)

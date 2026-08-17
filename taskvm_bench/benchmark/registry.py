@@ -45,13 +45,33 @@ class Condition(str, Enum):
     # limited ablations
     TASKVM_NO_VERIFIER = "taskvm-no-verifier"
     TASKVM_NO_REPLAN = "taskvm-no-replan"
+    # ── RM-0.B real-model conditions (B-06) ─────────────────────────────
+    # MAIN: the full stack over the REAL provider chain (fresh observe →
+    # real StateCompiler → real TaskArchitect → real HttpCUAModel → real
+    # GUI substrate → VisibleVerifier → ONE shared ledger; no template,
+    # no hand-built plan, no fixture fallback).
+    TASKVM_REAL_FULL = "taskvm-real-full"
+    # DIAGNOSTIC: compiler/architect may stay template; the CUA is REAL.
+    # The id says cua-only — it must never be reported as real-full.
+    TASKVM_REAL_CUA_ONLY = "taskvm-real-cua-only"
+    # real-model baselines: same structure as their template twins, real
+    # CUA (the planner layer of planner-cua-real stays the deterministic
+    # goal-program structure — the compared axis is the CUA capability).
+    DIRECT_CUA_REAL = "direct-cua-real"
+    PLANNER_CUA_REAL = "planner-cua-real"
+    # the template control for the real-model series: identical structure
+    # to ``taskvm`` under the deterministic capability model, so the real
+    # series has an explicit capability lower bound in the same report.
+    TASKVM_TEMPLATE_CONTROL = "taskvm-template-control"
 
 
 #: Conditions that may NEVER appear as a main paper result: they consume
-#: evaluation-plane secrets (oracle ground truth) and exist only as
-#: diagnostic upper bounds. Reports must label them loudly.
+#: evaluation-plane secrets (oracle ground truth) or are partial-model
+#: diagnostics (``taskvm-real-cua-only`` — the real chain is only the CUA
+#: leg). Reports must label them loudly.
 DIAGNOSTIC_ONLY_CONDITIONS: frozenset[Condition] = frozenset({
     Condition.TASKVM_ORACLE_UPPER_BOUND,
+    Condition.TASKVM_REAL_CUA_ONLY,
 })
 
 #: The primary paper conditions, in report order.
@@ -66,6 +86,30 @@ PRIMARY_CONDITIONS: tuple[Condition, ...] = (
 ABLATION_CONDITIONS: tuple[Condition, ...] = (
     Condition.TASKVM_NO_VERIFIER,
     Condition.TASKVM_NO_REPLAN,
+)
+
+#: RM-0.B real-model conditions (B-06). Within ONE condition the model
+#: id/version is PINNED at harness construction (one HttpModelPort for
+#: the whole trial); a failure may stop the trial honestly but may never
+#: silently switch models. Any model fallback must change the condition
+#: metadata / be recorded explicitly.
+REAL_MODEL_CONDITIONS: tuple[Condition, ...] = (
+    Condition.DIRECT_CUA_REAL,
+    Condition.PLANNER_CUA_REAL,
+    Condition.TASKVM_REAL_FULL,
+)
+
+#: The explicit template control for the real-model series.
+TEMPLATE_CONTROL_CONDITIONS: tuple[Condition, ...] = (
+    Condition.TASKVM_TEMPLATE_CONTROL,
+)
+
+#: Standalone diagnostic conditions that belong to NO other group but must
+#: still resolve through the registry's known universe (mirroring how the
+#: oracle upper bound is registered via PRIMARY_CONDITIONS). They may never
+#: appear as a main paper result — see ``DIAGNOSTIC_ONLY_CONDITIONS``.
+DIAGNOSTIC_CONDITIONS: tuple[Condition, ...] = (
+    Condition.TASKVM_REAL_CUA_ONLY,
 )
 
 
@@ -129,7 +173,9 @@ def list_suites() -> tuple[Suite, ...]:
 
 
 def all_conditions() -> tuple[Condition, ...]:
-    return PRIMARY_CONDITIONS + ABLATION_CONDITIONS
+    return (PRIMARY_CONDITIONS + ABLATION_CONDITIONS
+            + REAL_MODEL_CONDITIONS + TEMPLATE_CONTROL_CONDITIONS
+            + DIAGNOSTIC_CONDITIONS)
 
 
 def condition_of(name: str) -> Condition:

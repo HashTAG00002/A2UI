@@ -12,6 +12,7 @@ from typing import Any, Mapping
 
 from taskvm.architect.architect import TaskArchitect
 from taskvm.architect.compiler import StateCompiler
+from taskvm.architect.http_port import HttpModelPort
 from taskvm.architect.observation import (
     CompilerObservationView, VisibleRegion,
 )
@@ -35,6 +36,9 @@ from taskvm.runtime.sync import StructureInvalidation
 from taskvm.substrate import SubstrateSession
 from taskvm.verifier.visible import VisibleVerifier
 
+from taskvm.workspace_ui.composition import (
+    HttpCUAModel, bootstrap_real_full,
+)
 from taskvm_bench.evaluation.actors import (
     TemplateCUA, TemplateModelPort, parse_goal_program, parse_visible_kv,
 )
@@ -44,6 +48,8 @@ from taskvm_bench.benchmark.schema import InjectionKind
 __all__ = [
     "TrialBudget", "HarnessOutcome", "DirectCUAHarness", "PlannerCUAHarness",
     "TaskVMHarness", "make_harness", "WorldExtractor",
+    "DirectCUARealHarness", "PlannerCUARealHarness",
+    "RealFullHarness", "RealCUAOnlyHarness",
 ]
 
 
@@ -88,14 +94,24 @@ class HarnessOutcome:
 
 
 class _CUACounter:
-    """Wraps a TemplateCUA counting ACT decisions as GUI actions and
-    recording a compact per-call trace (no observation bodies — traces
-    stay small and leak-free)."""
+    """Wraps ANY CUAModel (template or real) counting ACT decisions as
+    GUI actions and recording a compact per-call trace (no observation
+    bodies — traces stay small and leak-free)."""
 
-    def __init__(self, inner: TemplateCUA) -> None:
+    def __init__(self, inner) -> None:
         self.inner = inner
         self.gui_actions = 0
         self.trace: list[dict[str, Any]] = []
+
+    @property
+    def records_own_ledger(self) -> bool:
+        """A-13 transparency: the wrapper must not hide the inner
+        adapter's ledger-ownership declaration. When the inner adapter
+        owns its rows (``HttpCUAModel``), the runtime's exception path
+        checks THIS attribute on the wrapper — without the forwarding
+        it would append a duplicate row (1 request = 2 rows) with an
+        unpinned model id."""
+        return bool(getattr(self.inner, "records_own_ledger", False))
 
     def predict_action(self, *, goal: str, observation,
                        labels: Mapping[str, str] | None = None,
@@ -149,9 +165,16 @@ class DirectCUAHarness(_TextGoalMixin):
     def __init__(self) -> None:
         self._pending = []
 
+    # ── capability seams (B-06): the real-model twin overrides these ──
+    def _new_counter(self) -> _CUACounter:
+        return _CUACounter(TemplateCUA())
+
+    def _cua_calls(self, counter: _CUACounter) -> int:
+        return len(counter.inner.calls)
+
     def run(self, substrate: SubstrateSession, goal: str, *,
             budget: TrialBudget) -> HarnessOutcome:
-        counter = _CUACounter(TemplateCUA())
+        counter = self._new_counter()
         sid = substrate.list_surfaces()[0].surface_id
         goal_text = goal
         trace: list[dict[str, Any]] = []
@@ -175,7 +198,7 @@ class DirectCUAHarness(_TextGoalMixin):
                               "detail": receipt.detail[:120]})
         return HarnessOutcome(
             stop_reason=stop,
-            model_calls_by_role={"cua": len(counter.inner.calls)},
+            model_calls_by_role={"cua": self._cua_calls(counter)},
             gui_actions=counter.gui_actions, trace=trace,
             detail=f"direct-cua stopped: {stop}")
 
@@ -190,6 +213,13 @@ class PlannerCUAHarness(_TextGoalMixin):
 
     def __init__(self) -> None:
         self._pending = []
+
+    # ── capability seams (B-06): the real-model twin overrides these ──
+    def _new_counter(self) -> _CUACounter:
+        return _CUACounter(TemplateCUA())
+
+    def _cua_calls(self, counter: _CUACounter) -> int:
+        return len(counter.inner.calls)
 
     @staticmethod
     def _next_instruction(prog, current: Mapping[str, str]) -> str | None:
@@ -208,7 +238,7 @@ class PlannerCUAHarness(_TextGoalMixin):
 
     def run(self, substrate: SubstrateSession, goal: str, *,
             budget: TrialBudget) -> HarnessOutcome:
-        counter = _CUACounter(TemplateCUA())
+        counter = self._new_counter()
         sid = substrate.list_surfaces()[0].surface_id
         goal_text = goal
         trace: list[dict[str, Any]] = []
@@ -251,7 +281,7 @@ class PlannerCUAHarness(_TextGoalMixin):
             stop_reason=stop,
             model_calls_by_role={
                 "planner": planner_calls,
-                "cua": len(counter.inner.calls)},
+                "cua": self._cua_calls(counter)},
             gui_actions=counter.gui_actions, trace=trace,
             detail=f"planner-cua stopped: {stop}")
 
@@ -375,8 +405,26 @@ class TaskVMHarness:
                                  "phase": phase})
 
     # ── composition ────────────────────────────────────────────────────
-    def _compose(self, substrate: SubstrateSession, goal: str):
-        ledger = ModelCallLedger()
+    def _new_ledger(self) -> ModelCallLedger:
+        """Ledger seam (B-06): the template default mints a fresh ledger
+        per composition; the real-model twins return the ONE ledger the
+        harness pinned at construction (single-owner accounting across
+        compiler/architect/CUA rows)."""
+        return ModelCallLedger()
+
+    def _new_cua(self, ledger) -> _CUACounter:
+        """Capability seam (B-06): the template default; the real-cua
+        diagnostic twin swaps in the real ``HttpCUAModel`` over the SAME
+        ledger (1 provider request = 1 ledger row holds everywhere)."""
+        return _CUACounter(TemplateCUA())
+
+    def _compose(self, substrate: SubstrateSession,
+                 goal: str) -> tuple:
+        """Assemble (ledger, port, compiler, architect, kernel, gov,
+        runtime, cua-counter). Structurally duck-typed on purpose: the
+        real-model twins (B-06) return HttpModelPort-backed objects from
+        the SAME seam — only the port's identity differs."""
+        ledger = self._new_ledger()
         port = TemplateModelPort()
         compiler = StateCompiler(port, ledger)
         architect = TaskArchitect(port, ledger)
@@ -393,7 +441,7 @@ class TaskVMHarness:
                 visible_text=obs0.visible_text,
                 structure_fingerprint=obs0.fingerprint),))
         gov.bootstrap(view)
-        counter = _CUACounter(TemplateCUA())
+        counter = self._new_cua(ledger)
         verifier = _NoVerifier() if self._no_verifier else (
             _OracleVerifier(self._oracle_spec)
             if self._oracle_spec is not None else VisibleVerifier())
@@ -705,18 +753,202 @@ class _OracleVerifier:
             detail="oracle-bound verification (diagnostic upper bound)")
 
 
-def make_harness(condition: "Condition | str", *, spec=None):
+# ── B-06: the real-model conditions ──────────────────────────────────────
+#
+# Model pinning (B-06 hard rule): each harness constructs ONE
+# ``HttpModelPort`` at ``__init__`` and reuses it for the whole trial —
+# compiler, architect and CUA share that one port (and its pinned
+# ``default_model``). There is NO failure-triggered re-construction, NO
+# model fallback path: a provider failure propagates as an honest stop /
+# raised error with the SAME port and SAME model id. A fallback would
+# have to be a different condition id (explicitly recorded).
+
+class _RealPortMixin:
+    """Shared construction: one pinned port + one shared ledger, injected
+    once; ``model_port`` exists so CONTRACT-WIRING tests can script the
+    provider (a scripted port pass is never a real-model claim)."""
+
+    _rm_port: HttpModelPort
+    _rm_ledger: ModelCallLedger
+
+    def _init_real(self, *, model: str | None, model_port, ledger) -> None:
+        self._rm_ledger = ledger if ledger is not None else ModelCallLedger()
+        self._rm_port = model_port if model_port is not None else \
+            HttpModelPort(default_model=model)
+
+    @property
+    def pinned_model(self) -> str:
+        """The model id this condition is pinned to (report metadata)."""
+        return getattr(self._rm_port, "default_model", "") or ""
+
+
+class DirectCUARealHarness(_RealPortMixin, DirectCUAHarness):
+    """Condition ``direct-cua-real`` (B-06 baseline): the bare CUA loop
+    over the REAL ``HttpCUAModel`` — identical structure to
+    ``direct-cua``, real capability. Every provider request lands in the
+    shared ledger (1 request = 1 row, A-13)."""
+
+    condition = Condition.DIRECT_CUA_REAL
+
+    def __init__(self, *, model: str | None = None,
+                 model_port=None, ledger=None) -> None:
+        super().__init__()
+        self._init_real(model=model, model_port=model_port, ledger=ledger)
+
+    def _new_counter(self) -> _CUACounter:
+        return _CUACounter(
+            HttpCUAModel(port=self._rm_port, ledger=self._rm_ledger))
+
+    def _cua_calls(self, counter: _CUACounter) -> int:
+        return int(getattr(counter.inner, "request_count", 0))
+
+
+class PlannerCUARealHarness(_RealPortMixin, PlannerCUAHarness):
+    """Condition ``planner-cua-real`` (B-06 baseline): the planner loop
+    with the REAL ``HttpCUAModel`` executing. The planner layer stays the
+    deterministic goal-program structure — the compared axis across the
+    real series is the CUA capability under each harness STRUCTURE, so
+    the planner must remain structure, not a second model variable."""
+
+    condition = Condition.PLANNER_CUA_REAL
+
+    def __init__(self, *, model: str | None = None,
+                 model_port=None, ledger=None) -> None:
+        super().__init__()
+        self._init_real(model=model, model_port=model_port, ledger=ledger)
+
+    def _new_counter(self) -> _CUACounter:
+        return _CUACounter(
+            HttpCUAModel(port=self._rm_port, ledger=self._rm_ledger))
+
+    def _cua_calls(self, counter: _CUACounter) -> int:
+        return int(getattr(counter.inner, "request_count", 0))
+
+
+class RealCUAOnlyHarness(_RealPortMixin, TaskVMHarness):
+    """Condition ``taskvm-real-cua-only`` (B-06 DIAGNOSTIC): compiler /
+    architect stay template (deterministic); ONLY the CUA is real. The
+    condition id says cua-only and it is registered in
+    ``DIAGNOSTIC_ONLY_CONDITIONS`` — it must never be reported as
+    real-full. Useful for isolating CUA capability from the
+    compiler/architect legs."""
+
+    condition = Condition.TASKVM_REAL_CUA_ONLY
+
+    def __init__(self, *, model: str | None = None,
+                 model_port=None, ledger=None) -> None:
+        super().__init__(condition=Condition.TASKVM_REAL_CUA_ONLY)
+        self._init_real(model=model, model_port=model_port, ledger=ledger)
+
+    def _new_cua(self, ledger) -> _CUACounter:
+        # compiler/architect rows land in the ledger minted by the base
+        # compose; the REAL CUA port writes into the SAME ledger object
+        # the harness pinned (single owner).
+        return _CUACounter(
+            HttpCUAModel(port=self._rm_port, ledger=self._rm_ledger))
+
+    def _new_ledger(self) -> ModelCallLedger:
+        # the pinned single-owner ledger: template compiler/architect
+        # rows AND real CUA rows all land here.
+        return self._rm_ledger
+
+
+class RealFullHarness(_RealPortMixin, TaskVMHarness):
+    """Condition ``taskvm-real-full`` (B-06 MAIN): the full TaskVM stack
+    over the REAL provider chain — fresh substrate observation → real
+    StateCompiler → real TaskArchitect → kernel FROM THE ARCHITECT
+    PRODUCT → real ``HttpCUAModel`` over the real GUI substrate →
+    VisibleVerifier → ONE shared single-owner ledger.
+
+    The composition path is ``bootstrap_real_full`` (B-07) — the SAME
+    single path the projection/demo use; this harness adds NO second
+    orchestration. Forbidden by construction: TemplateModelPort /
+    TemplateCUA / hand-written TaskVariable / hand-written WorkflowGraph
+    / fixture plan fallback (an architect failure honestly stops the
+    trial with ``no_plan`` — nothing hand-built is substituted)."""
+
+    condition = Condition.TASKVM_REAL_FULL
+
+    def __init__(self, *, model: str | None = None,
+                 model_port=None, ledger=None) -> None:
+        super().__init__(condition=Condition.TASKVM_REAL_FULL)
+        self._rm_model = model
+        self._init_real(model=model, model_port=model_port, ledger=ledger)
+
+    def _compose(self, substrate: SubstrateSession,
+                 goal: str) -> tuple:
+        # ONE pinned port + ONE shared ledger across compiler, architect
+        # AND CUA; the counting wrapper is transparent to ledger rows.
+        cua = _CUACounter(
+            HttpCUAModel(port=self._rm_port, ledger=self._rm_ledger))
+        bundle = bootstrap_real_full(
+            goal=goal, sid="benchmark-trial-real-full",
+            substrate=substrate, model_port=self._rm_port,
+            ledger=self._rm_ledger, model=self._rm_model, cua_model=cua)
+        kernel = bundle["kernel"]
+        runtime = bundle["runtime"]
+        # governance routing for external events reuses the REAL
+        # compiler/architect objects the bootstrap itself constructed
+        # (no second instance, no second ledger).
+        gov = GovernanceService(
+            kernel, architect=bundle["architect"],
+            compiler=bundle["compiler"], ledger=self._rm_ledger)
+        return (self._rm_ledger, self._rm_port, bundle["compiler"],
+                bundle["architect"], kernel, gov, runtime, cua)
+
+
+def make_harness(condition: "Condition | str", *, spec=None,
+                 model: str | None = None,
+                 model_port=None, ledger=None):
     """The condition factory. ``spec`` is required (and only legal) for
-    the diagnostic oracle upper bound."""
+    the diagnostic oracle upper bound.
+
+    B-06: ``model`` pins the model id for the REAL conditions (one
+    ``HttpModelPort`` per harness — no failure-driven switch). It is a
+    hard error to pass ``model``/``model_port`` to a template condition:
+    pinning is meaningless there and silently accepting it would blur
+    the condition taxonomy. ``model_port`` exists for contract-wiring
+    tests only — a scripted port is never a real-model claim."""
     if not isinstance(condition, Condition):
         from taskvm_bench.benchmark.registry import condition_of
         condition = condition_of(condition)
+    real_kwargs = (model, model_port, ledger)
     if condition is Condition.DIRECT_CUA:
+        if any(k is not None for k in real_kwargs):
+            raise ValueError(
+                "model/model_port/ledger only apply to real-model "
+                f"conditions; {condition.value!r} is template")
         return DirectCUAHarness()
     if condition is Condition.PLANNER_CUA:
+        if any(k is not None for k in real_kwargs):
+            raise ValueError(
+                "model/model_port/ledger only apply to real-model "
+                f"conditions; {condition.value!r} is template")
         return PlannerCUAHarness()
     if condition is Condition.TASKVM:
+        if any(k is not None for k in real_kwargs):
+            raise ValueError(
+                "model/model_port/ledger only apply to real-model "
+                f"conditions; {condition.value!r} is template")
         return TaskVMHarness()
+    if condition is Condition.TASKVM_TEMPLATE_CONTROL:
+        if any(k is not None for k in real_kwargs):
+            raise ValueError(
+                "model/model_port/ledger only apply to real-model "
+                "conditions; the template control is template by design")
+        return TaskVMHarness(condition=condition)
+    if condition is Condition.DIRECT_CUA_REAL:
+        return DirectCUARealHarness(model=model, model_port=model_port,
+                                    ledger=ledger)
+    if condition is Condition.PLANNER_CUA_REAL:
+        return PlannerCUARealHarness(model=model, model_port=model_port,
+                                     ledger=ledger)
+    if condition is Condition.TASKVM_REAL_CUA_ONLY:
+        return RealCUAOnlyHarness(model=model, model_port=model_port,
+                                  ledger=ledger)
+    if condition is Condition.TASKVM_REAL_FULL:
+        return RealFullHarness(model=model, model_port=model_port,
+                               ledger=ledger)
     if condition is Condition.TASKVM_ORACLE_UPPER_BOUND:
         if spec is None:
             raise ValueError(

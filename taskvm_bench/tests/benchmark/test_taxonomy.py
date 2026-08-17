@@ -64,13 +64,24 @@ def test_registry_suites_and_conditions():
     # final covers the whole taxonomy exactly
     final = SUITES["final"]
     assert set(final.task_ids) == {t.task_id for t in all_tasks()}
-    # 4 primary + 2 ablations; the diagnostic upper bound is registered
+    # 4 primary + 2 ablations + 3 real-model + 1 template control (B-06)
+    # + 1 standalone diagnostic (taskvm-real-cua-only) — the oracle upper
+    # bound is registered via PRIMARY, cua-only via DIAGNOSTIC_CONDITIONS
     conds = all_conditions()
-    assert len(conds) == 6
+    assert len(conds) == 11
     assert len(PRIMARY_CONDITIONS) == 4
     assert len(ABLATION_CONDITIONS) == 2
     from taskvm_bench.benchmark.registry import (
+        REAL_MODEL_CONDITIONS, TEMPLATE_CONTROL_CONDITIONS,
+        DIAGNOSTIC_CONDITIONS,
         Condition, DIAGNOSTIC_ONLY_CONDITIONS,
     )
+    assert len(REAL_MODEL_CONDITIONS) == 3
+    assert len(TEMPLATE_CONTROL_CONDITIONS) == 1
+    assert DIAGNOSTIC_CONDITIONS == (Condition.TASKVM_REAL_CUA_ONLY,)
+    # B-06: the real-model main condition must resolve, and the
+    # partial-model diagnostic must be loudly labelled (never real-full)
+    assert Condition.TASKVM_REAL_FULL in REAL_MODEL_CONDITIONS
     assert DIAGNOSTIC_ONLY_CONDITIONS == frozenset(
-        {Condition.TASKVM_ORACLE_UPPER_BOUND})
+        {Condition.TASKVM_ORACLE_UPPER_BOUND,
+         Condition.TASKVM_REAL_CUA_ONLY})
