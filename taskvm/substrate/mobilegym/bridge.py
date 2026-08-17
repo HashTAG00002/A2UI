@@ -54,7 +54,8 @@ Routes (mirror the Drive app's contract, app-namespaced):
     GET  /api/session_state/<sid>             → summary only (n_chats, n_tx) — never GT
     GET  /api/wechat_chats/<sid>              → flattened wechat chats (entities)
     GET  /api/alipay_transactions/<sid>       → flattened alipay transferRecords
-    GET  /api/x_state/<sid>                   → X toggle lists (liked/retweeted/bookmarked ids) [verifier read]
+    GET  /api/x_posts/<sid>                   → X post rows (toggle bools from store [non-invasive]; content best-effort from whatever is already on screen — see B-04)
+    GET  /api/x_state/<sid>                   → X toggle lists (liked/retweeted/bookmarked ids) [verifier read, store-only]
     POST /api/wechat/<sid>/<eid>              → send_message via gui_write_async (real gestures) OR msg:<id> rollback (gui_write_async undo → 409 if irreversible)
     POST /api/x/<sid>/<eid>                   → toggle_like/retweet/bookmark via gui_act_async (pure-vision CUA, E16-complete)
 
@@ -63,6 +64,21 @@ The evaluation/setup plane (reset/inject_task/oracle reads) activates a
 sid; the runtime plane (observe/act/mutate routes) REQUIRES the active sid
 and honestly refuses a mismatch (409 session mismatch) — the runtime never
 switches reality via env.reset/get_state/set_state underneath the caller.
+
+B-04 (Oracle audit — Non-invasive MobileGym evaluation oracle, fixed
+2026-08-17): the X oracle read (``GET /api/x_posts/<sid>``, backing
+``MobileGymEvaluationEnvironment.oracle_state`` for the "x" app) used to
+call ``env.open_app("x", wait_stable=True)`` + ``asyncio.sleep(1.5)`` on
+EVERY read — switching the live sim's foreground app and burning wall
+clock just to grade it, polluting the very screen/latency the runtime is
+being measured on. Fixed: the grading-relevant fields (is_liked/
+is_retweeted/is_bookmarked — the only fields any checkpoint criterion
+reads) now come straight from the zustand store dict ``env.get_state()``
+already returns (``_x_toggle_rows`` — a pure projection, zero env calls,
+same data ``x_state()`` has always used). The non-grading ``content``
+preview field is best-effort from whatever ``[data-post-id]`` DOM is
+ALREADY rendered (no navigation, no sleep); it is honestly blank when X
+is not currently the foreground. See ``_x_oracle_rows_noninvasive``.
 """
 from __future__ import annotations
 
@@ -376,12 +392,38 @@ class MobileGymBridge:
             rows = self._flatten_alipay_txs(apps.get("alipay", {}))
             return {"site": SITE, "sid": sid, "alipay_transactions": rows}
         if resource == "x_posts":
-            # X posts live in the base dataset (not in the zustand store),
-            # so we must read them from the DOM. This requires the X app
-            # to be open — open it first, then read.
-            await self.env.open_app("x", wait_stable=True)
-            await asyncio.sleep(1.5)  # let timeline render
-            rows = await self._flatten_x_posts_async(apps.get("x", {}))
+            # B-04 (Oracle audit 2026-08-15/17 — Non-invasive MobileGym
+            # evaluation oracle): the OLD path called
+            # ``env.open_app("x", wait_stable=True)`` + ``asyncio.sleep(1.5)``
+            # here — switching the live sim's FOREGROUND app + burning wall
+            # clock BEFORE every oracle read. That is the exact violation the
+            # audit flagged: "per-op 判卷...改变前台 app...改变下一轮模型截图
+            # ...把 oracle 时间算进 projection latency" — a judge that moves
+            # furniture in the room it is grading.
+            #
+            # Fix (priority 1 — read the in-memory store, no UI at all):
+            # the fields that actually matter for grading (is_liked /
+            # is_retweeted / is_bookmarked — the checkpoint criterion in
+            # ``mobilegym_fixtures.SOCIAL_MORNING_BRIEF`` only ever asserts
+            # ``{"liked": True}``) live in ``apps.x.user.*PostIds`` — plain
+            # zustand-store DATA, already reachable from the
+            # ``env.get_state()`` call two lines above. No navigation, no
+            # sleep, no foreground change: this is what ``x_state()`` below
+            # already proves is possible.
+            #
+            # The ``content`` field (post text preview) is NOT store data —
+            # it lives in a base dataset (posts.json, loaded via preload())
+            # that MobileGym never puts in the zustand store, so the ONLY
+            # way to read it is the rendered DOM (see
+            # ``_flatten_x_posts_async``'s docstring). Rather than force a
+            # navigation to get it, this is priority-3 non-invasive: read
+            # WHATEVER is already on the live screen right now (a passive
+            # observation identical in kind to "the agent glancing at its
+            # own last screenshot"), and if X's timeline is not currently
+            # the foreground view, honestly leave ``content`` blank instead
+            # of manufacturing a foreground switch to fetch it. The oracle
+            # never calls ``open_app`` and never sleeps.
+            rows = await self._x_oracle_rows_noninvasive(apps.get("x", {}))
             return {"site": SITE, "sid": sid, "x_posts": rows}
         raise web.HTTPNotFound(text=f"unknown resource {resource}")
 
@@ -412,67 +454,110 @@ class MobileGymBridge:
             })
         return rows
 
-    async def _flatten_x_posts_async(self, x_state: dict) -> list[dict]:
-        """Read X posts from the LIVE DOM (not from state). X's post table
-        lives in a base dataset (posts.json, loaded via preload()) that is
-        NOT part of the zustand store — so state['apps']['x']['posts'] is
-        always an empty dict. The posts ARE rendered in the DOM, each in a
-        ``<div data-post-id="p_...">`` container (Task B, 2026-08-12 fix —
-        added to ``XTimelinePostCard.tsx``'s root div; a small, non-invasive
-        markup addition, not a behavior change).
-
-        This reads that attribute + the store's toggle lists
-        (``user.likedPostIds`` etc. — which ARE in the store) to produce the
-        same row schema as before: [{id, is_liked, is_retweeted,
-        is_bookmarked, content}].
-
-        Bug this replaces (E14-honest rec'd fix, .mrules Task B): the old
-        reader found post ids via ``[data-action-params]`` action-bar
-        buttons, then walked UP via ``b.closest('[class*="flex flex-col"]')``
-        to find a "post card" container for the content preview — but no
-        ancestor of the action bar actually has a class matching
-        ``flex flex-col`` (verified: the real ancestor chain is
-        ``border-b p-4 ...`` at the post root, `flex` (avatar+body row) two
-        levels up, `flex-1 min-w-0` for the body — none contain the literal
-        substring "flex flex-col" together). The ``closest`` call always
-        returned null, so the code fell through to the
-        ``b.parentElement?.parentElement?.parentElement`` fallback, which for
-        the LIKE button (``XPostActionBar`` renders a flat row of buttons)
-        walks up to a grandparent shared across ALL action-bar icons in the
-        SAME row (not the whole post), and for adjacent/first posts on the
-        timeline this often resolved to the same ancestor for multiple posts
-        (or one that also captured the top navigation bar's text if the DOM
-        was still settling) — producing identical/wrong content previews per
-        .mrules E14-honest. The new ``data-post-id`` selector reads content
-        DIRECTLY from that post's own container — one query, no ancestor
-        walking, so it cannot cross-contaminate between posts.
-
-        Requires the X app to be OPEN (timeline visible) — callers must
-        ``open_app('x')`` before invoking this."""
+    @staticmethod
+    def _x_toggle_rows(x_state: dict) -> dict[str, dict]:
+        """PURE, read-only, store-only projection of the X toggle lists
+        (B-04 fix, priority 1). ``apps.x.user.{liked,retweeted,bookmarked}
+        PostIds`` are plain in-memory zustand-store DATA — the SAME dict
+        ``env.get_state()`` already returns, no DOM/UI involved at all.
+        This is the ONLY thing MobileGym oracle grading actually checks
+        (``mobilegym_fixtures.SOCIAL_MORNING_BRIEF``'s checkpoint criterion
+        is ``{"x": {POST_ID: {"liked": True}}}`` — never ``content``), so
+        it is the load-bearing half of the oracle read and it is 100%
+        non-invasive: a plain dict projection, zero env/page calls, keyed
+        by post id -> {is_liked, is_retweeted, is_bookmarked}."""
         user = x_state.get("user", {}) or {}
         liked = set(user.get("likedPostIds", []) or [])
         retweeted = set(user.get("retweetedPostIds", []) or [])
         bookmarked = set(user.get("bookmarkedPostIds", []) or [])
-        dom_posts = await self.env.page.evaluate("""() => {
-            const cards = document.querySelectorAll('[data-post-id]');
-            const posts = [];
-            for (const card of cards) {
-                const pid = card.getAttribute('data-post-id');
-                if (!pid) continue;
-                const content = card.textContent?.substring(0, 200) || '';
-                posts.push({id: pid, content});
-            }
-            return posts;
-        }""")
-        rows = []
-        for p in dom_posts or []:
-            pid = p.get("id")
-            rows.append({
-                "id": pid,
-                "content": str(p.get("content", ""))[:80],
+        out: dict[str, dict] = {}
+        for pid in liked | retweeted | bookmarked:
+            out[pid] = {
                 "is_liked": pid in liked,
                 "is_retweeted": pid in retweeted,
                 "is_bookmarked": pid in bookmarked,
+            }
+        return out
+
+    async def _x_oracle_rows_noninvasive(self, x_state: dict) -> list[dict]:
+        """B-04 (Oracle audit — Non-invasive MobileGym evaluation oracle)
+        replacement for the deleted ``_flatten_x_posts_async``. NEVER
+        calls ``env.open_app`` and NEVER sleeps — the oracle must not move
+        the foreground app or burn wall-clock time the runtime's projection
+        latency would otherwise be charged for (the exact B-04 complaint).
+
+        Priority-1 half (grading-relevant, non-invasive by construction):
+        the toggle booleans come STRAIGHT from the zustand store
+        (``_x_toggle_rows`` — a pure dict projection, zero env calls).
+
+        Priority-3 half (``content``, non-grading, best-effort): the post
+        TEXT lives only in a base dataset MobileGym renders into the DOM
+        and never puts in the store (see the historical docstring this
+        replaces, preserved below), so there is no store path for it. Instead
+        of forcing a foreground switch to fetch it, this reads WHATEVER
+        ``data-post-id`` cards are ALREADY rendered on the live page right
+        now — a passive observation, not a navigation. If the X timeline
+        happens to already be the foreground (e.g. the agent itself just
+        opened X), the content comes along for free with zero extra
+        side-effects; if X is not currently on screen, ``content`` is
+        honestly left as "" (not fabricated, not fetched via a manufactured
+        app-switch) and the row still carries the (store-sourced) toggle
+        booleans, which is everything grading needs.
+
+        Historical note (content DOM-read mechanics, unchanged from the
+        pre-B-04 ``_flatten_x_posts_async``): X's post table lives in a base
+        dataset (posts.json, loaded via preload()) that is NOT part of the
+        zustand store — so state['apps']['x']['posts'] is always an empty
+        dict. The posts ARE rendered in the DOM, each in a
+        ``<div data-post-id="p_...">`` container (Task B, 2026-08-12 fix —
+        added to ``XTimelinePostCard.tsx``'s root div). Reading that
+        attribute directly (one query, no ancestor walking) avoids the E14
+        cross-contamination bug (.mrules Task B) where a ``closest(...)``
+        ancestor walk from the action-bar buttons resolved to a shared
+        grandparent across sibling posts."""
+        toggle_by_id = self._x_toggle_rows(x_state)
+        content_by_id: dict[str, str] = {}
+        page = getattr(self.env, "page", None)
+        if page is not None:
+            try:
+                dom_posts = await page.evaluate("""() => {
+                    const cards = document.querySelectorAll('[data-post-id]');
+                    const posts = [];
+                    for (const card of cards) {
+                        const pid = card.getAttribute('data-post-id');
+                        if (!pid) continue;
+                        const content = card.textContent?.substring(0, 200) || '';
+                        posts.push({id: pid, content});
+                    }
+                    return posts;
+                }""")
+            except Exception as e:
+                # Honest best-effort: a transient page/evaluate failure
+                # (e.g. mid-navigation) must not crash grading — it just
+                # means content stays blank for this read, same as X not
+                # being foreground at all.
+                logger.warning(f"[bridge] x oracle content DOM read "
+                                f"skipped (non-fatal, no UI action taken): {e}")
+                dom_posts = []
+            for p in dom_posts or []:
+                pid = p.get("id")
+                if pid:
+                    content_by_id[pid] = str(p.get("content", ""))[:80]
+        # union of ids known via toggle state OR currently visible on screen
+        # — an id can be visible-but-untoggled (freshly rendered, never
+        # liked/retweeted/bookmarked) or toggled-but-not-currently-visible
+        # (scrolled off / X not foreground); both are honest partial views.
+        all_ids = set(toggle_by_id) | set(content_by_id)
+        rows = []
+        for pid in all_ids:
+            t = toggle_by_id.get(pid, {"is_liked": False, "is_retweeted": False,
+                                        "is_bookmarked": False})
+            rows.append({
+                "id": pid,
+                "content": content_by_id.get(pid, ""),
+                "is_liked": t["is_liked"],
+                "is_retweeted": t["is_retweeted"],
+                "is_bookmarked": t["is_bookmarked"],
             })
         return rows
 
