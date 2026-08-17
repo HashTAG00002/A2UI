@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol, runtime_checkable
 
 MODEL_ROLE_STATE_COMPILER = "state_compiler"
@@ -61,7 +61,15 @@ class ModelPort(Protocol):
 
 @dataclass(frozen=True)
 class ModelCallRecord:
-    """One landed (or failed) high-level model call — audit raw material."""
+    """One landed (or failed) high-level model call — audit raw material.
+
+    ``request_id`` (RM-0 A-13): minted by the row's single owner — the
+    transport/model adapter that actually issued the provider request. Every
+    real provider request gets exactly one row carrying a fresh unique
+    ``request_id``; downstream layers (runtime, evaluation) reference that
+    row ONLY via ``Ledger.annotate`` (node_id / attempt / execution
+    context) — never by appending a second row for the same request
+    (C-2: ``1 provider request = 1 ledger row``)."""
 
     role: str                    # one of MODEL_ROLES (or an E-side extension)
     purpose: str                 # e.g. "initial_compose", "goal_recompose"
@@ -73,6 +81,9 @@ class ModelCallRecord:
     latency_ms: int = 0
     revision: int = 0            # task-state revision at call time (0 = n/a)
     error: str = ""
+    request_id: str = ""         # unique id minted by the row's owner (A-13)
+    node_id: str = ""            # execution context, attached via annotate
+    attempt: int = 0             # execution context, attached via annotate
 
 
 class ModelCallLedger:
@@ -80,8 +91,15 @@ class ModelCallLedger:
 
     ``counts_by_role()`` is what the benchmark reads to separate compiler /
     architect / CUA overhead. Records are immutable; the ledger never edits
-    history.
+    history. ``annotate`` (A-13) is the single sanctioned mutation: it
+    REPLACES a row in place (same request_id, same provider request) with
+    execution context attached — it can never create or drop rows, so the
+    ``provider request == ledger row`` invariant survives annotation.
     """
+
+    #: fields ``annotate`` may set — everything else is owner-written once
+    _ANNOTATABLE = frozenset({"purpose", "node_id", "attempt", "is_repair",
+                              "revision"})
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -92,8 +110,35 @@ class ModelCallLedger:
             raise ValueError(
                 f"unknown model role {rec.role!r}; use a MODEL_ROLE_* constant")
         with self._lock:
+            if rec.request_id and any(
+                    r.request_id == rec.request_id for r in self._records):
+                raise ValueError(
+                    f"duplicate request_id {rec.request_id!r}: one provider "
+                    "request must map to exactly one ledger row (C-2)")
             self._records.append(rec)
         return rec
+
+    def annotate(self, request_id: str, **fields: Any) -> ModelCallRecord | None:
+        """Attach execution context to an existing row (A-13).
+
+        Only the annotation fields (``purpose`` / ``node_id`` / ``attempt`` /
+        ``is_repair`` / ``revision``) may be set; unknown field names raise
+        ``ValueError`` (a typo must never corrupt accounting). Returns the
+        annotated record, or ``None`` when ``request_id`` is unknown — an
+        honest no-op, never a new row."""
+        unknown = set(fields) - self._ANNOTATABLE
+        if unknown:
+            raise ValueError(
+                f"annotate() cannot set non-annotatable fields: {sorted(unknown)}")
+        if not request_id:
+            return None
+        with self._lock:
+            for i, r in enumerate(self._records):
+                if r.request_id == request_id:
+                    updated = replace(r, **fields) if fields else r
+                    self._records[i] = updated
+                    return updated
+        return None
 
     @property
     def records(self) -> tuple[ModelCallRecord, ...]:

@@ -51,12 +51,20 @@ class CUADecision:
     ``kind=ACT`` carries one ``GuiAction``; ``DONE``/``FAIL`` carry none.
     ``raw`` is provenance (the model's reply text / fake script id) for the
     call ledger and trace — never an internal id.
+
+    ``request_id`` (A-13 single-owner ledger): when the CUA adapter is the
+    ledger owner for its provider request (``records_own_ledger`` below),
+    it stamps the ledger row's ``request_id`` here so the runtime can
+    ANNOTATE that row (node_id / attempt / is_repair / revision) instead of
+    recording a second row for the same provider request (C-2:
+    1 provider request = 1 ledger row). Fakes leave it empty.
     """
 
     kind: CUADecisionKind
     action: GuiAction | None = None
     reason: str = ""
     raw: str = ""
+    request_id: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, CUADecisionKind):
@@ -88,7 +96,17 @@ class CUAModel(Protocol):
     visible world. The concrete impl is a composition-layer adapter over
     ``taskvm.architect.ModelPort``+``_LedgeredPort`` (system-prompt assembly,
     observation→prompt, JSON→CUADecision); tests inject a fake. Runtime never
-    calls a provider directly."""
+    calls a provider directly.
+
+    Ledger ownership (A-13, C-2 ``1 provider request = 1 ledger row``): an
+    adapter may declare ``records_own_ledger = True`` (a plain attribute,
+    duck-typed — not part of this Protocol's call surface). That is a
+    PROMISE that the adapter itself lands exactly one ledger row per real
+    provider request on EVERY path (success, parse failure, transport
+    exception). The runtime then never appends rows of its own for that
+    adapter — it only ANNOTATES the adapter's row via ``request_id`` when
+    the decision carries one. Adapters without the attribute (test fakes)
+    keep the legacy contract: the runtime records their calls."""
 
     def predict_action(self, *, goal: str, observation: Observation,
                        labels: Mapping[str, str] | None = None,
@@ -107,6 +125,27 @@ class ObservationExtractor(Protocol):
     def extract(self, observation: Observation,
                 variables: Mapping[str, TaskVariable]
                 ) -> tuple[ObservedValue, ...]: ...
+
+
+@runtime_checkable
+class SurfaceBindingResolver(Protocol):
+    """TaskVM-owned handle → session surface resolution (A-01).
+
+    The runtime must never default to ``surfaces[0]``: evidence gathered on
+    surface B must act/verify on surface B. Concrete locators stay
+    substrate-private (domain ``SurfaceHandle`` carries only an opaque id);
+    this port is the composition-owned private resolver that bridges the
+    compiler's handle provenance to the session's surface ids.
+
+    ``resolve_surface`` returns the session surface id, or ``None`` when the
+    binding cannot be recovered. ``None`` is a ROUTING FAILURE: the runtime
+    publishes ``StructureInvalidated`` / lands an honest fail — it must NOT
+    fall back to any default surface. Implementations may attempt a
+    deterministic rebind (visible-label match over fresh observations —
+    read-only, 0 model calls) before giving up."""
+
+    def resolve_surface(self, handle_id: str,
+                        *, visible_label: str = "") -> str | None: ...
 
 
 @runtime_checkable
@@ -137,7 +176,13 @@ class ModelCallRecord:
     """One landed (or failed) CUA model call — audit raw material. Fields are
     field-for-field identical to ``taskvm.architect.ModelCallRecord`` so the
     SAME ``ModelCallLedger`` instance accepts records from both layers (the
-    ledger only string-validates ``role``)."""
+    ledger only string-validates ``role``).
+
+    ``request_id`` (A-13): minted by the row's single owner (the transport
+    / model adapter) at request time; downstream layers reference the row
+    ONLY through it (``Ledger.annotate``). ``node_id`` / ``attempt`` are
+    execution context the runtime attaches by annotation — a second row is
+    never created for the same provider request (C-2)."""
 
     role: str
     purpose: str
@@ -149,15 +194,26 @@ class ModelCallRecord:
     latency_ms: int = 0
     revision: int = 0
     error: str = ""
+    request_id: str = ""
+    node_id: str = ""
+    attempt: int = 0
 
 
 @runtime_checkable
 class CallLedger(Protocol):
     """Append-only call accounting. The concrete impl is
     ``taskvm.architect.ModelCallLedger`` (injected as the SAME instance given
-    to the architect — one unified report)."""
+    to the architect — one unified report).
+
+    ``annotate`` (A-13): attach execution context (node_id / attempt /
+    is_repair / revision / purpose) to an EXISTING row identified by
+    ``request_id`` — the contract-compatible alternative to recording a
+    second row for the same provider request. Returns the annotated record
+    or ``None`` when the request_id is unknown (honest no-op)."""
 
     def record(self, rec: ModelCallRecord) -> Any: ...
+
+    def annotate(self, request_id: str, **fields: Any) -> Any: ...
 
     @property
     def records(self) -> tuple[ModelCallRecord, ...]: ...

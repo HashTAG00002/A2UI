@@ -55,11 +55,12 @@ class RuntimePorts:
       (deterministic Observation→ObservedValues; raises ``StructureInvalidation``
       on unrecoverable binding).
     - ``verifier``: ``taskvm.verifier.VisibleVerifier`` (E's single verifier).
-    - ``ledger``: the SAME ``taskvm.architect.ModelCallLedger`` instance given
+        - ``ledger``: the SAME ``taskvm.architect.ModelCallLedger`` instance given
       to the architect (one unified cua/compiler/architect call report).
 
     None of these are imported here (gate); composition constructs them.
     """
+
     cua_model: CUAModel
     serializer: CUAGoalSerializer
     extractor: ObservationExtractor
@@ -71,7 +72,8 @@ def compose_runtime(kernel: Any, substrate: "SubstrateSession",
                     ports: RuntimePorts, *,
                     budgets: RuntimeBudgets | None = None,
                     surfaces: list[str] | None = None,
-                    model: str | None = None) -> AutonomyRuntime:
+                    model: str | None = None,
+                    surface_resolver: Any = None) -> AutonomyRuntime:
     """The single composition entry point — assemble a real
     ``AutonomyRuntime`` over a real ``SubstrateSession`` with injected ports.
 
@@ -82,10 +84,19 @@ def compose_runtime(kernel: Any, substrate: "SubstrateSession",
     owns building the kernel, the SubstrateSession (via
     ``substrate_registry.create_session``), and the five ports; this function
     only wires them into the runtime facade.
+
+    ``surface_resolver`` (optional, A-01): a composition-owned
+    ``SurfaceBindingResolver`` (see runtime/ports.py) mapping compiler-minted
+    opaque handle ids on evidence to session surface ids. Multi-surface
+    routing uses it to act/verify on the surface the evidence was grounded
+    on; ``None`` keeps single-surface sessions working (the
+    trivially-unambiguous case) — multi-surface sessions without a resolver
+    fail honestly instead of guessing.
     """
     return AutonomyRuntime(
         kernel, substrate,
         cua_model=ports.cua_model, serializer=ports.serializer,
         extractor=ports.extractor, verifier=ports.verifier,
         ledger=ports.ledger, budgets=budgets or DEFAULT_BUDGETS,
-        surfaces=surfaces, model=model)
+        surfaces=surfaces, model=model,
+        surface_resolver=surface_resolver)

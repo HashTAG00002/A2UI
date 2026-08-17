@@ -45,6 +45,7 @@ from taskvm.runtime.sync import StructureInvalidation, SurfaceSync
 # reasons run() may return (audit/UI facing)
 DONE = "done"
 PAUSED = "paused"
+STOPPED = "stopped"          # A-02: persistent lifecycle stop
 BUDGET_EXHAUSTED = "budget_exhausted"
 PENDING_RECOMPOSE = "pending_recompose"
 NO_PLAN = "no_plan"
@@ -64,7 +65,8 @@ class AutonomyRuntime:
                  extractor: ObservationExtractor, verifier: Verifier,
                  ledger: CallLedger, budgets: RuntimeBudgets | None = None,
                  surfaces: list[str] | None = None,
-                 model: str | None = None) -> None:
+                 model: str | None = None,
+                 surface_resolver=None) -> None:
         self._kernel = kernel
         self._substrate = substrate
         self._cua = cua_model
@@ -74,6 +76,7 @@ class AutonomyRuntime:
         self._ledger = ledger
         self._budgets = budgets or RuntimeBudgets()
         self._model = model
+        self._resolver = surface_resolver
         surfaces = surfaces if surfaces is not None else self._discover_surfaces()
         self._sync = SurfaceSync(kernel, substrate, extractor, list(surfaces))
         self._comp = CompensationExecutor(
@@ -81,6 +84,7 @@ class AutonomyRuntime:
             extractor, ledger, self._budgets)
         self._events: list[RuntimeEvent] = []
         self._paused = False
+        self._stopped = False              # A-02: persistent lifecycle state
         self._stop_reason: str | None = None   # why we paused (budget/…)
         self._model_calls = 0
         self._t0: float = 0.0
@@ -139,23 +143,71 @@ class AutonomyRuntime:
         self._kernel.request_governance("pause", "soft pause requested")
 
     def request_resume(self) -> None:
+        # A-02: resume from a paused state only — stop is persistent
+        if self._stopped:
+            return
         self._paused = False
         self._stop_reason = None
         self._kernel.request_governance("resume", "soft pause cleared")
+
+    def request_stop(self) -> None:
+        """A-02: persistent lifecycle stop. Once stopped, the runtime never
+        starts a new GUI atomic action. An in-flight primitive may complete
+        (it is already inside substrate.act); but the next _pre_tick returns
+        STOPPED and the driver thread exits. Stop is irreversible — only
+        a fresh composition / driver.start() with a new runtime instance
+        can begin again (the frozen contract does not define restart-from-
+        stopped on the same runtime object)."""
+        self._stopped = True
+        self._paused = True  # also pause to break out of action loop
+        self._stop_reason = "stopped"
+        self._kernel.request_governance("stop", "lifecycle stop requested")
 
     def execute_compensation(self, plan, *, surface_id: str | None = None,
                              model: str | None = None) -> str:
         """Land a kernel-produced CompensationPlan through the real CUA +
         substrate. Forward autonomy is blocked by the kernel while the plan is
-        pending (runtime.md §7)."""
-        sid = surface_id or (self._sync.surfaces[0] if self._sync.surfaces else None)
-        if sid is None:
-            raise ValueError("no surface to compensate on")
-        self._sync.set_active(sid)
+        pending (runtime.md §7).
+
+        A-01: each entry routes to the surface that owns its semantic key's
+        binding (resolved from the variable's evidence handle), NOT to a
+        default surface. ``surface_id`` (explicit override) still wins — the
+        caller may know the surface from context; per-entry resolution then
+        only fills the entries it can honestly resolve."""
+        variables = {v.semantic_key: v
+                     for v in self._kernel.task_state().variables}
+        # single-surface sessions are routing-trivial (one candidate — no
+        # ambiguity, hence not a surface-0 "fallback"); the resolver chain
+        # only becomes LOAD-BEARING in multi-surface sessions (A-01)
+        trivial = (self._sync.surfaces[0]
+                   if len(self._sync.surfaces) == 1 else None)
+        surface_for_entry: dict[str, str] = {}
+        for entry in plan.entries:
+            sid = surface_id
+            if sid is None:
+                sid = self._resolve_surface_for_key(entry.semantic_key,
+                                                    variables)
+            if sid is None:
+                sid = trivial
+            if sid is None:
+                self._publish(RuntimeEventKind.STRUCTURE_INVALIDATED,
+                              node_id=entry.node_id,
+                              detail=(f"compensation entry "
+                                      f"{entry.semantic_key!r} has no "
+                                      "resolvable surface binding; honest "
+                                      "not-compensated (no surface-0 "
+                                      "fallback)"))
+                continue
+            surface_for_entry[entry.node_id] = sid
+        # the resolved surfaces still set the active marker so the CUA's own
+        # observations drive the right surface
+        first = next(iter(surface_for_entry.values()), None)
+        if first is not None:
+            self._sync.set_active(first)
         # Re-sync the CUA model reference — tests (and composition) may swap
         # ``self._cua`` between forward autonomy and compensation execution.
         self._comp._cua = self._cua
-        disp = self._comp.execute(plan, surface_id=sid,
+        disp = self._comp.execute(plan, surface_for_entry=surface_for_entry,
                                   model=model or self._model,
                                   model_calls_base=self._model_calls)
         self._model_calls += self._comp.consume_calls()
@@ -174,12 +226,31 @@ class AutonomyRuntime:
     def model_calls(self) -> int:
         return self._model_calls
 
+    @property
+    def budgets(self) -> RuntimeBudgets:
+        """The flat budget object (read-only view; runtime.md §5). A-03:
+        the production driver reads ``inactive_heartbeat_seconds`` from
+        here — the cadence is a runtime-layer budget, never a hardcoded
+        projection-layer constant."""
+        return self._budgets
+
     # ── the tick ──────────────────────────────────────────────────────────
     def _pre_tick(self) -> str | None:
+        # A-02: persistent stop — checked FIRST, before anything else.
+        # Once stop lands, the runtime never resumes on any tick.
+        if self._stopped:
+            return STOPPED
         if self._paused:
             return self._stop_reason or PAUSED
         if self._kernel.pending_recompose is not None:
             return PENDING_RECOMPOSE
+        if self._governance_says_stopped():
+            # an EXTERNAL stop (composition called the kernel directly)
+            # must be honoured here too — the runtime stays stopped.
+            self._stopped = True
+            self._paused = True
+            self._stop_reason = STOPPED
+            return STOPPED
         if self._governance_says_paused():
             # an EXTERNAL pause (composition called the kernel directly)
             # must stop the runtime too — the epoch bump already discarded
@@ -200,6 +271,16 @@ class AutonomyRuntime:
             if e.kind is EventKind.GOVERNANCE_REQUESTED:
                 last = e.payload.get("action")
         return last == "pause"
+
+    def _governance_says_stopped(self) -> bool:
+        """A-02: check whether the last governance event was a stop.
+        Handles the case where an external caller wrote stop directly to
+        the kernel (not through the driver path)."""
+        last = None
+        for e in self._kernel.events():
+            if e.kind is EventKind.GOVERNANCE_REQUESTED:
+                last = e.payload.get("action")
+        return last == "stop"
 
     def _advance(self, node: WorkflowNode) -> bool:
         """Advance one node. Returns True if the loop may keep pulling ready
@@ -228,19 +309,17 @@ class AutonomyRuntime:
 
     # ── ACTION: the CUA loop with repair + budgets ────────────────────────
     def _advance_action(self, node: WorkflowNode) -> bool:
-        surface = self._sync.surfaces[0] if self._sync.surfaces else None
-        if surface is None:
-            # no surface = unrecoverable for the runtime: escalate (pause +
-            # typed event) so the loop stops instead of spinning on a node
-            # it can never advance (honest stop, no fallback path)
+        if not self._sync.surfaces:
+            # no surface at all = unrecoverable for the runtime: escalate
+            # (pause + typed event) so the loop stops instead of spinning on
+            # a node it can never advance (honest stop, no fallback path)
             self._escalate(node, "no surface available: cannot drive the "
                                  "CUA loop")
             return True
         repairs = 0
         repair_note = ""
         while True:
-            outcome, detail = self._run_contract_once(node, surface,
-                                                      repair_note)
+            outcome, detail = self._run_contract_once(node, repair_note)
             if outcome == "blocked":
                 return False  # kernel-blocked forward autonomy — run()
                               # returns BLOCKED (no hot retry loop)
@@ -254,12 +333,64 @@ class AutonomyRuntime:
             self._kernel.requeue(node.node_id)   # FAILED → READY, same world
             repair_note = detail
 
-    def _run_contract_once(self, node: WorkflowNode, surface: str,
-                           repair_note: str) -> tuple[str, str]:
+    # ── A-01: contract-evidence → surface routing ──────────────────────
+    def _resolve_surface_for_contract(self, contract, node) -> str | None:
+        """Route an ActionContract to the surface its target evidence was
+        grounded on — never a ``surfaces[0]`` default.
+
+        Resolution order: (1) the contract's target-evidence handle via the
+        injected resolver; (2) the desired-state keys' variable evidence
+        handles; (3) the SINGLE-surface session case, which is routing-
+        trivial (one candidate — no ambiguity, hence not a fallback). With
+        several surfaces and no resolvable binding the answer is ``None``:
+        an honest routing failure (StructureInvalidated), never a guess."""
+        for ev in (contract.target_evidence or ()):
+            sid = self._resolve_handle(ev.surface.handle_id,
+                                       visible_label=ev.visible_label)
+            if sid is not None:
+                return sid
+        variables = self._variables()
+        for key in contract.desired_state:
+            sid = self._resolve_surface_for_key(key, variables)
+            if sid is not None:
+                return sid
+        if len(self._sync.surfaces) == 1:
+            return self._sync.surfaces[0]  # trivially unambiguous, not a guess
+        return None
+
+    def _resolve_surface_for_key(self, semantic_key: str, variables) -> str | None:
+        var = variables.get(semantic_key)
+        if var is None:
+            return None
+        for ev in (var.evidence or ()):
+            sid = self._resolve_handle(ev.surface.handle_id,
+                                       visible_label=ev.visible_label)
+            if sid is not None:
+                return sid
+        return None
+
+    def _resolve_handle(self, handle_id: str, *, visible_label: str = ""
+                        ) -> str | None:
+        if self._resolver is None:
+            return None
+        try:
+            return self._resolver.resolve_surface(
+                handle_id, visible_label=visible_label)
+        except Exception:
+            return None  # a broken resolver is a routing failure, not a crash
+
+    def _run_contract_once(self, node: WorkflowNode, repair_note: str
+                           ) -> tuple[str, str]:
         """One request → predict → act → finish → verify pass over the CURRENT
         visible world. Returns ``(outcome, detail)`` — outcome is
         ``"verify_failed"`` when the verdict failed and repair may still fix
         it; anything else ends the pass for this node.
+
+        A-01: the surface is resolved from the CONTRACT's target evidence
+        AFTER ``request_action`` hands the contract over — evidence grounded
+        on surface B drives surface B. An unresolvable binding in a
+        multi-surface session ⇒ honest fail (StructureInvalidated), never a
+        surface-0 default.
 
         Per runtime.md §8 (active-surface sync), EACH atomic GUI action folds
         a fresh observation into the kernel's OBSERVED plane and emits an
@@ -277,6 +408,18 @@ class AutonomyRuntime:
         action_id = handle["action_id"]
         request_epoch = handle["epoch"]
         contract = handle["contract"]
+        surface = self._resolve_surface_for_contract(contract, node)
+        if surface is None:
+            self._publish(RuntimeEventKind.STRUCTURE_INVALIDATED,
+                          node_id=node.node_id,
+                          detail=("action contract has no resolvable surface "
+                                  "binding (multi-surface session); honest "
+                                  "fail — no surface-0 fallback (A-01)"))
+            self._land_fail(node, action_id, False,
+                            "surface binding unresolved for contract "
+                            f"{contract.contract_id!r}")
+            return "stopped", ""
+        self._sync.set_active(surface)
         labels = self._labels()
         goal = self._ser.cua_goal(contract, labels)
         if repair_note:
@@ -301,7 +444,7 @@ class AutonomyRuntime:
         acts: list[str] = []          # provenance for the repair context
         is_repair = bool(repair_note)
         while actions < self._budgets.max_actions_per_contract:
-            if self._paused:
+            if self._paused or self._stopped:
                 return "stopped", ""
             if not self._budgets.within_model_budget(self._model_calls):
                 self._safe_pause(BUDGET_EXHAUSTED)
@@ -318,18 +461,27 @@ class AutonomyRuntime:
             except Exception as e:            # provider/parse failure
                 invalid += 1
                 self._model_calls += 1
-                self._ledger.record(ModelCallRecord(
-                    role=MODEL_ROLE_CUA,
-                    purpose=f"action_{node.node_id}_invalid{invalid}",
-                    model=self._model or "", ok=False, is_repair=is_repair,
-                    error=str(e)[:200],
-                    revision=self._kernel.task_state().revision))
+                # A-13: when the adapter owns its ledger (declared via
+                # ``records_own_ledger``) the row for THIS request already
+                # exists (the adapter records on every path, including the
+                # exception path) — appending another would double-count.
+                # Fakes without the declaration keep the runtime as their
+                # row owner (legacy contract).
+                if not getattr(self._cua, "records_own_ledger", False):
+                    self._ledger.record(ModelCallRecord(
+                        role=MODEL_ROLE_CUA,
+                        purpose=f"action_{node.node_id}_invalid{invalid}",
+                        model=self._model or "", ok=False,
+                        is_repair=is_repair, error=str(e)[:200],
+                        revision=self._kernel.task_state().revision,
+                        node_id=node.node_id, attempt=invalid))
                 if invalid >= self._budgets.max_invalid_predictions_per_contract:
                     self._safe_pause(BUDGET_EXHAUSTED)
                     return "stopped", ""
                 continue
             self._record_call(decision, f"action_{node.node_id}_{actions + 1}",
-                              is_repair=is_repair)
+                              is_repair=is_repair, node_id=node.node_id,
+                              attempt=actions + invalid + 1)
             if decision.kind is CUADecisionKind.FAIL:
                 self._land_fail(node, action_id, started,
                                 f"cua reported fail: {decision.reason}")
@@ -345,6 +497,11 @@ class AutonomyRuntime:
                     return "verify_failed", detail
                 return "committed", ""
             # ACT — one atomic GUI gesture through the kernel's gate
+            gesture = decision.action
+            if gesture is None:
+                # ACT kind guarantees a gesture (CUADecision validation);
+                # this belt-and-braces guard keeps the type contract local
+                return "stopped", ""
             if contract.requires_confirmation and self._kernel.epoch != request_epoch:
                 # governance moved between prediction and an irreversible
                 # act: the stale response must NOT land (runtime.md §4)
@@ -356,14 +513,13 @@ class AutonomyRuntime:
             elif self._kernel.epoch != request_epoch:
                 return "stopped", ""      # epoch bumped mid-contract — discard
             try:
-                self._substrate.act(surface, decision.action,
+                self._substrate.act(surface, gesture,
                                     epoch=str(self._kernel.epoch))
             except IrreversibleAction:
                 self._land_fail(node, action_id, started,
                                 "irreversible action unavailable on substrate")
                 return "stopped", ""
-            acts.append(decision.action.description
-                        or decision.action.kind)
+            acts.append(gesture.description or gesture.kind)
             actions += 1
             # PER-GESTURE FOLD (runtime.md §8): act → fresh observe → extract
             # → fold into the OBSERVED plane → runtime event + visual
@@ -453,11 +609,26 @@ class AutonomyRuntime:
 
     # ── VERIFY / control / loop nodes ─────────────────────────────────────
     def _advance_verify(self, node: WorkflowNode) -> None:
-        surface = self._sync.surfaces[0] if self._sync.surfaces else None
-        obs = self._sync.observe_active(surface) if surface else None
+        surface = self._verify_surface(node)
+        if surface is None:
+            # A-01: a VERIFY node whose condition keys carry no resolvable
+            # binding (multi-surface session) cannot be honestly judged —
+            # land a failed verdict + StructureInvalidated, never verify
+            # against a guessed surface-0 world.
+            self._publish(RuntimeEventKind.STRUCTURE_INVALIDATED,
+                          node_id=node.node_id,
+                          detail=("verify node has no resolvable surface "
+                                  "binding for its condition keys; honest "
+                                  "fail — no surface-0 fallback (A-01)"))
+            self._kernel.land_verification(VerificationResult(
+                node_id=node.node_id, epoch=self._kernel.epoch,
+                passed=False, action_id=None,
+                detail="surface binding unresolved for verification"))
+            return
+        obs = self._sync.observe_active(surface)
         before = self._kernel.task_state().observed_values()
         try:
-            values = self._ext.extract(obs, self._variables()) if obs else ()
+            values = self._ext.extract(obs, self._variables())
         except StructureInvalidation as e:
             self._publish(RuntimeEventKind.STRUCTURE_INVALIDATED,
                           node_id=node.node_id, detail=str(e))
@@ -475,6 +646,28 @@ class AutonomyRuntime:
             desired=state.desired_values(), observation=obs,
             action_id=None, epoch=self._kernel.epoch)
         self._kernel.land_verification(vr)
+
+    def _verify_surface(self, node: WorkflowNode) -> str | None:
+        """A-01: the surface a VERIFY node's condition is grounded on —
+        parsed from its ``key == value`` predicate; then the variables'
+        evidence handles; then the trivial single-surface case. ``None`` in
+        a multi-surface session with no resolvable binding (honest fail)."""
+        variables = self._variables()
+        pred = (node.verification or "").strip()
+        if "==" in pred:
+            key = pred.partition("==")[0].strip()
+            sid = self._resolve_surface_for_key(key, variables)
+            if sid is not None:
+                return sid
+        for var in variables.values():
+            for ev in (var.evidence or ()):
+                sid = self._resolve_handle(ev.surface.handle_id,
+                                           visible_label=ev.visible_label)
+                if sid is not None:
+                    return sid
+        if len(self._sync.surfaces) == 1:
+            return self._sync.surfaces[0]  # trivially unambiguous
+        return None
 
     def _advance_control(self, node: WorkflowNode) -> None:
         self._kernel.advance_control(node.node_id)
@@ -578,14 +771,30 @@ class AutonomyRuntime:
         self._publish(RuntimeEventKind.BUDGET_EXHAUSTED, detail=reason)
 
     def _record_call(self, decision: CUADecision, purpose: str, *,
-                     is_repair: bool = False) -> None:
+                     is_repair: bool = False,
+                     node_id: str = "", attempt: int = 0) -> None:
+        """A-13 single-owner accounting. When the decision carries a
+        ``request_id`` the CUA adapter already landed the provider-request
+        row — we ANNOTATE it with execution context instead of appending a
+        second row (C-2: 1 provider request = 1 ledger row). Decisions
+        without a request_id (test fakes, adapters that do not own their
+        ledger) keep the legacy record path — for them the runtime IS the
+        row owner."""
         self._model_calls += 1
+        if decision.request_id and callable(
+                getattr(self._ledger, "annotate", None)):
+            self._ledger.annotate(
+                decision.request_id, purpose=purpose, node_id=node_id,
+                attempt=attempt, is_repair=is_repair,
+                revision=self._kernel.task_state().revision)
+            return
         self._ledger.record(ModelCallRecord(
             role=MODEL_ROLE_CUA, purpose=purpose,
             model=self._model or "",
             ok=decision.kind is not CUADecisionKind.FAIL,
             is_repair=is_repair,
-            revision=self._kernel.task_state().revision))
+            revision=self._kernel.task_state().revision,
+            node_id=node_id, attempt=attempt))
 
     def _publish(self, kind: RuntimeEventKind, *, node_id: str = "",
                  surface_id: str = "", artifact_ref: str = "",

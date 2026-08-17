@@ -67,32 +67,54 @@ class CompensationExecutor:
         used, self._calls = self._calls, 0
         return used
 
-    def execute(self, plan: CompensationPlan, *, surface_id: str,
+    def execute(self, plan: CompensationPlan, *,
+                surface_for_entry: dict[str, str] | None = None,
                 model: str | None = None,
                 model_calls_base: int = 0) -> str:
         """Land every reversible entry; return the kernel disposition
-        (``complete`` / ``partial`` / ``failed`` / ``discarded``)."""
+        (``complete`` / ``partial`` / ``failed`` / ``discarded``).
+
+        A-01: ``surface_for_entry`` maps ``node_id → surface_id`` — each
+        compensation entry lands on the surface that owns its binding (the
+        runtime resolved it from the variable's evidence handle). Entries
+        WITHOUT a mapping are honestly not-compensated: a routing failure
+        must never become a wrong-surface GUI write."""
         self._events = []
         self._calls = 0
+        surface_for_entry = surface_for_entry or {}
         variables = {v.semantic_key: v
                      for v in self._kernel.task_state().variables}
         labels = {v.semantic_key: v.label for v in variables.values()}
         outcomes: list[CompensationEntryResult] = []
         for entry in plan.entries:
+            sid = surface_for_entry.get(entry.node_id)
+            if sid is None:
+                outcomes.append(CompensationEntryResult(
+                    node_id=entry.node_id, semantic_key=entry.semantic_key,
+                    final_observed=entry.from_observed, compensated=False))
+                self._events.append(RuntimeEvent(
+                    kind=RuntimeEventKind.COMPENSATION_ENTRY,
+                    epoch=plan.epoch, node_id=entry.node_id,
+                    detail=(f"{entry.semantic_key}=not-compensated "
+                            "(no resolvable surface binding; A-01)"),
+                    payload={"semantic_key": entry.semantic_key,
+                             "final_observed": entry.from_observed}))
+                continue
             outcome = self._execute_entry(
-                plan, entry, surface_id, variables, labels, model,
+                plan, entry, sid, variables, labels, model,
                 model_calls_base)
             outcomes.append(outcome)
             self._events.append(RuntimeEvent(
                 kind=RuntimeEventKind.COMPENSATION_ENTRY, epoch=plan.epoch,
-                node_id=entry.node_id, surface_id=surface_id,
+                node_id=entry.node_id, surface_id=sid,
                 detail=f"{entry.semantic_key}="
                        f"{'compensated' if outcome.compensated else 'not-compensated'}",
                 payload={"semantic_key": entry.semantic_key,
                          "final_observed": outcome.final_observed}))
         result = CompensationResult.for_plan(
             plan, epoch=plan.epoch, outcomes=outcomes,
-            detail=f"executed {len(outcomes)} entries on {surface_id}")
+            detail=(f"executed {len(outcomes)} entries "
+                    f"({sum(1 for s in surface_for_entry.values())} routed"))
         return self._kernel.record_compensation_result(plan.plan_id, result)
 
     def _execute_entry(self, plan: CompensationPlan, entry,
@@ -125,15 +147,19 @@ class CompensationExecutor:
             except Exception as e:          # provider / parse failure — same
                 # honest accounting as the forward loop (runtime.md §5):
                 # a model call that produced NO usable prediction, bounded
-                # by the small invalid ceiling, never a silent crash
+                # by the small invalid ceiling, never a silent crash.
+                # A-13: the adapter may already own the row
+                # (``records_own_ledger``) — never double-count.
                 invalid += 1
                 self._calls += 1
-                self._ledger.record(ModelCallRecord(
-                    role=MODEL_ROLE_CUA,
-                    purpose=f"compensation_{entry.node_id}_invalid{invalid}",
-                    model=model or "", ok=False, is_repair=False,
-                    error=str(e)[:200],
-                    revision=self._kernel.task_state().revision))
+                if not getattr(self._cua, "records_own_ledger", False):
+                    self._ledger.record(ModelCallRecord(
+                        role=MODEL_ROLE_CUA,
+                        purpose=f"compensation_{entry.node_id}_invalid{invalid}",
+                        model=model or "", ok=False, is_repair=False,
+                        error=str(e)[:200],
+                        revision=self._kernel.task_state().revision,
+                        node_id=entry.node_id, attempt=invalid))
                 if invalid >= self._budgets.max_invalid_predictions_per_contract:
                     break
                 continue
@@ -188,7 +214,17 @@ class CompensationExecutor:
     def _record_call(self, decision, node_id: str, model: str | None) -> None:
         ok = decision.kind is not CUADecisionKind.FAIL
         self._calls += 1
+        # A-13 single-owner accounting: annotate the adapter's row when the
+        # decision carries its request_id; fakes keep the runtime as owner.
+        if decision.request_id and callable(
+                getattr(self._ledger, "annotate", None)):
+            self._ledger.annotate(
+                decision.request_id, purpose=f"compensation_{node_id}",
+                node_id=node_id, attempt=self._calls, is_repair=False,
+                revision=self._kernel.task_state().revision)
+            return
         self._ledger.record(ModelCallRecord(
             role=MODEL_ROLE_CUA, purpose=f"compensation_{node_id}",
             model=model or "", ok=ok, is_repair=False,
-            revision=self._kernel.task_state().revision))
+            revision=self._kernel.task_state().revision,
+            node_id=node_id))

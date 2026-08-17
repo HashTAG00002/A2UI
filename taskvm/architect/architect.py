@@ -493,6 +493,25 @@ class TaskArchitect:
             label_to_id[label] = next_id()
             parsed_nodes.append(rn)
 
+        # A-01 (handle provenance): build the compiler-minted handle index
+        # from the observed variables' evidence — a Task Architect action
+        # targeting a label the State Compiler already grounded MUST reuse
+        # that same handle (same opaque id), so the surface binding chain
+        # compiler → contract → runtime resolver stays unbroken. New labels
+        # the compiler never saw get fresh architect handles (ha…) — those
+        # carry no surface provenance and rely on the runtime's unambiguous
+        # single-surface case or fail honestly in multi-surface sessions.
+        handle_by_label: dict[str, SurfaceHandle] = {}
+        for v in variables:
+            for ev in (v.evidence or ()):
+                if ev.visible_label and ev.visible_label not in handle_by_label:
+                    handle_by_label[ev.visible_label] = ev.surface
+
+        def _action_handle(label_str: str, seq: int) -> SurfaceHandle:
+            reused = handle_by_label.get(label_str)
+            return reused if reused is not None else SurfaceHandle(
+                handle_id=f"ha{seq:03d}")
+
         def ids_of(labels, owner: str) -> tuple[str, ...]:
             out = []
             for lb in labels or []:
@@ -538,7 +557,8 @@ class TaskArchitect:
                         f"list of visible labels")
                 evidence = tuple(
                     SurfaceEvidence(
-                        surface=SurfaceHandle(handle_id=f"ha{e_i:03d}"),
+                        surface=_action_handle(
+                            str(s).strip(), e_i + id_offset),
                         visible_label=str(s))
                     for e_i, s in enumerate(ev, start=1)
                     if str(s).strip())
