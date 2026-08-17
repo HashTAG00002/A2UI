@@ -26,15 +26,22 @@ PYTHONPATH=. python -m taskvm_bench.evaluation.cli report --input eval_results/<
 
 产物: `eval_results/<run-id>/report.json`（机器可读 + per-trial `trials/*.json`）与 `report.md`. `eval_results/` 不进 git.
 
-## 3. 公平合同 (所有条件共享)
+## 3. 公平合同 (结构性对齐, structurally aligned)
 
 | 轴 | 共享方式 |
 |---|---|
 | 任务 | 同一 `TaskSpec` (seed/goal/success/protected) |
 | CUA 能力 | 同一 `TemplateCUA` 确定性模板 (可见文本 → 动作) |
-| 模型预算 | 同一 `TrialBudget` (`BUDGET_PRESETS[\"paper\"]`) |
+| 预算 | 同一 `TrialBudget` 对象 (`BUDGET_PRESETS["paper"]`) — 结构性对齐, 见下方说明 |
 | 观测 | 同一 `WorldSubstrate` 协议 (可见文本, 无内部 ID) |
 | 判卷 | 同一隐藏 `Oracle` (只读世界真值, 只在 trial 结束打分) |
+
+预算公平性边界 (A-08 改口): 当前六条件为 **structurally aligned under a shared
+`TrialBudget` object** —— 同一任务、同 seed、同一预算对象; 但该 dataclass 混装了
+各条件分别消耗的上限轴 (direct/planner 循环烧 `max_turns=64`, taskvm 治理轮烧
+`max_rounds=24`, 模型调用上限 `max_model_calls_per_task=512`, 见
+`taskvm_bench/evaluation/harness.py::TrialBudget`)。统一的 provider-request /
+GUI-action / wall-clock 硬上限属于后续 freeze 阶段 (RM-1.0) 工作, 当前不声称已实现。
 
 ## 4. 条件 (registry 冻结)
 
@@ -50,6 +57,12 @@ PYTHONPATH=. python -m taskvm_bench.evaluation.cli report --input eval_results/<
 Family 覆盖: SEQUENCE / FANOUT_FANIN / BOUNDED_LOOP / CROSS_APP / GOAL_PATCH / LOCAL_PATCH / INTERRUPTION / CONFLICT / ROLLBACK / UI_DRIFT / PARTIAL_FAILURE / IRREVERSIBLE.
 Split 覆盖: ID / SURFACE_HOLDOUT (venues) / OPERATION_HOLDOUT (rsvp) / CROSS_PRODUCT / SEED_NOISE.
 合同锁定在 `tests/benchmark/test_taxonomy.py` (含 holdout 诚实性: ID 任务零 venues/rsvp 泄漏).
+
+Holdout 性质 (A-09): SURFACE_HOLDOUT / OPERATION_HOLDOUT 等 split 属于
+**normalized semantic OOD (归一化语义 OOD)** —— 只换未见 key / 未见操作语义 /
+未见 surface label, world 对所有 surface 统一渲染 `k=v` 文本
+(`taskvm_bench/evaluation/world.py::visible_text`), 不测试新 DOM 层级 /
+视觉布局 / viewport / 主题变化; 真正 visual-reskin holdout 属于后续 RM-1.0.
 
 ## 6. 报告指标
 

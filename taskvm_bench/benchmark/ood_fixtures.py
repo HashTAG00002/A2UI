@@ -1,16 +1,20 @@
-"""OOD (held-out) canonical task graphs — the W4 kill-test ground-truth (verifier-only).
+"""Normalized semantic OOD (held-out) canonical task graphs — the W4
+kill-test ground-truth (verifier-only).
 
 Holds the GT binding for the two held-out OOD tasks the W4 kill-test measures:
   1. ``send_launch_announcement`` — a **truly-unseen app** task (Mail). The model
      has never seen the ``mail`` app, its ``message`` entity kind, its
      ``data-mail-id`` DOM attribute (the A2UI compiler prompt names only
      calendar/taskboard/drive id attrs), or its ``set_state`` operator (which
-     mutates a finite-state field, not a scalar). Tests raw OOD generalization.
-  2. ``outlook_release_reschedule`` — a **reskin** task (Outlook_Cal, a renamed
-     calendar). Same conceptual operation as ``release_reschedule`` (move the
-     release meeting + sync dependent task deadlines) but on a renamed
-     substrate (appointment/scheduled_for/reschedule_appointment). Tests
-     substrate-independence: same op, new skin.
+     mutates a finite-state field, not a scalar). Tests normalized semantic
+     OOD generalization: unseen entity kind / operator / id-attr vocabulary
+     while the world still renders the same uniform ``k=v`` text rows.
+  2. ``outlook_release_reschedule`` — a **semantic reskin** task (Outlook_Cal,
+     a renamed calendar). Same conceptual operation as ``release_reschedule``
+     (move the release meeting + sync dependent task deadlines) but on a
+     renamed substrate (appointment/scheduled_for/reschedule_appointment).
+     Tests substrate-independence at the semantic level: same op, renamed
+     keys/labels — the rendering itself stays uniform ``k=v`` text.
 
 **No-leak boundary (load-bearing)**: same as ``fixtures.py`` — imported ONLY by
 the verifier path + the orchestrator (``evaluation/run_ood_recon`` /
@@ -21,8 +25,16 @@ These are MINIMAL recon-grade fixtures (2 tasks, ~2-3 bindings each) — enough 
 get the first real OOD binding-F1 number today (handoff §1: the B-class OOD
 recon is the highest-priority signal, and a 1-2 task / 3-sample probe suffices
 to decide go/no-go before scaling to the full 40-template/800-instance bench).
-The full benchmark generator (``benchmark/generator.py``) scales these into the
-40-template/800-instance/OOD~20% bench later in the week.
+The full benchmark generator (``benchmark/generator.py``) scales these into
+the 40-template/800-instance/~20%-normalized-semantic-OOD bench later in the
+week.
+
+Scope note (A-09): every task in this module is *normalized semantic OOD* —
+the held-out axes are unseen keys / unseen operator semantics / unseen
+surface labels, while the world renders every surface as the same uniform
+``k=v`` text rows (``taskvm_bench/evaluation/world.py::visible_text``).
+These fixtures do NOT test new DOM hierarchies, visual layouts, viewports or
+theme changes; a true visual-reskin holdout is RM-1.0 work.
 """
 from __future__ import annotations
 
@@ -73,8 +85,9 @@ SEND_LAUNCH_ANNOUNCEMENT = CanonicalTaskGraph(
     description="User sends the scheduled launch announcement (M1 scheduled→sent) "
                 "AND the draft reminder (M3 draft→sent) now — both via the UNSEEN "
                 "mail app's set_state operator. M2 (weekly digest) untouched. "
-                "OOD probe: can the compiler discover bindings on an app whose "
-                "kind/operator/id-attr it has never seen? "
+                "OOD probe (normalized semantic): can the compiler discover bindings "
+                "on an app whose kind/operator/id-attr it has never seen (world "
+                "rendering stays uniform k=v text)? "
                 "Note: field-level non-interference (only M1/M3.state changes, "
                 "not their other fields) is NOT asserted by the W1 non-interference "
                 "checker (it checks whole-entity-unchanged for the set); an FP "
@@ -133,8 +146,10 @@ OUTLOOK_RELEASE_RESCHEDULE = CanonicalTaskGraph(
     description="User moves release_date 8/14→8/18; Outlook_Cal appointment A1 "
                 "moves (via reschedule_appointment — the reskinned move_event) + "
                 "TaskBoard T1/T2 deadlines sync (seen app). A2/A7/T3 untouched. "
-                "OOD probe: substrate-independence — same conceptual op under a "
-                "renamed skin (appointment/scheduled_for), plus cross-app binding.",
+                "OOD probe (normalized semantic): substrate-independence at the "
+                "semantic level — same conceptual op under renamed keys/labels "
+                "(appointment/scheduled_for; rendering stays uniform k=v text), "
+                "plus cross-app binding.",
 )
 
 
@@ -198,7 +213,8 @@ OOD_TASKS: dict[str, CanonicalTaskGraph] = {
 
 @dataclass
 class OODCategory:
-    """Which OOD category a held-out task belongs to (for the F1 breakdown)."""
+    """Which normalized-semantic-OOD category a held-out task belongs to
+    (for the F1 breakdown)."""
     task_id: str
     category: str        # "unseen_app" | "reskin"
     description: str

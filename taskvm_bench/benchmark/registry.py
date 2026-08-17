@@ -1,13 +1,19 @@
 """taskvm_bench.benchmark.registry — suites and system conditions.
 
 The four primary system conditions (Agent F brief §7) answer ONE scientific
-question: *under the same base model/CUA capability, the same tasks and the
-same budgets, does the TaskVM harness improve task completion,
+question: *under the same base model/CUA capability, the same tasks and a
+shared budget object, does the TaskVM harness improve task completion,
 controllability, recoverability and open-world behaviour over direct agent
 execution?*
 
-Condition fairness contract (handoff 07): same task, same CUA backend, same
-max budgets — only the harness differs.
+Condition fairness contract (handoff 07, reworded by A-08): the six
+conditions are **structurally aligned under a shared ``TrialBudget``
+object** — same task, same seed, same budget object; only the harness
+differs. NOTE: that dataclass mixes axes the conditions consume separately
+(direct/planner burn ``max_turns``; taskvm burns ``max_rounds`` plus the
+runtime model-call caps — see ``evaluation/harness.py::TrialBudget``).
+Unified provider-request / GUI-action / wall-clock hard caps are RM-1.0
+freeze work and are NOT claimed today.
 
 The two ablations are deliberately limited to what answers a contribution
 claim (brief §8: 不能回答论文核心研究问题的 ablation 不做):

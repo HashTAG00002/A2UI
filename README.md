@@ -70,14 +70,26 @@ pip install playwright && playwright install chromium   # 浏览器测试
 
 ---
 
-## 用户 Workflow
+## 用户 Workflow（当前 demo 的真实行为）
 
-1. **启动**：`./scripts/dev.sh` → 5 个 app + projection UI 就绪
-2. **创建会话**：POST `/api/sessions` → 获得 session_id
-3. **输入目标**：通过 UI 或 API 提交自然语言任务目标
-4. **State Compiler**：architect 从可见 GUI 观测编译任务架构（一次模型调用）
-5. **自治推进**：`/api/sessions/<sid>/governance/start` → runtime bounded loop
-6. **实时投影**：SSE `/api/sessions/<sid>/events` 推送状态更新
+1. **启动**：`./scripts/dev.sh` → 5 个 builtin app + projection UI 就绪；demo
+   会话由 composition（`taskvm/workspace_ui/demo.py` → `compose_task_runtime`）
+   在启动时组装注册，一次绑定**一个** builtin app（`TASKVM_DEMO_APP`，默认
+   `calendar`；可选 calendar/taskboard/drive/mail/outlook_cal）
+2. **会话查询**：GET `/api/sessions` 仅列出已注册会话（无 POST 创建路由；
+   session 注册只发生在 composition 启动阶段）
+3. **任务目标与计划**：demo 的 goal 与 kernel plan 是手工 fixture（固定目标
+   「把日历事件『产品发布』改期到 2026-08-18」、任务变量 `event_date`
+   2026-08-14→2026-08-18、固定 2 节点 plan），**不经** State Compiler /
+   Task Architect；自然语言 goal → StateCompiler → TaskArchitect → runtime 的
+   full composition（taskvm-real-full）将在 RM-0.B 阶段补齐
+4. **CUA 模型**：默认在线模式为真实 `HttpCUAModel`（`OPENAI_BASE_URL` /
+   `OPENAI_API_KEY` / `TASKVM_MODEL`；一次 predict = 一次 provider 请求 = 一条
+   ledger 记录）；`TASKVM_DEMO_OFFLINE` / `--offline` 切换为确定性 placeholder，
+   诚实 FAIL，不声称自治完成
+5. **自治推进**：POST `/api/sessions/<sid>/governance/start` → runtime bounded loop
+6. **实时投影**：SSE 流是 GET `/api/sessions/<sid>/sse`；GET
+   `/api/sessions/<sid>/events` 是分页 JSON 事件日志（`offset`/`limit`），不是 SSE
 7. **治理操作**：
    - LocalPatch：修改局部目标
    - GoalPatch：重构任务终点（旧 in-flight response 自动失效）
@@ -112,6 +124,10 @@ python -m taskvm_bench.evaluation.cli report --input eval_results/<run-id> --for
 - fakes 不是真模型——数字回答的是"结构问题"，不是任何具体大模型的成绩。
 - world 是确定性模拟考场，不是 MobileGym/OSWorld。
 - oracle 上界是诊断量，永不进 headline。
+- open-world/holdout split 是 **normalized semantic OOD（归一化语义 OOD）**：只换
+  未见 key / 未见操作语义 / 未见 surface label，world 对所有 surface 统一渲染
+  `k=v` 文本；不测试新 DOM 层级 / 视觉布局 / viewport / 主题变化——真正
+  visual-reskin holdout 属于后续 RM-1.0。
 
 ---
 
