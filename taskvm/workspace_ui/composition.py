@@ -41,15 +41,20 @@ URLs/config defaults). Nothing under ``taskvm/projection`` or
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping
+import uuid
+from dataclasses import replace as _replace
+from typing import Any, Mapping, cast
 
 from taskvm.architect import (
     ActionContractSerializer, HttpModelPort, ModelCallLedger,
     ModelCallRecord, MODEL_ROLE_CUA, assert_prompt_clean,
 )
 from taskvm.architect.observation import CompilerObservationView, VisibleRegion
+from taskvm.architect.port import ModelPort
 from taskvm.runtime.bootstrap import RuntimePorts, compose_runtime
-from taskvm.runtime.ports import CUADecision, CUADecisionKind
+from taskvm.runtime.ports import (
+    CallLedger, CUADecision, CUADecisionKind,
+)
 from taskvm.substrate import GuiAction, Observation, substrate_registry
 from taskvm.verifier.visible import VisibleVerifier
 
@@ -71,16 +76,38 @@ _CUA_SYSTEM_PROMPT = (
 class HttpCUAModel:
     """``CUAModel`` port over the architect ``HttpModelPort``.
 
+    A-13 single-owner ledger: this adapter declares
+    ``records_own_ledger = True`` — it mints a unique ``request_id`` per
+    REAL provider request and lands EXACTLY ONE ledger row per request
+    on every path (success / unparseable reply / transport exception),
+    carrying that ``request_id``. Decisions hand the ``request_id`` back
+    so the runtime ANNOTATES the row (node/attempt/repair context)
+    instead of appending a second row (C-2: 1 provider request = 1
+    ledger row). The pre-flight no-leak check runs BEFORE any provider
+    request — a prompt leak issues no request and lands no row (rows
+    count provider requests, not harness bugs).
+
     One ``predict_action`` = one provider request = one ledger record
     (C-2 discipline). The outgoing prompt passes the no-leak gate; a
     parse failure is an honest ``fail`` decision — the runtime's repair
     loop owns any re-ask.
     """
 
-    def __init__(self, port: HttpModelPort | None = None,
+    #: A-13 promise: this adapter owns its ledger rows (see class docstring)
+    records_own_ledger = True
+
+    def __init__(self, port: ModelPort | None = None,
                  ledger: ModelCallLedger | None = None) -> None:
         self._port = port or HttpModelPort()
         self._ledger = ledger
+        self._requests = 0
+
+    @property
+    def request_count(self) -> int:
+        """REAL provider requests issued through this adapter (A-13 test
+        invariant: this must equal the number of ledger rows the adapter
+        owns — and the runtime must add none of its own)."""
+        return self._requests
 
     def predict_action(self, *, goal: str, observation: Observation,
                        labels: Mapping[str, str] | None = None,
@@ -94,38 +121,46 @@ class HttpCUAModel:
             assert_prompt_clean(_CUA_SYSTEM_PROMPT + "\n" + user,
                                 what="cua prompt")
         except Exception as e:  # a leak is a harness bug — fail honestly
-            self._record(ok=False, error=f"prompt leak: {e}", model=model)
+            # No provider request was issued, so NO ledger row (C-2: rows
+            # count real provider requests only — A-13).
             return CUADecision(kind=CUADecisionKind.FAIL,
                                reason="指令生成内部错误，已安全终止")
+        request_id = self._mint_request_id()
         try:
             reply = self._port.complete_json(system=_CUA_SYSTEM_PROMPT,
                                              user=user, model=model)
         except Exception as e:
-            self._record(ok=False, error=str(e), model=model)
+            self._record(request_id, ok=False, error=str(e), model=model)
             raise
         parsed = reply.parsed if isinstance(reply.parsed, dict) else None
         if parsed is None:
-            self._record(ok=False, error="unparseable CUA reply",
+            self._record(request_id, ok=False, error="unparseable CUA reply",
                          model=model, reply=reply)
             return CUADecision(kind=CUADecisionKind.FAIL,
                                reason="模型返回无法解析",
-                               raw=reply.raw[:200])
+                               raw=reply.raw[:200], request_id=request_id)
         decision = _decision_from_json(parsed)
-        self._record(ok=decision.kind is not CUADecisionKind.FAIL,
+        self._record(request_id, ok=decision.kind is not CUADecisionKind.FAIL,
                      model=model, reply=reply)
-        return decision
+        return _replace(decision, request_id=request_id)
 
     # ── ledger ───────────────────────────────────────────────────────────
-    def _record(self, *, ok: bool, model: str | None, error: str = "",
-                reply: Any = None) -> None:
+    def _mint_request_id(self) -> str:
+        self._requests += 1
+        return f"cua-{uuid.uuid4().hex[:16]}"
+
+    def _record(self, request_id: str, *, ok: bool, model: str | None,
+                error: str = "", reply: Any = None) -> None:
         if self._ledger is None:
             return
         self._ledger.record(ModelCallRecord(
             role=MODEL_ROLE_CUA, purpose="cua.predict_action",
-            model=model or self._port.default_model, ok=ok,
+            model=model or str(getattr(self._port, "default_model", "")
+                               or ""),
+            ok=ok,
             prompt_tokens=getattr(reply, "prompt_tokens", None),
             completion_tokens=getattr(reply, "completion_tokens", None),
-            error=error))
+            error=error, request_id=request_id))
 
 
 def _decision_from_json(parsed: Mapping[str, Any]) -> CUADecision:
@@ -207,14 +242,20 @@ class VisibleLabelExtractor:
 
 # ── the bundle builder — the ONE compose_runtime call site ────────────────
 
-def build_runtime_ports(*, model_port: HttpModelPort | None = None,
+def build_runtime_ports(*, model_port: ModelPort | None = None,
                         ledger: ModelCallLedger | None = None,
                         cua_model: Any = None,
                         extractor: Any = None,
                         ) -> RuntimePorts:
     """Assemble the five injected ports. Pass ``ledger`` to SHARE one
     instance with the architect (the unified call report); pass
-    ``cua_model``/``extractor`` to override with test fakes."""
+    ``cua_model``/``extractor`` to override with test fakes.
+
+    The ``cast`` below documents the seam's duck-typing contract:
+    ``architect.ModelCallLedger`` and ``runtime.ports.CallLedger`` declare
+    field-for-field identical ``ModelCallRecord``s (two parallel frozen
+    dataclasses — a nominal-type checker cannot see that identity, the
+    ledger only string-validates ``role`` at runtime)."""
     ledger = ledger or ModelCallLedger()
     return RuntimePorts(
         serializer=ActionContractSerializer(),
@@ -222,7 +263,7 @@ def build_runtime_ports(*, model_port: HttpModelPort | None = None,
             port=model_port or HttpModelPort(), ledger=ledger),
         extractor=extractor or VisibleLabelExtractor(),
         verifier=VisibleVerifier(),
-        ledger=ledger)
+        ledger=cast(CallLedger, ledger))
 
 
 def compose_task_runtime(kernel: Any, *, host: str = "localhost",
