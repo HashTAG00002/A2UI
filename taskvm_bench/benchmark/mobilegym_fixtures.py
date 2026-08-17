@@ -2,7 +2,8 @@
 
 Holds the GT binding for the ONE demo task that proves the TaskVM four-step arc
 (bind → write → verify → rollback) on a new substrate (MobileGym, a
-Playwright-driven React phone sim) accessed via ``harness/mobilegym_bridge.py``.
+Playwright-driven React phone sim) accessed via
+``taskvm/substrate/mobilegym/bridge.py``.
 
   ``top3_expense_to_wechat`` — a port of MobileGym's
   ``bench_env/task/crossapp_commerce/defs/Top3ExpenseSummaryToWechat.py``:
@@ -91,8 +92,14 @@ TOP3_EXPENSE_TO_WECHAT = CanonicalTaskGraph(
     },
     description="MobileGym demo: read alipay top-3 expenses (30d window) → send "
                 "a summary text to the wechat 黄勇 chat via send_message. 2 apps "
-                "(alipay read-only → wechat write), 1 write surface. Rollback is "
-                "snapshot-based (bridge set_state restore), not a field-setter inverse.",
+                "(alipay read-only → wechat write), 1 write surface. send_message "
+                "is irreversible: rollback is a REAL GUI compensation attempt "
+                "(bridge gui_write_async undo) whose verdict is honestly 409 "
+                "+ partial (the wechat UI has no delete/recall path, append-only "
+                "messages) — there is NO hidden set_state fallback; on the legacy "
+                "semantic route, a bridge without a CUA loop honestly refuses "
+                "(501). A meaningful checkpoint must sit BEFORE the irreversible "
+                "send (rolling back past a send is honest 409).",
 )
 
 
