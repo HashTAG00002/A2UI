@@ -10,10 +10,20 @@ Usage (handoff 07):
     python -m taskvm_bench.evaluation.cli report --input eval_results/<run_id>
     python -m taskvm_bench.evaluation.cli compare --config configs/paper_matrix.json
 
-No phase/gate vocabulary, one report schema, one runner. The
-``--substrate`` flag accepts only ``world`` today: builtin_web is an
-honest pending dependency (substrate.md transitional debt register),
-never a silent stub.
+RM-0.B (B-08): ``--substrate mobilegym`` routes to the MobileGym
+factory over the real bridge/L1 oracle stack. Seed semantics are TWO
+different concepts and are never conflated (re-prompt §B-05):
+
+* ``--seeds``    — deterministic-matrix replicates for the builtin
+                   ``world`` runner (backwards compatible, unchanged);
+* ``--env-seed`` — the MobileGym ENVIRONMENT seed (world initialisation);
+* ``--samples``  — real-model sample replicates (stochastic model
+                   retries of the SAME environment).
+
+The mobilegym branch passes the ``--condition`` string through VERBATIM
+(no registry lookup): the real-model condition definitions (e.g.
+``taskvm-real-full``) land with B-06 and this CLI treats them as opaque
+identifiers, never re-defining them here.
 """
 from __future__ import annotations
 
@@ -21,6 +31,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from typing import Sequence
 
 from taskvm_bench.benchmark.registry import (
@@ -67,6 +78,8 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    if args.substrate == "mobilegym":
+        return _run_mobilegym(args)
     tasks = _tasks_from(args)
     conditions = _conditions_from(args.condition)
     budget = BUDGET_PRESETS[args.budget]
@@ -82,6 +95,107 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"\nrun dir: {run_dir} "
           f"(report.json / report.md / trials/*.json)")
     return 0
+
+
+# ── the mobilegym branch (B-08) ─────────────────────────────────────────
+
+def _run_mobilegym(args: argparse.Namespace) -> int:
+    """RM-0.B MobileGym runs: the factory chain over the real bridge.
+
+    The ``--condition`` string is passed through VERBATIM (B-06 owns the
+    real-model condition definitions — nothing is re-defined here). Only
+    the ``rm-smoke`` plumbing suite / explicit ``--task`` fixture ids are
+    accepted: RM-1.0 open-scenario task design is NOT this wave.
+    """
+    from taskvm_bench.benchmark.mobilegym_fixtures import (
+        TOP3_EXPENSE_TO_WECHAT, all_mobilegym_tasks,
+    )
+    from taskvm_bench.evaluation.mobilegym_factory import (
+        MobileGymFactory, MobileGymTrialSpec,
+    )
+    from taskvm_bench.evaluation.results import RunDirectory
+
+    if args.task:
+        fixtures = [all_mobilegym_tasks()[t] for t in args.task]
+    elif args.suite in ("rm-smoke", None):
+        # the plumbing smoke: the SIMPLEST existing fixture (one binding,
+        # one write surface) — no new task design in RM-0.
+        fixtures = [TOP3_EXPENSE_TO_WECHAT]
+    else:
+        raise SystemExit(
+            f"suite {args.suite!r} is not defined for --substrate "
+            f"mobilegym; use --suite rm-smoke or --task <mobilegym "
+            f"fixture id> (known: {sorted(all_mobilegym_tasks())})")
+
+    condition = (args.condition or ["taskvm-real-full"])[0]
+    samples = args.samples if args.samples is not None else 1
+
+    # the projection public API server the UserOpDriver talks to (B-04:
+    # the bench plane's ONLY handle on the session). Served BEFORE the
+    # trials: the store is empty until bootstrap_real_full registers the
+    # per-trial session inside run_trial — the first client call happens
+    # only at driver time, after registration.
+    from taskvm.projection.store import ProjectionSessionStore
+    from taskvm.workspace_ui import serve as serve_projection
+    from taskvm_bench.evaluation.projection_client import ProjectionClient
+    from taskvm_bench.evaluation.user_ops import UserOpDriver
+    store = ProjectionSessionStore()
+    projection_port = _serve_projection(serve_projection(store),
+                                         args.projection_port)
+    base_url = f"http://127.0.0.1:{projection_port}"
+
+    run_id = args.run_id or ("rm-mobilegym-" + time.strftime("%Y%m%d-%H%M%S"))
+    run_dir = RunDirectory(run_id, root=args.out)
+    factory = MobileGymFactory(
+        bridge_port=args.bridge_port, connect_only=not args.spawn_bridge)
+    trial_manifests: list[dict] = []
+    try:
+        for fixture in fixtures:
+            for sample in range(samples):
+                spec = MobileGymTrialSpec(
+                    fixture=fixture, environment_seed=args.env_seed,
+                    sample_index=sample, condition=condition,
+                    model=args.model)
+                print(f"trial {fixture.task_id}/e{args.env_seed}"
+                      f"/s{sample} …", file=sys.stderr)
+                driver = UserOpDriver(
+                    ProjectionClient(base_url, spec.resolve_sid()))
+                record = factory.run_trial(spec, driver=driver, store=store)
+                run_dir.write_trial(record, sample)
+                trial_manifests.append(factory.manifest_fields(spec))
+                print(f"  → verdict={record.trial_verdict} "
+                      f"ops={[o['verdict'] for o in record.user_ops]} "
+                      f"eval_error={record.evaluation_error}",
+                      file=sys.stderr)
+        run_dir.write_manifest(
+            substrate="mobilegym", condition=condition,
+            model=args.model or "", environment_seed=args.env_seed,
+            samples=samples, suite=args.suite or "rm-smoke",
+            tasks=[f.task_id for f in fixtures],
+            trials=trial_manifests,
+        )
+    finally:
+        factory.close()
+    print(f"\nrun dir: {run_dir.root} (manifest.json / trials/) — "
+          f"development_only plumbing smoke, NOT an RM task result")
+    return 0
+
+
+def _serve_projection(app, port: int) -> int:
+    """Serve the projection Flask app on a daemon thread; ``port=0``
+    auto-picks a free one (returned)."""
+    import threading
+    if not port:
+        import socket
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+    threading.Thread(
+        target=lambda: app.run(host="127.0.0.1", port=port,
+                                threaded=True, debug=False,
+                                use_reloader=False),
+        daemon=True).start()
+    return port
 
 
 def cmd_report(args: argparse.Namespace) -> int:
@@ -162,9 +276,33 @@ def build_parser() -> argparse.ArgumentParser:
                        help="trials per (task, condition)")
     p_run.add_argument("--budget", choices=sorted(BUDGET_PRESETS),
                        default="smoke")
-    p_run.add_argument("--substrate", choices=["world"], default="world",
-                       help="builtin_web is a registered pending "
-                            "dependency, not a silent stub")
+    p_run.add_argument("--substrate", choices=["world", "mobilegym"],
+                       default="world",
+                       help="world = the builtin deterministic matrix "
+                            "runner; mobilegym = the RM-0.B factory over "
+                            "the real bridge/L1 stack (B-08)")
+    p_run.add_argument("--samples", type=int, default=None,
+                       help="mobilegym only: real-model sample replicates "
+                            "(stochastic retries of the SAME environment "
+                            "seed; a --seeds alias would conflate two "
+                            "concepts — env seed vs model sample)")
+    p_run.add_argument("--env-seed", type=int, default=0,
+                       help="mobilegym only: the ENVIRONMENT seed (world "
+                            "initialisation), distinct from --samples")
+    p_run.add_argument("--model", default=None,
+                       help="mobilegym only: model id override (default: "
+                            "the provider port's own default)")
+    p_run.add_argument("--bridge-port", type=int, default=3019,
+                       help="mobilegym only: the bridge port to connect to "
+                            "or start")
+    p_run.add_argument("--projection-port", type=int, default=3026,
+                       help="mobilegym only: the projection public-API "
+                            "port the UserOpDriver talks to (0 = auto)")
+    p_run.add_argument("--spawn-bridge", action="store_true",
+                       help="mobilegym only: let the factory SPAWN the "
+                            "bridge subprocess (closed flag whitelist — "
+                            "never a CUA-loop injection); default is to "
+                            "connect to an already-running bridge")
     p_run.add_argument("--out", default="eval_results")
     p_run.add_argument("--run-id", default=None)
     p_run.add_argument("--no-traces", action="store_true",
