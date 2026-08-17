@@ -55,7 +55,9 @@ from taskvm.runtime.bootstrap import RuntimePorts, compose_runtime
 from taskvm.runtime.ports import (
     CallLedger, CUADecision, CUADecisionKind,
 )
-from taskvm.substrate import GuiAction, Observation, substrate_registry
+from taskvm.substrate import (
+    GUI_ACTION_KINDS, GuiAction, Observation, substrate_registry,
+)
 from taskvm.verifier.visible import VisibleVerifier
 
 from taskvm.domain.state import ObservedValue, SurfaceEvidence, TaskVariable
@@ -63,14 +65,34 @@ from taskvm.domain.state import ObservedValue, SurfaceEvidence, TaskVariable
 
 # ── the CUA model adapter (composition-owned, per RuntimePorts docstring) ──
 
+#: B-01: the action protocol is aligned with the FROZEN GuiAction
+#: vocabulary (substrate.md §2: GUI_ACTION_KINDS — click|tap|type|key|
+#: scroll|wait|open) and its full field set. The model sees ONLY this
+#: user-visible vocabulary — never substrate internals.
 _CUA_SYSTEM_PROMPT = (
-    "你是一个图形界面操作代理（CUA）。每一轮你会看到当前屏幕的可见文本"
-    "和一个操作目标。你只做一件事：返回恰好一个原子 GUI 操作，或声明完成/"
-    "失败。只使用屏幕上可见的信息。输出严格 JSON："
-    '{"kind":"act","action":{"kind":"click|type|scroll|key",'
-    '"text":"...","coordinate":[x,y]}} 或 {"kind":"done"} 或 '
-    '{"kind":"fail","reason":"业务原因"}。不要输出任何其他内容。'
+    "你是一个图形界面操作代理（CUA）。每一轮你会看到当前屏幕的截图（若"
+    "提供）和清洗后的可见文本，以及一个操作目标。你只做一件事：返回恰"
+    "好一个原子 GUI 操作，或声明完成/失败。只使用屏幕上可见的信息。"
+    "输出严格 JSON："
+    '{"kind":"act","action":{"kind":"click|tap|type|key|scroll|wait|open",'
+    '"coordinate":[x,y],"text":"...","key":"...",'
+    '"direction":"up|down|left|right","magnitude":0,'
+    '"duration_ms":0,"target":"可见的应用名或界面名"}}'
+    ' 或 {"kind":"done"} 或 {"kind":"fail","reason":"业务原因"}。'
+    "坐标归一化到 [0,1000]。不要输出任何其他内容。"
 )
+
+#: B-01: kinds that REQUIRE a coordinate (a click/tap without a target
+#: point is unexecutable — an honest fail, never a guess).
+_COORD_REQUIRED = frozenset({"click", "tap"})
+#: B-01: required scalar/text field per kind (missing ⇒ honest fail).
+_REQUIRED_FIELD_BY_KIND = {
+    "type": "text", "key": "key", "open": "target",
+}
+#: B-01: numeric fields coerced with int() — a non-numeric value is an
+#: illegal action (honest fail), not a silent drop.
+_NUMERIC_FIELDS = ("magnitude", "duration_ms")
+_SCROLL_DIRECTIONS = frozenset({"up", "down", "left", "right"})
 
 
 class HttpCUAModel:
@@ -117,6 +139,16 @@ class HttpCUAModel:
         retry = (f"\n（第 {attempt} 次重试：上一次操作没有完成任务，请确认修改"
                  "确实生效后再报告完成。）") if attempt > 1 else ""
         user = (f"## 操作目标\n{goal}{retry}\n\n## 屏幕可见文本\n{visible}")
+        # B-01: vision-capable path — a fresh screenshot travels as the
+        # multimodal image part (HttpModelPort.complete_json's
+        # ``image_data_url``), NEVER as prompt text. Only a real data URL
+        # ("data:image/…;base64,…) qualifies: an artifact ref / file path /
+        # internal locator is NOT sent as an image and NEVER inlined into
+        # the prompt (honest text-only degradation, no guessing).
+        image = None
+        ref = getattr(observation, "screenshot_ref", None)
+        if isinstance(ref, str) and ref.startswith("data:image/"):
+            image = ref
         try:
             assert_prompt_clean(_CUA_SYSTEM_PROMPT + "\n" + user,
                                 what="cua prompt")
@@ -128,7 +160,8 @@ class HttpCUAModel:
         request_id = self._mint_request_id()
         try:
             reply = self._port.complete_json(system=_CUA_SYSTEM_PROMPT,
-                                             user=user, model=model)
+                                             user=user, model=model,
+                                             image_data_url=image)
         except Exception as e:
             self._record(request_id, ok=False, error=str(e), model=model)
             raise
@@ -164,6 +197,13 @@ class HttpCUAModel:
 
 
 def _decision_from_json(parsed: Mapping[str, Any]) -> CUADecision:
+    """B-01: parse the model's JSON against the FROZEN GuiAction schema.
+
+    Total over ``GUI_ACTION_KINDS`` (click|tap|type|key|scroll|wait|open)
+    and every GuiAction field. Missing REQUIRED fields (click/tap without
+    a coordinate; type without text; key without key; open without
+    target), unknown kinds, or non-numeric numeric fields are HONEST
+    FAILs — never a guess, never a silent field drop."""
     kind = str(parsed.get("kind", "")).lower()
     if kind == "done":
         return CUADecision(kind=CUADecisionKind.DONE,
@@ -173,19 +213,67 @@ def _decision_from_json(parsed: Mapping[str, Any]) -> CUADecision:
                            reason=str(parsed.get("reason", ""))[:300],
                            raw=str(parsed)[:200])
     if kind == "act":
-        act = parsed.get("action") or {}
+        act = parsed.get("action")
+        if not isinstance(act, Mapping):
+            return CUADecision(kind=CUADecisionKind.FAIL,
+                               reason="act 决策缺少 action 对象",
+                               raw=str(parsed)[:200])
         act_kind = str(act.get("kind", ""))
-        if act_kind not in ("click", "type", "scroll", "key"):
+        if act_kind not in GUI_ACTION_KINDS:
             return CUADecision(kind=CUADecisionKind.FAIL,
                                reason=f"未知操作类型 {act_kind!r}",
                                raw=str(parsed)[:200])
+        # required-field discipline (honest fail, no guessing)
         coord = act.get("coordinate")
         if isinstance(coord, (list, tuple)) and len(coord) == 2:
-            coord = (int(coord[0]), int(coord[1]))
+            try:
+                coord = (float(coord[0]), float(coord[1]))
+            except (TypeError, ValueError):
+                return CUADecision(kind=CUADecisionKind.FAIL,
+                                   reason="coordinate 不是数值对",
+                                   raw=str(parsed)[:200])
         else:
             coord = None
-        action = GuiAction(kind=act_kind, text=str(act.get("text", "") or ""),
-                           coordinate=coord)
+        if act_kind in _COORD_REQUIRED and coord is None:
+            return CUADecision(
+                kind=CUADecisionKind.FAIL,
+                reason=f"{act_kind} 操作缺少 coordinate",
+                raw=str(parsed)[:200])
+        req = _REQUIRED_FIELD_BY_KIND.get(act_kind)
+        if req is not None and not str(act.get(req, "") or ""):
+            return CUADecision(
+                kind=CUADecisionKind.FAIL,
+                reason=f"{act_kind} 操作缺少必需字段 {req}",
+                raw=str(parsed)[:200])
+        numeric: dict[str, int] = {}
+        for field in _NUMERIC_FIELDS:
+            raw_v = act.get(field)
+            if raw_v is None:
+                continue
+            try:
+                numeric[field] = int(raw_v)
+            except (TypeError, ValueError):
+                return CUADecision(
+                    kind=CUADecisionKind.FAIL,
+                    reason=f"{field} 不是整数",
+                    raw=str(parsed)[:200])
+        direction = act.get("direction")
+        if direction is not None:
+            direction = str(direction)
+            if act_kind == "scroll" and direction not in _SCROLL_DIRECTIONS:
+                return CUADecision(
+                    kind=CUADecisionKind.FAIL,
+                    reason=f"非法滚动方向 {direction!r}",
+                    raw=str(parsed)[:200])
+        action = GuiAction(
+            kind=act_kind,
+            coordinate=coord,
+            text=str(act.get("text", "") or "") or None,
+            key=str(act.get("key", "") or "") or None,
+            direction=direction,
+            magnitude=numeric.get("magnitude"),
+            duration_ms=numeric.get("duration_ms"),
+            target=str(act.get("target", "") or "") or None)
         return CUADecision(kind=CUADecisionKind.ACT, action=action,
                            raw=str(parsed)[:200])
     return CUADecision(kind=CUADecisionKind.FAIL,
