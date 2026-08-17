@@ -39,6 +39,7 @@ import hashlib
 import json
 import os
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
@@ -57,8 +58,8 @@ from taskvm_bench.evaluation.user_ops import UserOp
 
 __all__ = [
     "BridgeUnavailableError", "DependencyMissingError", "FactoryError",
-    "MobileGymFactory", "MobileGymTrialSpec", "BridgeHandle",
-    "ledger_role_counts", "REPO_ROOT",
+    "TrialIsolationError", "MobileGymFactory", "MobileGymTrialSpec",
+    "BridgeHandle", "ledger_role_counts", "REPO_ROOT",
 ]
 
 #: repo root (this file is <repo>/taskvm_bench/evaluation/mobilegym_factory.py)
@@ -87,6 +88,17 @@ class DependencyMissingError(FactoryError):
     """A prototype-side dependency the factory only CALLS is absent
     (e.g. the B-07 bootstrap before the parallel agent lands it) —
     reported honestly, never stubbed."""
+
+
+class TrialIsolationError(FactoryError):
+    """B-10: two active trials would share ONE mutable foreground/session.
+
+    The bridge holds exactly ONE live browser state (``_active_sid``);
+    a second concurrent trial would silently context-switch reality
+    underneath the first (or share its session). The factory therefore
+    runs trials SERIALLY by default — a busy factory refuses the second
+    trial with this error (or queues it, when ``wait_for_trial_lock`` is
+    set). One worker ⇔ one bridge instance; never a shared session."""
 
 
 # ── the bridge handle ───────────────────────────────────────────────────────
@@ -187,6 +199,11 @@ class TrialSetup:
     #: non-invasive, and the factory records the fingerprint around each
     #: oracle read so tests can assert the world did not move.
     oracle_noninvasive_checks: list[dict] = field(default_factory=list)
+    #: B-10: None when the reset/state invariant HOLDS; otherwise a human
+    #: description of the violation (unstable oracle double-read, seeded
+    #: entities not visible) — the trial becomes evaluation_error, never
+    #: a system failure and never a success.
+    invariant_violation: str | None = None
 
 
 # ── the factory ─────────────────────────────────────────────────────────────
@@ -211,7 +228,8 @@ class MobileGymFactory:
                  connect_only: bool = False,
                  bridge_startup_timeout_s: float = 90.0,
                  request_timeout_s: float = 10.0,
-                 keep_bridge: bool = False) -> None:
+                 keep_bridge: bool = False,
+                 wait_for_trial_lock: float = 0.0) -> None:
         self._bridge_url = bridge_url.rstrip("/") if bridge_url else None
         self._bridge_port = int(bridge_port)
         self._sim_url = sim_url
@@ -223,6 +241,13 @@ class MobileGymFactory:
         self._startup_timeout_s = float(bridge_startup_timeout_s)
         self._timeout = float(request_timeout_s)
         self._keep_bridge = keep_bridge
+        # B-10: serial execution — ONE active trial per factory (⇔ one
+        # bridge instance) at a time. ``wait_for_trial_lock`` > 0 turns
+        # a busy refusal into a bounded queue-wait instead.
+        self._wait_for_trial_lock = float(wait_for_trial_lock)
+        self._trial_lock = threading.Lock()
+        self._active_trial_key: str | None = None
+        self._busy_rejections = 0
         self.bridge: BridgeHandle | None = None
 
     # ── stage: bridge lifecycle ────────────────────────────────────────
@@ -345,7 +370,16 @@ class MobileGymFactory:
     def setup_trial(self, spec: MobileGymTrialSpec,
                     oracles: dict[str, MobileGymEvaluationEnvironment]
                     ) -> TrialSetup:
-        """reset → seed → post-seed oracle hashes (the exam room only)."""
+        """reset → seed → post-seed oracle hashes + the B-10 invariant.
+
+        Invariant (re-prompt §B-10): the freshly-seeded world must be
+        (a) STABLE — two consecutive non-invasive oracle reads agree —
+        and (b) REALLY SEEDED — every entity the fixture's seed_state
+        adds is visible in the oracle. A violation lands in
+        ``TrialSetup.invariant_violation``; the orchestrator turns that
+        into ``evaluation_error`` (never a system failure, never a
+        success) and skips the SUT stages (a world that cannot be
+        trusted must not be graded, nor burn provider calls)."""
         sid = spec.resolve_sid()
         fixture = spec.fixture
         primary = oracles[spec.surface_app]
@@ -354,9 +388,42 @@ class MobileGymFactory:
         setup.seed_response = primary.seed(
             sid, task_id=fixture.task_id, goal=fixture.goal,
             seed_state=dict(fixture.seed_state or {}))
-        setup.reset_state_hash = self._hash_state(
-            self._oracle_state_all(oracles, sid))
+        first = self._oracle_state_all(oracles, sid)
+        setup.reset_state_hash = self._hash_state(first)
+        # (a) stability double-read — the oracle is non-invasive (B-03),
+        # so any disagreement means the WORLD moved during setup.
+        second = self._oracle_state_all(oracles, sid)
+        if self._hash_state(second) != setup.reset_state_hash:
+            setup.invariant_violation = (
+                "oracle state not stable across two consecutive reads "
+                f"after seed (first={setup.reset_state_hash[:12]}…, "
+                f"second={self._hash_state(second)[:12]}…) — the world "
+                "drifted during setup; reset/state invariant violated")
+            return setup
+        # (b) seeded entities really visible
+        missing = self._seed_entities_missing(spec, first)
+        if missing:
+            setup.invariant_violation = (
+                f"seeded entities not visible in the oracle: {missing} — "
+                "the seed did not land; reset/state invariant violated")
         return setup
+
+    @staticmethod
+    def _seed_entities_missing(spec: MobileGymTrialSpec,
+                               oracle_state: dict[str, Any]) -> list[str]:
+        """Fixture ``add_chats`` ids that the oracle does NOT show.
+
+        Best-effort by construction: only the wechat merge directives
+        (``add_chats``) are checkable this way — X posts are not seedable
+        (documented in the fixtures) and alipay is read-from-default."""
+        seed = dict(getattr(spec.fixture, "seed_state", None) or {})
+        wc = seed.get("wechat") or {}
+        add_chats = wc.get("add_chats") or []
+        if not add_chats:
+            return []
+        entities = ((oracle_state.get("wechat") or {}).get("entities")) or {}
+        return [str(c.get("id")) for c in add_chats
+                if c.get("id") and c.get("id") not in entities]
 
     # ── stage: the real-full bootstrap (CALLER of B-07, never an editor)
     def bootstrap_session(self, spec: MobileGymTrialSpec, *,
@@ -439,6 +506,45 @@ class MobileGymFactory:
         server process — the factory never hosts HTTP itself except via
         the injected ``driver``'s base URL)."""
         bridge = self.ensure_bridge()
+        # ── B-10: serial execution gate ──────────────────────────────
+        # ONE active trial per factory/bridge — a second concurrent
+        # trial would share (or silently context-switch) the single
+        # mutable foreground session the bridge holds.
+        trial_key = (f"{spec.fixture.task_id}/e{spec.environment_seed}"
+                     f"/s{spec.sample_index}")
+        if self._wait_for_trial_lock > 0:
+            acquired = self._trial_lock.acquire(
+                timeout=self._wait_for_trial_lock)
+        else:
+            acquired = self._trial_lock.acquire(blocking=False)
+        if not acquired:
+            self._busy_rejections += 1
+            raise TrialIsolationError(
+                f"another trial is active on this factory "
+                f"({self._active_trial_key!r}); serial execution only — "
+                f"one worker ⇔ one bridge instance, never a shared "
+                f"mutable foreground/session")
+        self._active_trial_key = trial_key
+        try:
+            return self._run_trial_locked(spec, model_port=model_port,
+                                          bootstrap_fn=bootstrap_fn,
+                                          driver=driver, user_ops=user_ops,
+                                          ledger=ledger, store=store)
+        finally:
+            self._active_trial_key = None
+            self._trial_lock.release()
+
+    def _run_trial_locked(self, spec: MobileGymTrialSpec, *,
+                          model_port: Any = None,
+                          bootstrap_fn: Callable[..., dict] | None = None,
+                          driver: Any = None,
+                          user_ops: Sequence[UserOp] | None = None,
+                          ledger: Any = None,
+                          store: Any = None,
+                          ) -> UserOpTrialRecord:
+        """The B-08 stage chain, already holding the trial gate."""
+        bridge = self.bridge
+        assert bridge is not None      # ensured by run_trial's caller path
         sid = spec.resolve_sid()
         record = UserOpTrialRecord(
             model=spec.model or "", substrate="mobilegym",
@@ -450,29 +556,43 @@ class MobileGymFactory:
 
         oracles = self.build_oracles(spec.apps, sid)
         setup = self.setup_trial(spec, oracles)
+        integrity: dict = {"status": "skipped", "detail": ""}
+        bundle: dict = {"sid": sid, "skipped": True}
+        session = None
 
-        session = self.build_session(sid, spec.surface_app)
-        initial_obs = session.observe(session.list_surfaces()[0])
-        setup.initial_state_fingerprint = initial_obs.fingerprint
+        if setup.invariant_violation is not None:
+            # B-10 honest dead-end: the reset/state invariant does NOT
+            # hold — evaluation_error, not a system failure, not a
+            # success. The SUT stages are SKIPPED: a world that cannot
+            # be trusted must not be graded (nor burn provider calls).
+            record.evaluation_error = setup.invariant_violation
+        else:
+            session = self.build_session(sid, spec.surface_app)
+            initial_obs = session.observe(session.list_surfaces()[0])
+            setup.initial_state_fingerprint = initial_obs.fingerprint
 
-        bundle = self.bootstrap_session(
-            spec, session=session, ledger=ledger, store=store,
-            model_port=model_port, bootstrap_fn=bootstrap_fn)
+            bundle = self.bootstrap_session(
+                spec, session=session, ledger=ledger, store=store,
+                model_port=model_port, bootstrap_fn=bootstrap_fn)
 
-        if driver is not None:
-            ops = list(user_ops) if user_ops is not None else \
-                self.make_driver_ops()
-            for op in ops:
-                outcome = driver.execute(op)
-                record.add_op(UserOpRecord(**outcome.to_record()))
+            if driver is not None:
+                ops = list(user_ops) if user_ops is not None else \
+                    self.make_driver_ops()
+                for op in ops:
+                    outcome = driver.execute(op)
+                    record.add_op(UserOpRecord(**outcome.to_record()))
 
-        integrity = self.integrity_check(spec, oracles)
-        if integrity["status"] != "ok":
-            record.evaluation_error = (
-                f"post-trial integrity: {integrity['status']}"
-                f" ({integrity.get('detail', '')})")
+            integrity = self.integrity_check(spec, oracles)
+            if integrity["status"] != "ok":
+                record.evaluation_error = (
+                    f"post-trial integrity: {integrity['status']}"
+                    f" ({integrity.get('detail', '')})")
 
         record.finalize()
+        # B-10: an evaluation_error is NEVER a success — force the
+        # honest error verdict even if the per-op verdicts were green.
+        if record.evaluation_error:
+            record.trial_verdict = "error"
         # keep the produced artifacts reachable for callers (smoke
         # scripts assemble the B-10 manifest from them)
         self.last_bundle = bundle
@@ -500,4 +620,11 @@ class MobileGymFactory:
                 self.last_setup.initial_state_fingerprint,
             "final_integrity_status": self.last_integrity["status"],
             "final_state_hash": self.last_integrity.get("final_state_hash"),
+            # B-10 isolation accounting
+            "isolation": {
+                "mode": "serial",
+                "wait_for_trial_lock_s": self._wait_for_trial_lock,
+                "busy_rejections": self._busy_rejections,
+                "invariant_violation": self.last_setup.invariant_violation,
+            },
         }

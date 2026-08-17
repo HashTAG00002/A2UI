@@ -43,6 +43,9 @@ class FakeBridge:
     revision = 0
     alive = True
     last_seed: dict | None = None
+    #: die (503) after this many total requests (None = never)
+    die_after_requests: int | None = None
+    _n_requests = 0
 
     def __init__(self) -> None:
         self.requests: list[tuple[str, str]] = []
@@ -77,6 +80,10 @@ class FakeBridge:
 
             def do_GET(self):
                 outer.requests.append(("GET", self.path))
+                outer._n_requests += 1
+                if (outer.die_after_requests is not None
+                        and outer._n_requests > outer.die_after_requests):
+                    outer.alive = False
                 if not outer.alive:
                     self._json(503, {"status": "down"})
                     return
@@ -113,6 +120,10 @@ class FakeBridge:
                 length = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(length) or b"{}")
                 outer.requests.append(("POST", self.path))
+                outer._n_requests += 1
+                if (outer.die_after_requests is not None
+                        and outer._n_requests > outer.die_after_requests):
+                    outer.alive = False
                 if not outer.alive:
                     self._json(503, {"status": "down"})
                     return
@@ -461,6 +472,177 @@ def _first_run_dir(root):
         if os.path.isdir(os.path.join(root, name)):
             return root / name
     raise AssertionError("no run dir created")
+
+
+# ── B-10: trial isolation + honest evaluation_error ───────────────────────
+
+def test_trial_isolation_rejects_second_concurrent(fake_bridge):
+    """A busy factory REFUSES a second trial — never a silent shared
+    mutable foreground/session (one worker ⇔ one bridge instance)."""
+    from taskvm_bench.evaluation.mobilegym_factory import TrialIsolationError
+    factory = _factory(fake_bridge)
+    factory.ensure_bridge()
+    factory._trial_lock.acquire()          # simulate an active trial
+    factory._active_trial_key = "other/e0/s0"
+    with pytest.raises(TrialIsolationError) as ei:
+        factory.run_trial(_spec(), bootstrap_fn=lambda **kw: {},
+                          driver=FakeDriver())
+    assert "other/e0/s0" in str(ei.value)
+    assert factory._busy_rejections == 1
+    factory._trial_lock.release()
+    # after release the next trial runs normally
+    rec = factory.run_trial(_spec(), bootstrap_fn=lambda **kw: {},
+                            driver=FakeDriver())
+    assert rec.trial_verdict == "pass"
+
+
+def test_trial_isolation_true_concurrency_is_rejected(fake_bridge):
+    """Two REAL concurrent run_trial threads: exactly one wins, the
+    other gets the honest busy error (never a shared session)."""
+    import threading as _t
+    from taskvm_bench.evaluation.mobilegym_factory import TrialIsolationError
+    factory = _factory(fake_bridge)
+    factory.ensure_bridge()
+    results = []
+
+    class SlowDriver(FakeDriver):
+        def execute(self, op):
+            time.sleep(0.4)              # hold the trial gate open
+            return super().execute(op)
+
+    def run():
+        try:
+            results.append(factory.run_trial(
+                _spec(), bootstrap_fn=lambda **kw: {},
+                driver=SlowDriver()))
+        except TrialIsolationError as e:
+            results.append(e)
+
+    t1 = _t.Thread(target=run)
+    t1.start()
+    time.sleep(0.15)                       # t1 is inside its slow trial
+    try:
+        factory.run_trial(_spec(), bootstrap_fn=lambda **kw: {},
+                          driver=FakeDriver())
+        results.append("unexpected-no-error")
+    except TrialIsolationError as e:
+        results.append(e)
+    t1.join(timeout=10)
+    assert "TrialIsolationError" in [type(r).__name__ for r in results]
+    assert any(isinstance(r, TrialRecord) for r in results)
+    assert factory._busy_rejections >= 1
+
+
+def test_trial_isolation_bounded_wait_queues(fake_bridge):
+    """``wait_for_trial_lock > 0``: the second trial QUEUES instead of
+    being refused — both complete, strictly serially."""
+    import threading as _t
+    factory = MobileGymFactory(
+        bridge_url=fake_bridge.url, connect_only=True,
+        wait_for_trial_lock=10.0)
+    factory.ensure_bridge()
+    order = []
+    lock = _t.Lock()
+
+    class SlowDriver(FakeDriver):
+        def execute(self, op):
+            with lock:
+                order.append(("start", op.op_id))
+            time.sleep(0.25)
+            r = super().execute(op)
+            with lock:
+                order.append(("end", op.op_id))
+            return r
+
+    def run(tag):
+        factory.run_trial(_spec(sid=f"sid-{tag}"),
+                          bootstrap_fn=lambda **kw: {},
+                          driver=SlowDriver())
+
+    t1 = _t.Thread(target=run, args=("a",))
+    t1.start()
+    time.sleep(0.1)
+    t2 = _t.Thread(target=run, args=("b",))
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+    # strictly serial: every 'start' is followed by its own 'end'
+    # before the next 'start' begins
+    events = [e for kind, e in order if True]
+    kinds = [k for k, _ in order]
+    assert kinds[0] == "start" and kinds[-1] == "end"
+    assert kinds.count("start") == 4      # 2 trials × (start+stop ops)
+    # no interleaving: start,end,start,end,...
+    depth = 0
+    for k in kinds:
+        depth += 1 if k == "start" else -1
+        assert depth in (0, 1)
+
+
+def test_reset_invariant_hash_instability_is_evaluation_error(fake_bridge):
+    """Two consecutive oracle reads DISAGREE after seed → the world
+    drifted during setup → evaluation_error, SUT stages SKIPPED, never
+    a system crash and never a success."""
+    factory = _factory(fake_bridge)
+    factory.ensure_bridge()
+    calls = {"n": 0}
+
+    def drifting(state):
+        calls["n"] += 1
+        if calls["n"] >= 2:               # second oracle read differs
+            import copy
+            s = copy.deepcopy(state)
+            s["wechat_chats"][0]["n_messages"] = 99
+            return s
+        return state
+
+    fake_bridge.oracle_mutator = drifting
+    driver = FakeDriver()
+    record = factory.run_trial(
+        _spec(), bootstrap_fn=lambda **kw: {"never": "called"},
+        driver=driver)
+    assert not driver.executed            # SUT stages skipped
+    assert record.user_ops == []
+    assert record.evaluation_error and "not stable" in record.evaluation_error
+    assert record.trial_verdict == "error"   # NOT a success
+    assert factory.last_integrity["status"] == "skipped"
+    mf = factory.manifest_fields(_spec())
+    assert mf["isolation"]["invariant_violation"]
+
+
+def test_seed_entity_missing_is_evaluation_error(fake_bridge):
+    """The fixture's seeded chat is NOT visible in the oracle → the
+    seed did not land → evaluation_error naming the missing entity."""
+    factory = _factory(fake_bridge)
+    factory.ensure_bridge()
+    fake_bridge.state = {"wechat_chats": []}      # seed did not land
+    driver = FakeDriver()
+    record = factory.run_trial(
+        _spec(), bootstrap_fn=lambda **kw: {"never": "called"},
+        driver=driver)
+    assert not driver.executed
+    assert record.evaluation_error
+    assert "wxid_huangyong_demo" in record.evaluation_error
+    assert record.trial_verdict == "error"
+
+
+def test_integrity_failure_forces_error_verdict(fake_bridge):
+    """Post-trial integrity unavailable → evaluation_error AND verdict
+    error even though every op verdict was 'applied' (a green op list
+    can never launder a broken world)."""
+    factory = _factory(fake_bridge)
+    factory.ensure_bridge()
+    # request order: health(1) reset(2) seed(3) oracle(4,5) observe(6)
+    # — the L1 observe must still succeed; the bridge dies only for the
+    # post-trial integrity probes (health 7, …) → honest unavailable.
+    fake_bridge.die_after_requests = 6
+    record = factory.run_trial(
+        _spec(), bootstrap_fn=lambda **kw: {}, driver=FakeDriver())
+    assert record.evaluation_error and "unavailable" in record.evaluation_error
+    assert record.trial_verdict == "error"
+    assert all(op["verdict"] == "applied" for op in record.user_ops)
+    assert factory.manifest_fields(_spec())["final_integrity_status"] == \
+        "unavailable"
 
 
 def test_cli_mobilegym_rejects_unknown_suite():
