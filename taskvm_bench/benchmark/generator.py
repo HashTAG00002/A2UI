@@ -1,5 +1,6 @@
-"""Benchmark generator — scale the hand-written fixtures into 40 templates /
-800 instances (W3, handoff §6 item 3 + §7 item 11).
+"""Benchmark generator — a 4-family parametric synthetic generator: 4
+parameterized task-family templates realized over randomized seeds (the
+default mix yields 800 instances) (W3, handoff §6 item 3 + §7 item 11).
 
 A ``BenchmarkTemplate`` is a parameterized task-family (e.g. "move a date that
 drives dependent deadlines across calendar+taskboard"). A ``CanonicalTaskGraph``
@@ -24,8 +25,8 @@ deterministic per template_id+instance_id (no Math.random in this env — we use
 a hash-based partition) so a run is reproducible.
 
 This is the GENERATION LOGIC (handoff §1 A-class: deterministic engineering that
-can be built in one pass). Running all 800 instances through the real model is
-the B-class benchmark kill-test (W4/W5) — NOT done here.
+can be built in one pass). Running the default-mix 800 instances through the
+real model is the B-class benchmark kill-test (W4/W5) — NOT done here.
 """
 from __future__ import annotations
 
@@ -247,12 +248,12 @@ class BenchmarkSplit:
 def generate_benchmark(per_template: int = 200, *,
                        in_dist_per: int | None = None,
                        ood_per: int | None = None) -> BenchmarkSplit:
-    """Generate the benchmark (handoff §7 item 11: 40 templates / 800 instances /
-    OOD ~20%).
+    """Generate the benchmark (handoff §7 item 11: 4 templates / 800
+    instances by default / OOD ~20%).
 
     Default mix hits ~20% OOD: 2 in-dist templates × 320 + 2 OOD templates × 80
     = 640 + 160 = 800, OOD = 160/800 = 20%. Pass ``in_dist_per`` / ``ood_per``
-    to override (e.g. for a quick recon-scale run of 40 instances).
+    to override (e.g. per_template=10 → a recon-scale run of 24 instances).
 
     Each instance's seed = template_index * 1000 + i (deterministic, reproducible).
     """
