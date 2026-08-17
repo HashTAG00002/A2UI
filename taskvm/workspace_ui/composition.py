@@ -49,6 +49,8 @@ from taskvm.architect import (
     ActionContractSerializer, HttpModelPort, ModelCallLedger,
     ModelCallRecord, MODEL_ROLE_CUA, assert_prompt_clean,
 )
+from taskvm.architect.compiler import StateCompiler
+from taskvm.architect.architect import TaskArchitect
 from taskvm.architect.observation import CompilerObservationView, VisibleRegion
 from taskvm.architect.port import ModelPort
 from taskvm.runtime.bootstrap import RuntimePorts, compose_runtime
@@ -344,7 +346,7 @@ def build_runtime_ports(*, model_port: ModelPort | None = None,
     field-for-field identical ``ModelCallRecord``s (two parallel frozen
     dataclasses — a nominal-type checker cannot see that identity, the
     ledger only string-validates ``role`` at runtime)."""
-    ledger = ledger or ModelCallLedger()
+    ledger = ledger if ledger is not None else ModelCallLedger()
     return RuntimePorts(
         serializer=ActionContractSerializer(),
         cua_model=cua_model or HttpCUAModel(
@@ -388,5 +390,121 @@ def compose_task_runtime(kernel: Any, *, host: str = "localhost",
 __all__ = [
     "HttpCUAModel", "VisibleLabelExtractor",
     "build_runtime_ports", "compose_task_runtime",
+    "bootstrap_real_full",
     "CompilerObservationView", "VisibleRegion",
 ]
+
+
+# ── B-07: the genuine real-full composition bootstrap ─────────────────────
+
+def bootstrap_real_full(*, goal: str, sid: str,
+                         substrate: Any = None,
+                         model_port: Any = None,
+                         ledger: ModelCallLedger | None = None,
+                         store: Any = None,
+                         model: str | None = None,
+                         app: str | None = None, host: str = "localhost",
+                         base_url: str | None = None,
+                         surfaces: list[str] | None = None,
+                         success_criteria: tuple[str, ...] = ()) -> dict:
+    """Natural-language goal → fresh observation → StateCompiler →
+    TaskArchitect → Kernel → shared ledger → AutonomyRuntime → (optional)
+    registered projection session — with ZERO hand-built intermediates.
+
+    This is the RM-0.B real-full path (B-07). Every stage is the REAL
+    production object; nothing is hand-assembled:
+
+      1. the NL ``goal`` becomes a ``TaskIntent``;
+      2. the substrate's own ``list_surfaces()`` declares the world;
+      3. each (selected) surface gets a FRESH ``observe()``;
+      4. observations convert to ``CompilerObservationView`` regions
+         (visible-only: label/text/fingerprint; a screenshot travels ONLY
+         if it is a real ``data:image/…`` URL — paths/ids are dropped,
+         never inlined);
+      5. ``StateCompiler`` makes its REAL model call #1 (observed plane);
+      6. ``TaskArchitect`` makes its REAL model call #2 (variables+
+         workflow, validated);
+      7. the kernel initializes FROM THE ARCHITECT PRODUCT
+         (``init_task_state(arch.variables)`` + ``set_plan(arch.graph)``)
+         — never a hand-written TaskVariable/WorkflowGraph;
+      8. ONE shared ``ModelCallLedger`` is injected everywhere (compiler +
+         architect rows from steps 5-6, CUA rows from the runtime) so
+         1 provider request = 1 ledger row across all three roles;
+      9. ``compose_task_runtime`` assembles the real AutonomyRuntime
+         (same composition root as the demo/production);
+     10. with a ``store`` the session registers in the projection — the
+         subsequent lifecycle (driver start → CUA → real GUI → verifier →
+         SSE) is driven through the PUBLIC governance routes, not here.
+
+    ``model_port`` may inject a scripted port for CONTRACT-WIRING tests;
+    with the default ``HttpModelPort`` every call is a real provider
+    request (provider availability is the caller's environment concern).
+    """
+    from taskvm.domain.intent import TaskIntent
+    from taskvm.kernel import TaskVMKernel
+
+    intent = TaskIntent(goal=goal, success_criteria=tuple(success_criteria))
+
+    # (2) the substrate declares the world (registry-routed builtin_web by
+    # default — the provider resolves its own URL/config, §6-clean)
+    if substrate is None:
+        cfg: dict[str, Any] = {"app": app or "calendar", "host": host,
+                               "sid": sid}
+        if base_url is not None:
+            cfg["base_url"] = base_url
+        substrate = substrate_registry.create_session("builtin_web", cfg)
+    surface_infos = substrate.list_surfaces()
+
+    # (3-4) fresh observe → visible-only compiler view
+    wanted = set(surfaces) if surfaces else None
+    regions: list[VisibleRegion] = []
+    revision = 0
+    for info in surface_infos:
+        if wanted is not None and info.surface_id not in wanted:
+            continue
+        obs = substrate.observe(info)
+        revision = max(revision, int(getattr(obs, "revision", 0) or 0))
+        shot = getattr(obs, "screenshot_ref", None)
+        regions.append(VisibleRegion(
+            surface_label=info.display_name or info.surface_id,
+            visible_text=getattr(obs, "visible_text", "") or "",
+            structure_fingerprint=getattr(obs, "fingerprint", "") or "",
+            screenshot_data_url=(shot if isinstance(shot, str)
+                                 and shot.startswith("data:image/") else None)))
+    view = CompilerObservationView(revision=revision,
+                                   regions=tuple(regions))
+
+    # (5-8) real compiler → real architect → kernel FROM THE PRODUCTS,
+    # with ONE shared ledger for compiler/architect/CUA rows alike.
+    # NOTE: ``is not None`` (not ``or``) — an EMPTY ModelCallLedger is
+    # falsy (__len__), and ``or`` would silently mint a second ledger,
+    # splitting the single-owner accounting across two objects.
+    if ledger is None:
+        ledger = ModelCallLedger()
+    port = model_port or HttpModelPort()
+    compiler_result = StateCompiler(port, ledger, model=model).compile(
+        view, intent)
+    arch = TaskArchitect(port, ledger, model=model).compose(
+        intent, compiler_result)
+    kernel = TaskVMKernel(sid, intent)
+    kernel.init_task_state(arch.variables)
+    if arch.graph is not None:
+        kernel.set_plan(arch.graph)
+    ports = build_runtime_ports(model_port=port, ledger=ledger)
+    runtime = compose_task_runtime(kernel, substrate=substrate,
+                                   ports=ports, model=model)
+
+    # (10) optional projection registration — the PUBLIC lifecycle takes
+    # over from here (POST /governance/start → driver → runtime → GUI)
+    if store is not None:
+        from taskvm.projection.store import SurfaceDecl
+        decls = tuple(
+            SurfaceDecl(surface_id=info.surface_id,
+                        display_name=info.display_name or info.surface_id)
+            for info in surface_infos)
+        store.register(sid, kernel, runtime=runtime, surfaces=decls)
+
+    return dict(sid=sid, intent=intent, kernel=kernel, runtime=runtime,
+                substrate=substrate, ledger=ledger,
+                model_port=port, compiler_result=compiler_result,
+                architecture=arch, surfaces=surface_infos)
