@@ -66,3 +66,7 @@ docs/our_tex/*.pdf
 
 # Local-only Overleaf credentials (never commit tokens)
 docs/our_tex/.env.local
+
+# Session-local packaging script + its zip output (git archive snapshot, never tracked)
+pack.sh
+/A2UI_main_*.zip
