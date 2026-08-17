@@ -39,7 +39,8 @@ _CONCRETE_SUBSTRATES = (
     "taskvm.substrate.builtin", "taskvm.substrate.builtin_web",
     "taskvm.substrate.mobilegym", "taskvm.substrate.osworld",
 )
-_ALWAYS_BANNED = ("taskvm_bench",)
+_ALWAYS_BANNED = ("taskvm_bench",)   # enforced for EVERY package under
+                                      # taskvm/ by the repo-wide gate below
 
 _RULES: dict[str, PkgRule] = {
     # the pure core: stdlib only
@@ -62,6 +63,12 @@ _RULES: dict[str, PkgRule] = {
     # reverse gate: the bottom layer imports nothing above it
     "taskvm/substrate": PkgRule(stdlib_only=False,
                                 allowed_taskvm=("taskvm.domain",)),
+    # docs/contracts/runtime.md §1 (frozen): taskvm.verifier →
+    # 仅 taskvm.domain + 标准库 — the runtime-visible verifier consumes
+    # fresh observations + ActionContract handed in by the runtime; it
+    # needs no kernel, no substrate, no architect.
+    "taskvm/verifier": PkgRule(stdlib_only=True,
+                               allowed_taskvm=("taskvm.domain",)),
 }
 
 # legacy cross-layer concepts banned as identifiers in the new core
@@ -284,3 +291,60 @@ def test_kernel_facade_exports_no_mutable_stores():
                  "WorkflowStore", "CheckpointStore"):
         assert not hasattr(K, name), f"taskvm.kernel must not export {name}"
     assert K.TaskVMKernel is not None
+
+
+# ── repo-wide bench-plane ban (audit A-06) ─────────────────────────────────
+# The _RULES-driven gate only covers the layers listed above; governance /
+# verifier / workspace_ui / apps / thirdparty and any future package were
+# reachable by _ALWAYS_BANNED only in name. This gate scans EVERY .py under
+# taskvm/ so the "prototype never imports the bench plane" invariant holds
+# repo-wide, regardless of what _RULES happens to enumerate.
+def bench_import_violation(source: str, relpath: str) -> str | None:
+    """One source file → a taskvm_bench import violation, or None.
+    Absolute imports of the top-level name AND relative imports that
+    resolve into the taskvm_bench tree are both caught
+    (``imports_of_source`` resolves relatives against the file's own
+    path, so the checker is testable with synthetic sources)."""
+    for mod in imports_of_source(source, relpath):
+        if mod == "taskvm_bench" or mod.startswith("taskvm_bench."):
+            return (f"{relpath}: imports {mod!r} — the prototype (taskvm/) "
+                    "must never import the bench plane (taskvm_bench)")
+    return None
+
+
+def taskvm_bench_import_violations_repo_wide() -> list[str]:
+    """AST-scan every .py under taskvm/ (rglob — unlisted and future
+    packages included) for taskvm_bench imports."""
+    out: list[str] = []
+    for path in sorted((REPO_ROOT / "taskvm").rglob("*.py")):
+        rel = str(path.relative_to(REPO_ROOT))
+        v = bench_import_violation(path.read_text(encoding="utf-8"), rel)
+        if v:
+            out.append(v)
+    return out
+
+
+def test_taskvm_never_imports_taskvm_bench_repo_wide():
+    """The bench plane is strictly downstream: no module anywhere under
+    taskvm/ — not just the _RULES-listed layers — may import taskvm_bench."""
+    problems = taskvm_bench_import_violations_repo_wide()
+    assert not problems, "bench-plane imports inside taskvm/:\n" + \
+        "\n".join(problems)
+
+
+def test_bench_gate_catches_synthetic_offenders():
+    """Self-check on synthetic sources (never write a real offender
+    under taskvm/): the repo-wide gate must catch absolute imports,
+    from-imports and subtree imports of taskvm_bench, and leave clean
+    imports alone."""
+    for src in ("import taskvm_bench\n",
+                "from taskvm_bench.benchmark import fixtures\n",
+                "import taskvm_bench.evaluation.runner as runner\n"):
+        assert bench_import_violation(
+            src, "taskvm/workspace_ui/virtual_mod.py"), (
+            f"gate must catch: {src!r}")
+    clean = ("import json\n"
+             "from taskvm.domain import patch\n"
+             "from .sibling import thing\n")
+    assert bench_import_violation(
+        clean, "taskvm/governance/virtual_mod.py") is None
