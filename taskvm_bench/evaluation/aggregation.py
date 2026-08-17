@@ -2,8 +2,13 @@
 
 Handoff 07 §统计与报告 requirements implemented here:
 
-* ONE unified report schema (``taskvm_bench.evaluation.report/1``) — runners do
+* ONE unified report schema (``taskvm_bench.evaluation.report/2``) — runners do
   not invent their own fields;
+* token accounting is explicit: totals, per-trial / per-request means and
+  request counts with named denominators; a request whose usage the
+  provider never reported stays missing — never zero-filled into a mean
+  (schema/2 replaced the old ``mean_tokens_by_role``, which output raw
+  sums under a mean name);
 * the aggregate is computed FROM the persisted trial JSONs, so the raw
   verdicts stay authoritative (a summary can never overwrite or weaken
   them — it is additive);
@@ -30,8 +35,12 @@ __all__ = [
     "render_paper_tables",
 ]
 
-#: The frozen report schema identifier.
-REPORT_SCHEMA = "taskvm_bench.evaluation.report/1"
+#: The frozen report schema identifier. /2 (audit A-05) replaces the
+#: misnamed ``mean_tokens_by_role`` (raw sums labelled as means) with
+#: ``total_tokens_by_role`` / ``mean_tokens_per_trial_by_role`` /
+#: ``mean_tokens_per_request_by_role`` / ``n_requests_by_role`` — a /1
+#: report must NOT be silently re-interpreted with the new semantics.
+REPORT_SCHEMA = "taskvm_bench.evaluation.report/2"
 
 #: The failure taxonomy (handoff 07 minimum set + honest extras).
 FAILURE_TAXONOMY: tuple[str, ...] = (
@@ -135,17 +144,33 @@ def aggregate_trials(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         crash = sum(1 for r in recs if r.get("harness_crash"))
         classes = Counter(r.get("failure_class", "?") for r in recs)
         roles: dict[str, list[int]] = {}
+        # role -> [prompt_sum, completion_sum, metered_trials,
+        #           metered_requests] over METERED (trial, role) pairs only
         toks: dict[str, list[int]] = {}
         for r in recs:
-            for role, c in (r.get("model_calls_by_role") or {}).items():
+            calls_by_role = r.get("model_calls_by_role") or {}
+            for role, c in calls_by_role.items():
                 roles.setdefault(role, [0, 0])
                 roles[role][0] += int(c)
                 roles[role][1] += 1
             for role, pt in (r.get("model_tokens_by_role") or {}).items():
-                p, c = (pt if isinstance(pt, (list, tuple)) else (0, 0))
-                toks.setdefault(role, [0, 0])
-                toks[role][0] += int(p)
-                toks[role][1] += int(c)
+                pair = (pt if isinstance(pt, (list, tuple))
+                        and len(pt) == 2 else None)
+                if pair is None or not all(
+                        isinstance(v, (int, float))
+                        and not isinstance(v, bool) for v in pair):
+                    # honest missing: this trial reported no usage for the
+                    # role (prompt_tokens=None / no meter). Its requests
+                    # still count in n_requests_by_role but never enter a
+                    # token sum or a token-mean denominator — missing is
+                    # not zero, and pretending the provider returned usage
+                    # would understate every mean.
+                    continue
+                t = toks.setdefault(role, [0, 0, 0, 0])
+                t[0] += int(pair[0])
+                t[1] += int(pair[1])
+                t[2] += 1                        # one more metered trial
+                t[3] += int(calls_by_role.get(role, 0))
         elapsed = [float(r.get("elapsed_ms", 0.0)) for r in recs]
         gui = [int(r.get("gui_actions", 0)) for r in recs]
         writes = [int(r.get("system_writes", 0)) for r in recs]
@@ -184,8 +209,26 @@ def aggregate_trials(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "total_model_calls": total_calls,
             "mean_model_calls_by_role": {
                 r: safe_div(v[0], v[1]) for r, v in sorted(roles.items())},
-            "mean_tokens_by_role": {
+            # token accounting (schema/2, audit A-05) — the four fields
+            # below name their denominators explicitly:
+            #   total_tokens_by_role            sums over metered pairs
+            #   n_requests_by_role              ALL requests, metered or not
+            #   n_requests_with_usage_by_role   requests in metered trials
+            #   mean_tokens_per_trial_by_role   total / metered trials
+            #   mean_tokens_per_request_by_role total / metered requests
+            # roles with no metered trial appear only in n_requests_by_role.
+            "total_tokens_by_role": {
                 r: [v[0], v[1]] for r, v in sorted(toks.items())},
+            "n_requests_by_role": {
+                r: v[0] for r, v in sorted(roles.items())},
+            "n_requests_with_usage_by_role": {
+                r: v[3] for r, v in sorted(toks.items())},
+            "mean_tokens_per_trial_by_role": {
+                r: [safe_div(v[0], v[2]), safe_div(v[1], v[2])]
+                for r, v in sorted(toks.items())},
+            "mean_tokens_per_request_by_role": {
+                r: [safe_div(v[0], v[3]), safe_div(v[1], v[3])]
+                for r, v in sorted(toks.items())},
             "mean_gui_actions": mean(gui),
             "mean_system_writes": mean(writes),
             "interaction_compression": {
