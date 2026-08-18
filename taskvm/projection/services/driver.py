@@ -13,10 +13,14 @@ D-F2 repair notes:
   not exist (dead wiring: nothing ever started the driver over a real
   runtime). One node per tick keeps pause/stop responsive.
 - lifecycle methods (``start``/``pause``/``resume``/``stop``) return their
-  DETERMINISTIC lifecycle value ("running"/"paused"/"running"/"stopped") —
-  never ``self._status``, which the worker thread overwrites with per-tick
-  dispositions ("step_budget"/"done"/…) and would make HTTP responses
-  racy. Per-tick dispositions stay observable via ``status()`` and SSE.
+  DETERMINISTIC lifecycle value ("running"/"paused"/"running"/"stopped").
+  ``status()`` ALSO prefers lifecycle state: if ``_pause_event`` is set or
+  ``_lifecycle_stopped`` is True, ``status()`` returns "paused"/"stopped"
+  regardless of the per-tick disposition the worker last wrote. This closes
+  the race where ``run()`` returns "step_budget" and the worker overwrites
+  ``_status`` *after* ``pause()`` set the event but *before* the worker
+  reaches the pause check at the top of the loop. Per-tick dispositions are
+  still observable when no lifecycle flag is set (the normal running state).
 - ``execute_compensation`` now returns the RUNTIME's disposition
   ("complete" | "partial" | "failed" | ...), not the driver's internal
   status — the rollback route reports it honestly (§8).
@@ -168,6 +172,17 @@ class ThreadedRuntimeDriver:
         return "stopped"
 
     def status(self) -> str:
+        # A-02 race fix: lifecycle states (paused/stopped) are authoritative —
+        # a per-tick disposition ("step_budget"/"done"/…) that the worker
+        # wrote *before* pause() landed must not leak through status().
+        # The worker checks _pause_event/_stop_flag AFTER run() returns and
+        # skips its _status write if a lifecycle change raced in, but a tiny
+        # window still exists between the worker's check and its write.
+        # This guard makes status() deterministic: lifecycle always wins.
+        if self._lifecycle_stopped:
+            return "stopped"
+        if self._pause_event.is_set():
+            return "paused"
         return self._status
 
     # ── compensation (blocking, in the caller's thread) ──────────────────
@@ -268,6 +283,10 @@ class ThreadedRuntimeDriver:
             # loop — it fires while paused too (read-only world sync).
             self._maybe_heartbeat(time.monotonic())
             if self._pause_event.is_set():
+                # A-02 race fix: ensure status reflects paused even if a
+                # per-tick disposition was written after pause() set the
+                # event but before the worker reached this check.
+                self._status = "paused"
                 time.sleep(self._step_interval)
                 continue
             try:
@@ -281,6 +300,18 @@ class ThreadedRuntimeDriver:
                     self._lifecycle_stopped = True
                     self._status = "stopped"
                     break
+                # A-02 race fix: re-check lifecycle flags AFTER run() returns
+                # but BEFORE writing per-tick disposition. If pause() or stop()
+                # was called while run() was in-flight, the lifecycle state
+                # must not be overwritten by the per-tick disposition.
+                if self._stop_flag.is_set():
+                    self._lifecycle_stopped = True
+                    self._status = "stopped"
+                    break
+                if self._pause_event.is_set():
+                    self._status = "paused"
+                    time.sleep(self._step_interval)
+                    continue
                 if stop is not None and str(stop) in _SOFT_STOPS:
                     self._status = str(stop)
                 elif stop is not None:
