@@ -51,6 +51,8 @@ from taskvm.substrate.mobilegym.evaluation import (
 )
 from taskvm.substrate.mobilegym.session import MobileGymSubstrateSession
 from taskvm_bench.evaluation.results import (
+    FAILURE_CLASSES,
+    STAGES,
     TrialRecord as UserOpTrialRecord,
     UserOpRecord,
 )
@@ -59,7 +61,8 @@ from taskvm_bench.evaluation.user_ops import UserOp
 __all__ = [
     "BridgeUnavailableError", "DependencyMissingError", "FactoryError",
     "TrialIsolationError", "MobileGymFactory", "MobileGymTrialSpec",
-    "BridgeHandle", "ledger_role_counts", "REPO_ROOT",
+    "BridgeHandle", "classify_trial_failure", "ledger_role_counts",
+    "REPO_ROOT",
 ]
 
 #: repo root (this file is <repo>/taskvm_bench/evaluation/mobilegym_factory.py)
@@ -182,6 +185,79 @@ def ledger_role_counts(ledger: Any) -> dict[str, int]:
         "task_architect": int(counts.get("task_architect", 0)),
         "cua": int(counts.get("cua", 0)),
     }
+
+
+# ── B-07 trial integrity: the ONE failure-classification owner ──────────
+
+def _ledger_role_completed(ledger: Any, role: str) -> int:
+    """Rows for ``role`` whose ``ok`` is True — the calls that really
+    LANDED. A failed provider request (e.g. HTTP 401) ALSO leaves a
+    ledger row (``ok=False``, written from the call site's ``finally``)
+    — counting raw rows would launder a trial past the very stage its
+    request died in. Duck-typed on ``ledger.records``."""
+    if ledger is None:
+        return 0
+    n = 0
+    for rec in getattr(ledger, "records", ()) or ():
+        if getattr(rec, "role", None) == role \
+                and getattr(rec, "ok", False):
+            n += 1
+    return n
+
+
+def classify_trial_failure(exc: BaseException, *, stage: str,
+                           ledger: Any = None) -> str:
+    """(stage, exception, ledger telemetry) → ONE closed
+    ``FAILURE_CLASSES`` entry — THE single classification owner (no
+    call-site magic-string matching, no CLI guessing).
+
+    Priority (first match wins):
+
+    1. infrastructure classes are TYPE-driven at any stage — the runner
+       lacks the basis to continue (the bridge cannot be established, a
+             prototype dependency the factory only CALLS is absent);
+    2. prototype contract errors are TYPE-driven — the frozen architect
+       plane raises ``CompilerOutputError`` / ``ArchitectOutputError``
+       that name their own stage;
+    3. OPAQUE exceptions raised inside the bootstrap are sub-attributed
+       by REAL ledger telemetry — the shared ledger's COMPLETED (``ok``)
+       role rows say which model stages had already landed when the
+       error hit (a 401 leaves an ``ok=False`` row — it must NOT count
+       as a completed stage):
+
+         no ``ok`` ``state_compiler`` row → died in the compiler stage
+         no ``ok`` ``task_architect`` row → died in the architect stage
+         both landed                    → composition done; assembly died
+
+       (This is why ``run_trial`` always passes a factory-minted shared
+       ledger into the bootstrap — the telemetry must exist even when
+       the caller never supplied one.)
+    4. otherwise the stage the trial was in decides: ``setup`` →
+       ``setup_error``; ``evaluation`` → ``evaluation_error``; the
+       driver/execution plane → ``execution_error``.
+
+    Only ``infrastructure_fatal`` may stop a batch; every other class is
+    a per-trial materialized error record and the batch continues."""
+    from taskvm.architect.architect import ArchitectOutputError
+    from taskvm.architect.compiler import CompilerOutputError
+
+    if isinstance(exc, (BridgeUnavailableError, DependencyMissingError)):
+        return "infrastructure_fatal"
+    if isinstance(exc, CompilerOutputError):
+        return "compiler_contract_error"
+    if isinstance(exc, ArchitectOutputError):
+        return "architect_contract_error"
+    if stage in ("compiler", "architect"):
+        if _ledger_role_completed(ledger, "state_compiler") == 0:
+            return "compiler_contract_error"
+        if _ledger_role_completed(ledger, "task_architect") == 0:
+            return "architect_contract_error"
+        return "execution_error"          # composition done, assembly died
+    if stage == "setup":
+        return "setup_error"
+    if stage == "evaluation":
+        return "evaluation_error"
+    return "execution_error"
 
 
 # ── setup state (what the setup plane produced, honestly recorded) ─────────
@@ -542,10 +618,35 @@ class MobileGymFactory:
                           ledger: Any = None,
                           store: Any = None,
                           ) -> UserOpTrialRecord:
-        """The B-08 stage chain, already holding the trial gate."""
+        """The B-08 stage chain, already holding the trial gate — B-07
+        trial-integrity discipline:
+
+        * the ``TrialRecord`` EXISTS from the moment the trial starts and
+          is ALWAYS finalized and returned — a failing trial materializes
+          an honest error record instead of escaping as a raw exception;
+        * every stage (setup / bootstrap / driver / integrity) is an
+          explicit exception boundary; the ONE classification owner
+          (:func:`classify_trial_failure`) sets ``failure_class`` and
+          ``stage_reached`` — "never entered CUA" can never be mistaken
+          for "CUA GUI action failed";
+        * the ``last_*`` handles are cleared at trial START, so a failing
+          trial can never inherit the previous trial's artifacts.
+        """
         bridge = self.bridge
         assert bridge is not None      # ensured by run_trial's caller path
         sid = spec.resolve_sid()
+
+        # ── A5: no cross-trial dirty state — reset BEFORE anything runs;
+        # a mid-trial failure leaves THIS trial's partial state (or None),
+        # never the previous trial's success artifacts.
+        self.last_bundle = None
+        self.last_setup = None
+        self.last_integrity = None
+        self.last_session = None
+        self.last_oracles = None
+        self.last_record = None
+
+        # ── A2: the record exists from the moment the trial is requested
         record = UserOpTrialRecord(
             model=spec.model or "", substrate="mobilegym",
             condition=spec.condition,
@@ -553,12 +654,42 @@ class MobileGymFactory:
             sample_index=spec.sample_index,
             task_version=str(getattr(spec.fixture, "task_id", "task")),
         )
+        record.stage_reached = "setup"
 
-        oracles = self.build_oracles(spec.apps, sid)
-        setup = self.setup_trial(spec, oracles)
+        # the factory ALWAYS owns a shared ledger for this trial: the
+        # bootstrap's compiler/architect rows (and the runtime's CUA
+        # rows) become observable telemetry for sub-stage attribution
+        # and ``cua_entered`` — REAL rows, never guesses.
+        if ledger is None:
+            from taskvm.architect import ModelCallLedger
+            ledger = ModelCallLedger()
+
+        setup = TrialSetup(sid=sid)
+        self.last_setup = setup
         integrity: dict = {"status": "skipped", "detail": ""}
-        bundle: dict = {"sid": sid, "skipped": True}
-        session = None
+        self.last_integrity = integrity
+
+        def fail(exc: BaseException, stage: str) -> UserOpTrialRecord:
+            """Materialize ONE honest error record (exactly-once finalize)
+            — never a raw escape, never a silent skip."""
+            record.evaluation_error = (
+                f"{stage} stage: {type(exc).__name__}: {exc}")
+            record.failure_class = classify_trial_failure(
+                exc, stage=stage, ledger=ledger)
+            record.stage_reached = stage
+            record.finalize()
+            record.trial_verdict = "error"
+            self.last_record = record
+            return record
+
+        # ── stage: setup plane (oracles → reset → seed → invariant) ────
+        try:
+            oracles = self.build_oracles(spec.apps, sid)
+            self.last_oracles = oracles
+            setup = self.setup_trial(spec, oracles)
+            self.last_setup = setup
+        except Exception as exc:
+            return fail(exc, "setup")
 
         if setup.invariant_violation is not None:
             # B-10 honest dead-end: the reset/state invariant does NOT
@@ -566,49 +697,104 @@ class MobileGymFactory:
             # success. The SUT stages are SKIPPED: a world that cannot
             # be trusted must not be graded (nor burn provider calls).
             record.evaluation_error = setup.invariant_violation
-        else:
+            record.failure_class = "evaluation_error"
+            record.finalize()
+            record.trial_verdict = "error"
+            self.last_record = record
+            return record
+
+        # ── stage: L1 session + first observe (still the setup plane —
+        # the SUT has not been composed yet) ────────────────────────────
+        try:
             session = self.build_session(sid, spec.surface_app)
+            self.last_session = session
             initial_obs = session.observe(session.list_surfaces()[0])
             setup.initial_state_fingerprint = initial_obs.fingerprint
+        except Exception as exc:
+            return fail(exc, "setup")
 
+        # ── stage: the SUT bootstrap (compiler → architect → kernel →
+        # runtime), ONE prototype call (B-07 single execution path); the
+        # sub-stages are visible only through the shared ledger's rows ──
+        record.stage_reached = "compiler"
+        try:
             bundle = self.bootstrap_session(
                 spec, session=session, ledger=ledger, store=store,
                 model_port=model_port, bootstrap_fn=bootstrap_fn)
+        except Exception as exc:
+            stage = ("architect"
+                     if _ledger_role_completed(ledger, "state_compiler") > 0
+                     else "compiler")
+            return fail(exc, stage)
+        self.last_bundle = bundle
+        record.stage_reached = "architect"
 
-            if driver is not None:
+        # ── stage: the driver (user ops over the projection public API) ──
+        if driver is not None:
+            record.stage_reached = "execution"
+            try:
                 ops = list(user_ops) if user_ops is not None else \
                     self.make_driver_ops()
                 for op in ops:
                     outcome = driver.execute(op)
                     record.add_op(UserOpRecord(**outcome.to_record()))
+            except Exception as exc:
+                self._mark_cua_entry(record, ledger)
+                return fail(exc, "execution")
+            self._mark_cua_entry(record, ledger)
 
+        # ── stage: the grading plane (post-trial integrity) ────────────
+        record.stage_reached = "evaluation"
+        try:
             integrity = self.integrity_check(spec, oracles)
-            if integrity["status"] != "ok":
-                record.evaluation_error = (
-                    f"post-trial integrity: {integrity['status']}"
-                    f" ({integrity.get('detail', '')})")
+            self.last_integrity = integrity
+        except Exception as exc:       # integrity_check catches internally;
+            return fail(exc, "evaluation")   # this belt stays honest
+        if integrity["status"] != "ok":
+            record.evaluation_error = (
+                f"post-trial integrity: {integrity['status']}"
+                f" ({integrity.get('detail', '')})")
+            record.failure_class = "evaluation_error"
 
         record.finalize()
         # B-10: an evaluation_error is NEVER a success — force the
         # honest error verdict even if the per-op verdicts were green.
         if record.evaluation_error:
             record.trial_verdict = "error"
-        # keep the produced artifacts reachable for callers (smoke
-        # scripts assemble the B-10 manifest from them)
-        self.last_bundle = bundle
-        self.last_setup = setup
-        self.last_integrity = integrity
-        self.last_session = session
-        self.last_oracles = oracles
+        else:
+            record.stage_reached = "complete"
         self.last_record = record
         return record
+
+    @staticmethod
+    def _mark_cua_entry(record: UserOpTrialRecord, ledger: Any) -> None:
+        """Did the CUA model actually get invoked in THIS trial?
+
+        REAL telemetry only: (a) the shared ledger carries ``cua`` role
+        rows, or (b) a user-op timeline saw a real GUI action. Absent
+        both, ``cua_entered`` stays False — honest "not observed", never
+        a guess."""
+        if ledger_role_counts(ledger)["cua"] > 0:
+            record.cua_entered = True
+            return
+        for op in record.user_ops:
+            if (op.get("timeline") or {}).get("first_gui_action") \
+                    is not None:
+                record.cua_entered = True
+                return
 
     def manifest_fields(self, spec: MobileGymTrialSpec) -> dict:
         """The B-10 per-trial manifest block (bridge instance id, sid,
         environment seed, reset state hash, initial fingerprint, final
-        integrity) — assembled from the LAST run trial's artifacts."""
+        integrity) — assembled from the LAST run trial's artifacts.
+
+        B-07: a trial that died before the grading plane leaves
+        ``last_integrity`` cleared (None) — the manifest then reports
+        ``final_integrity_status: None`` (honest "never graded"),
+        never the previous trial's stale status."""
         if getattr(self, "last_setup", None) is None:
             raise FactoryError("no trial has run on this factory yet")
+        integrity = self.last_integrity or {}
         return {
             "bridge_instance_id": self.bridge.instance_id if self.bridge
             else None,
@@ -618,8 +804,8 @@ class MobileGymFactory:
             "reset_state_hash": self.last_setup.reset_state_hash,
             "initial_state_fingerprint":
                 self.last_setup.initial_state_fingerprint,
-            "final_integrity_status": self.last_integrity["status"],
-            "final_state_hash": self.last_integrity.get("final_state_hash"),
+            "final_integrity_status": integrity.get("status"),
+            "final_state_hash": integrity.get("final_state_hash"),
             # B-10 isolation accounting
             "isolation": {
                 "mode": "serial",

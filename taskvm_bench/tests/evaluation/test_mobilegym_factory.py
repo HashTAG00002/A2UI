@@ -403,9 +403,13 @@ def test_cli_parser_accepts_mobilegym_and_seed_semantics():
     assert args.condition == ["taskvm-real-full"]
     assert args.model == "gpt-5.6-sol"
     assert args.samples == 1 and args.env_seed == 0
-    # world branch is untouched (backwards compatible)
+    # B-07 (Task E): bare `run` no longer hard-defaults to world —
+    # the substrate/suite defaults are resolved by
+    # resolve_substrate_and_suite (mobilegym + rm-smoke; explicit world
+    # keeps the legacy smoke default). The parser itself stays neutral.
     args_w = p.parse_args(["run"])
-    assert args_w.substrate == "world" and args_w.seeds == 1
+    assert args_w.substrate is None and args_w.suite is None
+    assert args_w.seeds == 1
     with pytest.raises(SystemExit):
         p.parse_args(["run", "--substrate", "nosuch"])
 

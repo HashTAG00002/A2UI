@@ -24,6 +24,14 @@ The mobilegym branch passes the ``--condition`` string through VERBATIM
 (no registry lookup): the real-model condition definitions (e.g.
 ``taskvm-real-full``) land with B-06 and this CLI treats them as opaque
 identifiers, never re-defining them here.
+
+B-07 (trial-integrity round): the mobilegym batch loop is FAILURE
+TOLERANT per trial — every requested trial must materialize a record.
+A non-fatal trial failure (model/contract/execution/evaluation error)
+NEVER stops the batch; only ``infrastructure_fatal`` (the bridge/process
+cannot be established) stops it, with a clear reason. Defaults (Task E):
+no ``--substrate``/``--suite`` ⇒ mobilegym + rm-smoke; explicit
+``--substrate world`` keeps the legacy world/smoke behaviour.
 """
 from __future__ import annotations
 
@@ -56,6 +64,39 @@ def _tasks_from(args: argparse.Namespace):
     return list(get_suite(args.suite).tasks())
 
 
+def resolve_substrate_and_suite(
+    substrate: str | None, suite: str | None,
+) -> tuple[str, str]:
+    """Task E: the ONE substrate/suite default owner (pure, testable).
+
+    * nothing specified      → mobilegym + rm-smoke (the RM-0.B default
+                              surface; "no default combo may be born
+                              unsupported");
+    * ``--substrate world``  → the legacy default suite ``smoke``;
+    * ``--substrate mobilegym`` → the rm-smoke plumbing suite;
+    * only ``--suite`` given → the suite names its substrate (a world
+      registry suite ⇒ world; ``rm-smoke`` ⇒ mobilegym).
+
+    Explicit combos are returned verbatim — downstream validation
+    (registry lookup / the mobilegym suite guard) rejects nonsense.
+    """
+    world_suites = {s.suite_id for s in list_suites()}
+    if substrate is None:
+        if suite is None:
+            return "mobilegym", "rm-smoke"
+        if suite == "rm-smoke":
+            return "mobilegym", suite
+        if suite in world_suites:
+            return "world", suite
+        raise SystemExit(
+            f"suite {suite!r} is not known (world suites: "
+            f"{sorted(world_suites)}; mobilegym: rm-smoke or --task)")
+    if suite is None:
+        return substrate, ("smoke" if substrate == "world"
+                           else "rm-smoke")
+    return substrate, suite
+
+
 # ── subcommands ─────────────────────────────────────────────────────────────
 
 def cmd_list(args: argparse.Namespace) -> int:
@@ -78,6 +119,8 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    args.substrate, args.suite = resolve_substrate_and_suite(
+        args.substrate, args.suite)
     if args.substrate == "mobilegym":
         return _run_mobilegym(args)
     tasks = _tasks_from(args)
@@ -97,7 +140,29 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
-# ── the mobilegym branch (B-08) ─────────────────────────────────────────
+# ── the mobilegym branch (B-08; B-07 batch discipline) ───────────────
+
+def _synthetic_residual_record(spec, exc: BaseException):
+    """Task B: an exception LEAKED out of ``run_trial`` (a residual —
+    the factory's stage boundaries should have caught it). The batch
+    still materializes an honest record: verdict error, the closed
+    ``execution_error`` class (the leak happened somewhere past setup,
+    at the factory/CLI call plane — never precisely knowable), and the
+    raw exception named verbatim in ``evaluation_error``."""
+    from taskvm_bench.evaluation.results import TrialRecord
+    record = TrialRecord(
+        model=spec.model or "", substrate="mobilegym",
+        condition=spec.condition, sample_index=spec.sample_index,
+        task_version=str(getattr(spec.fixture, "task_id", "task")),
+    )
+    record.evaluation_error = (
+        f"residual leak (unclassified): {type(exc).__name__}: {exc}")
+    record.failure_class = "execution_error"
+    record.stage_reached = ""
+    record.finalize()
+    record.trial_verdict = "error"
+    return record
+
 
 def _run_mobilegym(args: argparse.Namespace) -> int:
     """RM-0.B MobileGym runs: the factory chain over the real bridge.
@@ -106,12 +171,18 @@ def _run_mobilegym(args: argparse.Namespace) -> int:
     real-model condition definitions — nothing is re-defined here). Only
     the ``rm-smoke`` plumbing suite / explicit ``--task`` fixture ids are
     accepted: RM-1.0 open-scenario task design is NOT this wave.
+
+    B-07 batch discipline: every requested trial materializes a record
+    (factory-returned or synthetic residual); non-fatal failures never
+    stop the batch; ONLY ``infrastructure_fatal`` stops it (clear
+    reason, exit code 2). The run ends with the Stage Survival Funnel.
     """
     from taskvm_bench.benchmark.mobilegym_fixtures import (
         TOP3_EXPENSE_TO_WECHAT, all_mobilegym_tasks,
     )
+    from taskvm_bench.evaluation.funnel import build_funnel, render_funnel
     from taskvm_bench.evaluation.mobilegym_factory import (
-        MobileGymFactory, MobileGymTrialSpec,
+        FactoryError, MobileGymFactory, MobileGymTrialSpec,
     )
     from taskvm_bench.evaluation.results import RunDirectory
 
@@ -149,6 +220,11 @@ def _run_mobilegym(args: argparse.Namespace) -> int:
     factory = MobileGymFactory(
         bridge_port=args.bridge_port, connect_only=not args.spawn_bridge)
     trial_manifests: list[dict] = []
+    records: list = []
+    trials_requested = len(fixtures) * samples
+    fatal_reason: str | None = None
+    trial_index = 0            # RUNNING index (never per-sample: two
+                               # fixtures must not overwrite trial-000)
     try:
         for fixture in fixtures:
             for sample in range(samples):
@@ -160,22 +236,59 @@ def _run_mobilegym(args: argparse.Namespace) -> int:
                       f"/s{sample} …", file=sys.stderr)
                 driver = UserOpDriver(
                     ProjectionClient(base_url, spec.resolve_sid()))
-                record = factory.run_trial(spec, driver=driver, store=store)
-                run_dir.write_trial(record, sample)
-                trial_manifests.append(factory.manifest_fields(spec))
+                try:
+                    record = factory.run_trial(spec, driver=driver,
+                                               store=store)
+                except FactoryError as e:
+                    # pre-trial fatal (bridge cannot be established /
+                    # isolation refusal): NO trial was entered, nothing
+                    # to materialize — stop the batch honestly.
+                    fatal_reason = f"{type(e).__name__}: {e}"
+                    break
+                except Exception as e:      # residual leak — still
+                    record = _synthetic_residual_record(spec, e)
+                run_dir.write_trial(record, trial_index)
+                trial_index += 1
+                records.append(record)
+                try:
+                    trial_manifests.append(factory.manifest_fields(spec))
+                except Exception as e:
+                    # a residual-leak record may have no factory
+                    # artifacts at all — the manifest block then says
+                    # so honestly instead of killing the batch here.
+                    trial_manifests.append({
+                        "sid": spec.resolve_sid(),
+                        "error": f"manifest unavailable: {e}",
+                    })
                 print(f"  → verdict={record.trial_verdict} "
                       f"ops={[o['verdict'] for o in record.user_ops]} "
                       f"eval_error={record.evaluation_error}",
                       file=sys.stderr)
+                if record.failure_class == "infrastructure_fatal":
+                    fatal_reason = (
+                        f"trial {fixture.task_id}/s{sample}: "
+                        f"{record.evaluation_error}")
+                    break
+            if fatal_reason:
+                break
+        funnel = build_funnel(records, trials_requested=trials_requested)
         run_dir.write_manifest(
             substrate="mobilegym", condition=condition,
             model=args.model or "", environment_seed=args.env_seed,
             samples=samples, suite=args.suite or "rm-smoke",
             tasks=[f.task_id for f in fixtures],
             trials=trial_manifests,
+            funnel=funnel.to_dict(),
+            batch_stopped_reason=fatal_reason,
         )
+        run_dir.write_report("funnel.json", funnel.to_dict())
     finally:
         factory.close()
+    print(render_funnel(funnel))
+    if fatal_reason:
+        print(f"\nBATCH STOPPED (infrastructure_fatal): {fatal_reason}",
+              file=sys.stderr)
+        return 2
     print(f"\nrun dir: {run_dir.root} (manifest.json / trials/) — "
           f"development_only plumbing smoke, NOT an RM task result")
     return 0
@@ -266,8 +379,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_list.set_defaults(fn=cmd_list)
 
     p_run = sub.add_parser("run", help="run a benchmark matrix")
-    p_run.add_argument("--suite", default="smoke",
-                       help="suite id (default: smoke)")
+    p_run.add_argument("--suite", default=None,
+                       help="suite id (default: rm-smoke for the "
+                            "mobilegym substrate, smoke for world)")
     p_run.add_argument("--task", action="append", default=None,
                        help="task id (repeatable; overrides --suite)")
     p_run.add_argument("--condition", action="append", default=None,
@@ -277,10 +391,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--budget", choices=sorted(BUDGET_PRESETS),
                        default="smoke")
     p_run.add_argument("--substrate", choices=["world", "mobilegym"],
-                       default="world",
+                       default=None,
                        help="world = the builtin deterministic matrix "
                             "runner; mobilegym = the RM-0.B factory over "
-                            "the real bridge/L1 stack (B-08)")
+                            "the real bridge/L1 stack (B-08). Default: "
+                            "mobilegym (the RM-0.B surface)")
     p_run.add_argument("--samples", type=int, default=None,
                        help="mobilegym only: real-model sample replicates "
                             "(stochastic retries of the SAME environment "

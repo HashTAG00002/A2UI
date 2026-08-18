@@ -31,8 +31,64 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
 
-#: per-op/trial record schema introduced by RM-0.B (B-05)
-SCHEMA_VERSION = "taskvm-userop-1"
+#: per-op/trial record schema introduced by RM-0.B (B-05).
+#:
+#: ``taskvm-userop-2`` (B-07, trial-integrity round) is ADDITIVE on top of
+#: ``taskvm-userop-1``: two new ``TrialRecord`` fields — ``stage_reached``
+#: and ``cua_entered`` — plus the closed ``STAGES`` / ``FAILURE_CLASSES``
+#: vocabularies below. No existing field changed meaning; old "-1"
+#: records read back with ``stage_reached == ""`` / ``cua_entered ==
+#: False`` which is exactly their honest default ("unknown / not
+#: observed"), so no re-interpretation of historical data is needed.
+SCHEMA_VERSION = "taskvm-userop-2"
+
+#: B-07 trial-integrity: the CLOSED stage vocabulary — how far ONE trial
+#: actually got through the evaluation chain, in causal order.
+#:
+#: * ``setup``       — world plane: oracle envs, reset, seed, the B-10
+#:                     reset/state invariant, and the L1 session build +
+#:                     first observe (everything before the SUT composition);
+#: * ``compiler``    — the state compiler was entered (inside the SUT
+#:                     bootstrap; a trial dying here never reached the
+#:                     architect);
+#: * ``architect``   — the task architect was entered (compiler already
+#:                     completed — attributed via the shared ledger's real
+#:                     role telemetry, not guessed);
+#: * ``execution``   — the driver's user ops ran against the live session
+#:                     (``cua_entered`` says whether the CUA model was
+#:                     actually invoked inside this stage);
+#: * ``evaluation``  — the post-trial integrity check ran;
+#: * ``complete``    — trial finalized with no error.
+STAGES = ("setup", "compiler", "architect", "execution", "evaluation",
+          "complete")
+
+#: B-07 trial-integrity: the CLOSED failure-class vocabulary (answers
+#: "which layer did this trial die in?" — never invented per-call-site).
+#:
+#: * ``setup_error``              — world plane failed before the SUT ran
+#:                                 (oracle env / reset / seed / L1 session
+#:                                 build exceptions);
+#: * ``compiler_contract_error``  — died in the compiler stage (typed
+#:                                 ``CompilerOutputError``, or ledger
+#:                                 telemetry shows no completed compiler
+#:                                 model call);
+#: * ``architect_contract_error`` — died in the architect stage (typed
+#:                                 ``ArchitectOutputError``, or the ledger
+#:                                 shows the compiler call landed but no
+#:                                 architect call did);
+#: * ``execution_error``          — died executing the SUT (post-composition
+#:                                 assembly, driver/user-op execution);
+#: * ``evaluation_error``         — the GRADING plane refused the trial
+#:                                 (B-10 reset/state invariant violation,
+#:                                 post-trial integrity unavailable) —
+#:                                 never a system crash, never a success;
+#: * ``infrastructure_fatal``     — the runner lacks the basis to continue
+#:                                 (bridge/process cannot be established,
+#:                                 a prototype dependency is missing) —
+#:                                 the only class that may stop a batch.
+FAILURE_CLASSES = ("setup_error", "compiler_contract_error",
+                   "architect_contract_error", "execution_error",
+                   "evaluation_error", "infrastructure_fatal")
 
 _HARNESS_VERSION = "rm0-bench-1"
 
@@ -78,6 +134,14 @@ class TrialRecord:
     trial_verdict: str = "pending"                 # pass|fail|error|pending
     failure_class: str = ""                        # honest, or ""
     evaluation_error: Optional[str] = None
+    #: B-07 (schema -2): furthest STAGES entry the trial actually reached;
+    #: "" on pre-integrity records (honest "not observed").
+    stage_reached: str = ""
+    #: B-07 (schema -2): did the CUA model actually get invoked during the
+    #: trial (shared-ledger ``cua`` role rows > 0, or a user-op timeline
+    #: that saw a real GUI action)? False is also honest when no telemetry
+    #: was available — it never guesses True.
+    cua_entered: bool = False
     created_at: float = field(default_factory=time.time)
     development_only: bool = True                  # RM-0.B plumbing smoke
 
@@ -86,7 +150,21 @@ class TrialRecord:
 
     def finalize(self) -> None:
         """Trial verdict from per-op verdicts (mean/majority discipline —
-        one lucky op never passes a trial; any error is an error)."""
+        one lucky op never passes a trial; any error is an error).
+
+        B-07 exactly-once discipline: an ``evaluation_error`` set by an
+        earlier stage failure ALWAYS wins over the generic per-op
+        aggregation below — a classified ``setup_error`` /
+        ``architect_contract_error`` / … must never be overwritten by the
+        blander ``no-user-ops-recorded`` (that string only describes the
+        SYMPTOM that the driver never ran, never the cause)."""
+        if self.evaluation_error is not None:
+            # a stage already classified this trial — keep the honest
+            # error verdict and its class; fill blanks only.
+            self.trial_verdict = "error"
+            if not self.failure_class:
+                self.failure_class = "execution_error"
+            return
         verdicts = [op.get("verdict", "error") for op in self.user_ops]
         if not verdicts:
             self.trial_verdict = "error"
