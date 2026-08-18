@@ -63,6 +63,10 @@ from taskvm.substrate import (
 from taskvm.verifier.visible import VisibleVerifier
 
 from taskvm.domain.state import ObservedValue, SurfaceEvidence, TaskVariable
+from taskvm.domain.intent import TaskIntent
+from taskvm.governance.events import GoalPatchRequested
+from taskvm.governance.service import GovernanceService
+from taskvm.projection.services.governance import KernelGovernancePort
 
 
 # ── the CUA model adapter (composition-owned, per RuntimePorts docstring) ──
@@ -387,6 +391,73 @@ class HandleCacheExtractor:
 # ── A-01: the production multi-surface binding resolver ───────────────────
 
 
+class GovernanceServicePort:
+    """The production governance port for the projection routes — the
+    GoalPatch wiring the frozen contracts mandate (projection.md §1:
+    "GoalPatch recomposition (architect-owned, **injected**)").
+
+    Every command EXCEPT goal_patch delegates to the stock
+    ``KernelGovernancePort`` (byte-identical kernel-only semantics —
+    LocalPatch / checkpoint / rollback / conflict are 0-model-call
+    kernel commands, single governance write each). ``goal_patch``
+    routes through ``GovernanceService.handle`` so the public route runs
+    the FROZEN chain:
+
+        apply_goal_patch (invalidate + block)
+        → ONE architect.recompose_future
+        → kernel.recompose (atomic close + unblock)
+
+    (architect contract §5 model-call table: GoalPatchRequested →
+    0 compiler / 1 architect.) A failed recomposition raises
+    ``GoalRecomposeFailed`` (a ValidationError → HTTP 409) with
+    ``pending_recompose`` honestly left set for a later
+    ``retry_goal_recompose`` — never a fallback plan, never a silent
+    reseed.
+    """
+
+    def __init__(self, service: GovernanceService,
+                 kernel: Any) -> None:
+        self._service = service
+        self._kernel_port = KernelGovernancePort(kernel)
+
+    # ── kernel-only commands: identical to the default port ────────────
+    def local_patch(self, updates: dict[str, Any],
+                    rationale: str = "") -> dict[str, Any]:
+        return self._kernel_port.local_patch(updates, rationale=rationale)
+
+    def checkpoint(self, label: str) -> dict[str, Any]:
+        return self._kernel_port.checkpoint(label)
+
+    def rollback(self, target_checkpoint_id: str,
+                 rationale: str = "") -> dict[str, Any]:
+        return self._kernel_port.rollback(target_checkpoint_id,
+                                          rationale=rationale)
+
+    def resolve_conflict(self, conflict_id: str, resolution: str,
+                         detail: str = "") -> dict[str, Any]:
+        return self._kernel_port.resolve_conflict(
+            conflict_id, resolution, detail=detail)
+
+    # ── the frozen GoalPatch closure chain (architect-injected) ────────
+    def goal_patch(self, *, goal: str,
+                   constraints: Iterable[str] = (),
+                   scope: Iterable[str] = (),
+                   success_criteria: Iterable[str] = (),
+                   rationale: str = "") -> dict[str, Any]:
+        new_intent = TaskIntent(
+            goal=goal,
+            constraints=tuple(constraints),
+            scope=tuple(scope),
+            success_criteria=tuple(success_criteria))
+        outcome = self._service.handle(GoalPatchRequested(
+            new_intent=new_intent, rationale=rationale))
+        detail = dict(outcome.detail)
+        detail["epoch"] = outcome.epoch
+        detail["recompose_closed"] = (            # closed by construction
+            self._service._kernel.pending_recompose is None)
+        return {"ok": True, "action": "goal_patch", "result": detail}
+
+
 class EvidenceSurfaceResolver:
     """The production ``SurfaceBindingResolver`` (A-01) — composition-owned
     private glue mapping compiler-minted opaque handle ids to session
@@ -651,18 +722,30 @@ def bootstrap_real_full(*, goal: str, sid: str,
                                    surface_resolver=surface_resolver)
 
     # (10) optional projection registration — the PUBLIC lifecycle takes
-    # over from here (POST /governance/start → driver → runtime → GUI)
+    # over from here (POST /governance/start → driver → runtime → GUI).
+    # GoalPatch wiring (audit 2026-08-19): the session is registered with
+    # the GovernanceService-backed governance port, so the public
+    # goal_patch route runs the FROZEN closure chain (apply_goal_patch →
+    # ONE architect.recompose_future → kernel.recompose → unblock)
+    # instead of the kernel-only default that left pending_recompose set
+    # and execution blocked forever (projection.md §1: recomposition is
+    # "architect-owned, injected" — this is the injection).
+    governance_service = GovernanceService(
+        kernel, architect=architect, compiler=compiler, ledger=ledger)
     if store is not None:
         from taskvm.projection.store import SurfaceDecl
         decls = tuple(
             SurfaceDecl(surface_id=info.surface_id,
                         display_name=info.display_name or info.surface_id)
             for info in surface_infos)
-        store.register(sid, kernel, runtime=runtime, surfaces=decls)
+        store.register(sid, kernel, runtime=runtime, surfaces=decls,
+                       governance=GovernanceServicePort(
+                           governance_service, kernel))
 
     return dict(sid=sid, intent=intent, kernel=kernel, runtime=runtime,
                 substrate=substrate, ledger=ledger,
                 model_port=port, compiler=compiler, architect=architect,
                 compiler_result=compiler_result,
                 architecture=arch, surfaces=surface_infos,
-                surface_resolver=surface_resolver)
+                surface_resolver=surface_resolver,
+                governance_service=governance_service)

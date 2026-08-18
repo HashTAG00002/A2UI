@@ -91,6 +91,7 @@ domain ← kernel ← architect ← governance ← runtime ← projection
 - **运行命令**：通过 `TASKVM_PYTHON` 环境变量指定解释器，或使用 `scripts/dev.sh`。
 - **Playwright 浏览器**：标准安装发现 + interpreter-derived `opt/ms-playwright` fallback。
 - **启动**：`./scripts/dev.sh` / 停止：`./scripts/stop.sh`。
+- 通过 FRIDAY_API_KEY 调用公司内部的的 API，详情参见 `docs/A2UI_开工大纲_v0_心智模型对齐版_老版本.md: 589-631`，设置环境变量：OPENAI_API_KEY=1925796454518841403
 
 ---
 

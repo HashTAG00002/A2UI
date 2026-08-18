@@ -81,8 +81,12 @@ pip install playwright && playwright install chromium   # 浏览器测试
 3. **任务目标与计划**：demo 的 goal 与 kernel plan 是手工 fixture（固定目标
    「把日历事件『产品发布』改期到 2026-08-18」、任务变量 `event_date`
    2026-08-14→2026-08-18、固定 2 节点 plan），**不经** State Compiler /
-   Task Architect；自然语言 goal → StateCompiler → TaskArchitect → runtime 的
-   full composition（taskvm-real-full）将在 RM-0.B 阶段补齐
+   Task Architect。自然语言 goal → fresh observation → StateCompiler →
+   TaskArchitect → Kernel → Runtime 的 full composition 已在 RM-0.B 落地
+   （`taskvm/workspace_ui/composition.py::bootstrap_real_full`），入口为
+   `taskvm/workspace_ui/demo_open.py`（`--goal` 必填；`--substrate
+   {mobilegym,builtin_web}`，默认 `mobilegym`；`--start-bridge` 可托管拉起
+   bridge）——dev.sh 的 demo 会话本身仍走手工 fixture
 4. **CUA 模型**：默认在线模式为真实 `HttpCUAModel`（`OPENAI_BASE_URL` /
    `OPENAI_API_KEY` / `TASKVM_MODEL`；一次 predict = 一次 provider 请求 = 一条
    ledger 记录）；`TASKVM_DEMO_OFFLINE` / `--offline` 切换为确定性 placeholder，
