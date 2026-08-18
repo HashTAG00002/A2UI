@@ -221,7 +221,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     echo "  The real run would now execute:"
     echo "    ${DEMO_ARGV[*]}"
     echo "  and then, from another terminal:"
-    echo "    curl -X POST http://127.0.0.1:$UI_PORT/governance/$SID/start"
+    echo "    curl -X POST http://127.0.0.1:$UI_PORT/api/sessions/$SID/governance/start"
     exit 0
 fi
 
@@ -235,8 +235,8 @@ echo "=============================================================="
 echo "  next steps (from ANOTHER terminal / your browser):"
 echo "    1. open the TaskVM UI:  http://127.0.0.1:$UI_PORT"
 echo "       (variables / workflow / governance / ledger / live screenshots)"
-echo "    2. start the autonomous loop:"
-echo "         curl -X POST http://127.0.0.1:$UI_PORT/governance/$SID/start"
+    echo "    2. start the autonomous loop:"
+    echo "         curl -X POST http://127.0.0.1:$UI_PORT/api/sessions/$SID/governance/start"
 echo "    3. watch the model drive the phone — every observe() frame shows"
 echo "       up as the surface card's screenshot in the UI"
 echo "    4. Ctrl-C here stops the demo AND the owned bridge"

@@ -410,7 +410,7 @@ def main(argv: list[str] | None = None) -> None:
                   "record)")
         print("  start the autonomous loop with:")
         print(f"    curl -X POST http://{args.host}:{args.port}"
-              f"/governance/{args.sid}/start")
+              f"/api/sessions/{args.sid}/governance/start")
         print("  stop: Ctrl-C (a spawned bridge dies with this process)")
         print("=" * 62)
 
