@@ -157,7 +157,16 @@ class AutonomyRuntime:
         STOPPED and the driver thread exits. Stop is irreversible — only
         a fresh composition / driver.start() with a new runtime instance
         can begin again (the frozen contract does not define restart-from-
-        stopped on the same runtime object)."""
+        stopped on the same runtime object).
+
+        A-02 stop-during-inference: a stop that lands while
+        ``predict_action`` is blocked on the provider must make the
+        prediction's returned ACT stale on arrival — the ACT branch
+        re-enters the lifecycle gate BEFORE start_action/substrate.act
+        (0 GUI writes). Stop deliberately does NOT bump the kernel epoch
+        (``request_governance`` bumps only for pause; the kernel is frozen
+        there) and stays ONE governance event — the single-owner path
+        pinned by tests/projection/test_lifecycle_a02.py."""
         self._stopped = True
         self._paused = True  # also pause to break out of action loop
         self._stop_reason = "stopped"
@@ -502,6 +511,26 @@ class AutonomyRuntime:
                 # ACT kind guarantees a gesture (CUADecision validation);
                 # this belt-and-braces guard keeps the type contract local
                 return "stopped", ""
+            # A-02 (stop during inference): ``predict_action`` may block on
+            # the provider for arbitrarily long. A public stop/pause that
+            # landed while the model was thinking makes this prediction
+            # stale ON ARRIVAL — re-enter the lifecycle gate (the same
+            # flags the loop top checks, applied AFTER the blocking
+            # inference) BEFORE start_action/substrate.act. Zero GUI
+            # writes; no second epoch/cancellation system is invented —
+            # these are the runtime's own lifecycle flags plus the kernel's
+            # governance log for an EXTERNAL stop (composition wrote
+            # ``request_governance("stop")`` directly; that path bumps no
+            # epoch, so the kernel gate alone would not veto the gesture).
+            # The provider row was already recorded above (1 request = 1
+            # row); execution disposition is NOT a ledger field (C-2). The
+            # attempt's lifecycle evidence is the kernel's
+            # GOVERNANCE_REQUESTED(stop) event + run() returning STOPPED;
+            # the handle honestly stays REQUESTED — never started, never
+            # partially executed.
+            if (self._paused or self._stopped
+                    or self._governance_says_stopped()):
+                return "stopped", ""
             if contract.requires_confirmation and self._kernel.epoch != request_epoch:
                 # governance moved between prediction and an irreversible
                 # act: the stale response must NOT land (runtime.md §4)
@@ -776,10 +805,14 @@ class AutonomyRuntime:
         """A-13 single-owner accounting. When the decision carries a
         ``request_id`` the CUA adapter already landed the provider-request
         row — we ANNOTATE it with execution context instead of appending a
-        second row (C-2: 1 provider request = 1 ledger row). Decisions
-        without a request_id (test fakes, adapters that do not own their
-        ledger) keep the legacy record path — for them the runtime IS the
-        row owner."""
+        second row (C-2: 1 provider request = 1 ledger row). An adapter
+        that declares ``records_own_ledger`` (the production
+        ``HttpCUAModel``) owns its row on EVERY path — even a decision
+        without a ``request_id`` (a test fake or a variant adapter) is
+        then NOT re-recorded here, mirroring the exception path's
+        existing ``records_own_ledger`` check. Only adapters without the
+        declaration (plain test fakes) keep the runtime as their row
+        owner."""
         self._model_calls += 1
         if decision.request_id and callable(
                 getattr(self._ledger, "annotate", None)):
@@ -788,6 +821,8 @@ class AutonomyRuntime:
                 attempt=attempt, is_repair=is_repair,
                 revision=self._kernel.task_state().revision)
             return
+        if getattr(self._cua, "records_own_ledger", False):
+            return    # the adapter's promise covers this request already
         self._ledger.record(ModelCallRecord(
             role=MODEL_ROLE_CUA, purpose=purpose,
             model=self._model or "",

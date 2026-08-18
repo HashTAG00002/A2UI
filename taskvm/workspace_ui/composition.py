@@ -43,7 +43,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import replace as _replace
-from typing import Any, Mapping, cast
+from typing import Any, Iterable, Mapping, cast
 
 from taskvm.architect import (
     ActionContractSerializer, HttpModelPort, ModelCallLedger,
@@ -330,6 +330,123 @@ class VisibleLabelExtractor:
         return tuple(out)
 
 
+# ── the observation extractor over the architect compile product (B-07) ───
+
+
+class HandleCacheExtractor:
+    """Runtime extractor OVER the architect compile product.
+
+    ``demo.py`` documents that the full handle-cache compile product
+    (architect plane) is the production observation path, while the builtin
+    apps render tables / definition lists — ``label: value`` tokens the
+    fast-path ``VisibleLabelExtractor`` matches rarely appear there, so the
+    OBSERVED plane would freeze at the compiler's initial reading. This
+    adapter closes that gap WITHOUT duplicating C's logic: each runtime
+    ``Observation`` becomes a one-region ``CompilerObservationView`` and
+    every variable re-read goes through ``StateCompiler.extract_observed``
+    — the architect's own public static implementation (reuse, not
+    re-implementation).
+
+    Honest fail-closed (same discipline as the fast path): a handle whose
+    ``surface_label`` does not match the observed surface's display name,
+    a handle without a ``value_pattern``, or a pattern that no longer
+    matches yields NO observation for that variable — never a guess.
+    """
+
+    def __init__(self, handles: Iterable[Any]) -> None:
+        self._handles = tuple(handles)
+        self.calls = 0
+
+    def extract(self, observation: Observation,
+                variables: Mapping[str, TaskVariable],
+                ) -> tuple[ObservedValue, ...]:
+        self.calls += 1
+        surface = getattr(observation, "surface", None)
+        label = (getattr(surface, "display_name", "") or ""
+                 or getattr(surface, "surface_id", "") or "surface")
+        region = VisibleRegion(
+            surface_label=label,
+            visible_text=getattr(observation, "visible_text", "") or "")
+        view = CompilerObservationView(
+            revision=int(getattr(observation, "revision", 0) or 0),
+            regions=(region,))
+        out: list[ObservedValue] = []
+        for h in self._handles:
+            if getattr(h, "semantic_key", "") not in variables:
+                continue
+            if not getattr(h, "value_pattern", ""):
+                continue
+            if getattr(h, "surface_label", "") and h.surface_label != label:
+                continue   # the handle is bound to a different surface
+            ov = StateCompiler.extract_observed(view, h)
+            if ov is not None:
+                out.append(ov)
+        return tuple(out)
+
+
+# ── A-01: the production multi-surface binding resolver ───────────────────
+
+
+class EvidenceSurfaceResolver:
+    """The production ``SurfaceBindingResolver`` (A-01) — composition-owned
+    private glue mapping compiler-minted opaque handle ids to session
+    surface ids over the frozen provenance chain:
+
+        compiler handle_id
+          → CompilerResult.handle_evidence.surface_label
+          → bootstrap's VisibleRegion.surface_label (= SurfaceInfo
+            .display_name or surface_id — what a real user would call the
+            window)
+          → SubstrateSession.list_surfaces().surface_id
+
+    The domain ``SurfaceHandle`` stays frozen (an opaque id only — a real
+    surface_id is never written into it); this mapping lives entirely in
+    composition glue, exactly where substrate.md §1 says substrate
+    selection/binding happens. The architect already reuses the compiler's
+    handle for a target_evidence label it has seen (``architect.py
+    _action_handle``), so ONE mapping serves both the contract-evidence and
+    variable-evidence resolution paths in the runtime.
+
+    Fail-closed (A-01): a handle resolves ONLY when the boot-time snapshot
+    still holds — the bound surface_id still exists, still answers to the
+    same visible label, and NO other surface claims that label. A surface
+    that disappeared, was recreated under a new id, was renamed, a label
+    conflict, or an unknown handle all return ``None`` — the runtime then
+    lands an honest StructureInvalidated / fail, NEVER a ``surfaces[0]``
+    guess. Every check is a read-only ``list_surfaces()`` — 0 model calls.
+    """
+
+    def __init__(self, substrate: Any,
+                 handle_labels: Mapping[str, str],
+                 bound_surfaces: Mapping[str, str]) -> None:
+        #: handle_id -> surface_label (from CompilerResult.handle_evidence)
+        self._handle_labels = dict(handle_labels)
+        #: surface_label -> surface_id (the bootstrap-time snapshot, i.e.
+        #: the same labels the VisibleRegions carried to the compiler)
+        self._bound = dict(bound_surfaces)
+        self._substrate = substrate
+        self.asks: list[tuple[str, str]] = []   # audit trail (test-facing)
+
+    def resolve_surface(self, handle_id: str, *, visible_label: str = ""
+                        ) -> str | None:
+        self.asks.append((handle_id, visible_label))
+        label = self._handle_labels.get(handle_id)
+        if not label:
+            return None          # unknown handle — no provenance, no guess
+        bound_sid = self._bound.get(label)
+        if not bound_sid:
+            return None          # the label never bound a surface at bootstrap
+        try:
+            infos = self._substrate.list_surfaces()   # fresh, read-only
+        except Exception:
+            return None          # an unreachable substrate is a routing failure
+        claimants = [i.surface_id for i in infos
+                     if (i.display_name or i.surface_id) == label]
+        if claimants != [bound_sid]:
+            return None          # gone / recreated / renamed / label conflict
+        return bound_sid
+
+
 # ── the bundle builder — the ONE compose_runtime call site ────────────────
 
 def build_runtime_ports(*, model_port: ModelPort | None = None,
@@ -363,13 +480,19 @@ def compose_task_runtime(kernel: Any, *, host: str = "localhost",
                          ports: RuntimePorts | None = None,
                          surfaces: list[str] | None = None,
                          model: str | None = None,
-                         budgets: Any = None) -> Any:
+                         budgets: Any = None,
+                         surface_resolver: Any = None) -> Any:
     """Build a real ``AutonomyRuntime`` for one task session — the single
     production call of ``compose_runtime`` (substrate.md §8 T1 leg-1).
 
     ``substrate`` may be injected (tests / alternate providers). By
     default a ``builtin_web`` ``SubstrateSession`` is created through the
     substrate registry from the provider's own URL knowledge.
+    ``surface_resolver`` (A-01) is the composition-owned
+    ``SurfaceBindingResolver`` (see ``EvidenceSurfaceResolver``); ``None``
+    keeps single-surface sessions working (routing-trivial) while a
+    multi-surface session without a resolver fails honestly in the
+    runtime instead of guessing.
     """
     if substrate is None:
         # §6-clean: NO concrete provider import — the builtin_web provider
@@ -383,12 +506,14 @@ def compose_task_runtime(kernel: Any, *, host: str = "localhost",
         substrate = substrate_registry.create_session("builtin_web", cfg)
     return compose_runtime(kernel, substrate,
                            ports or build_runtime_ports(),
-                           budgets=budgets, surfaces=surfaces, model=model)
+                           budgets=budgets, surfaces=surfaces, model=model,
+                           surface_resolver=surface_resolver)
 
 
 # re-exported for composition consumers (view building is architect-free)
 __all__ = [
-    "HttpCUAModel", "VisibleLabelExtractor",
+    "HttpCUAModel", "VisibleLabelExtractor", "HandleCacheExtractor",
+    "EvidenceSurfaceResolver",
     "build_runtime_ports", "compose_task_runtime",
     "bootstrap_real_full",
     "CompilerObservationView", "VisibleRegion",
@@ -404,6 +529,7 @@ def bootstrap_real_full(*, goal: str, sid: str,
                          store: Any = None,
                          model: str | None = None,
                          cua_model: Any = None,
+                         extractor: Any = None,
                          app: str | None = None, host: str = "localhost",
                          base_url: str | None = None,
                          surfaces: list[str] | None = None,
@@ -456,22 +582,31 @@ def bootstrap_real_full(*, goal: str, sid: str,
         substrate = substrate_registry.create_session("builtin_web", cfg)
     surface_infos = substrate.list_surfaces()
 
-    # (3-4) fresh observe → visible-only compiler view
+    # (3-4) fresh observe → visible-only compiler view. The SAME label
+    # mapping (display_name-or-surface_id → surface_id) becomes the A-01
+    # binding snapshot the production resolver re-validates live at every
+    # resolve — one source of truth for the provenance chain.
     wanted = set(surfaces) if surfaces else None
     regions: list[VisibleRegion] = []
+    bound_surfaces: dict[str, str] = {}
     revision = 0
     for info in surface_infos:
         if wanted is not None and info.surface_id not in wanted:
             continue
+        label = info.display_name or info.surface_id
         obs = substrate.observe(info)
         revision = max(revision, int(getattr(obs, "revision", 0) or 0))
         shot = getattr(obs, "screenshot_ref", None)
         regions.append(VisibleRegion(
-            surface_label=info.display_name or info.surface_id,
+            surface_label=label,
             visible_text=getattr(obs, "visible_text", "") or "",
             structure_fingerprint=getattr(obs, "fingerprint", "") or "",
             screenshot_data_url=(shot if isinstance(shot, str)
                                  and shot.startswith("data:image/") else None)))
+        # duplicate labels last-write-win here; the resolver's LIVE
+        # uniqueness check is the authority (a duplicated label can never
+        # resolve — fail closed, never a guess)
+        bound_surfaces[label] = info.surface_id
     view = CompilerObservationView(revision=revision,
                                    regions=tuple(regions))
 
@@ -491,10 +626,29 @@ def bootstrap_real_full(*, goal: str, sid: str,
     kernel.init_task_state(arch.variables)
     if arch.graph is not None:
         kernel.set_plan(arch.graph)
+    # B-07 observed-plane wiring: the compiler product's handle cache (the
+    # deterministic ``value_pattern`` re-reads) IS the production observation
+    # path for the runtime — handed to the runtime seam through a
+    # composition adapter that reuses ``StateCompiler.extract_observed``.
+    # No handle evidence (or an explicit ``extractor``) falls back to the
+    # label-token fast path — honest degradation, never a guess.
+    if extractor is None and compiler_result.handle_evidence:
+        extractor = HandleCacheExtractor(compiler_result.handle_evidence)
+    # A-01: the production multi-surface resolver — compiler handle_id →
+    # evidence surface_label → the bootstrap binding snapshot → the
+    # session's surface ids, re-validated live (read-only) per resolve.
+    # Multi-surface sessions route by evidence; single-surface sessions
+    # stay routing-trivial either way; unresolvable bindings fail closed.
+    surface_resolver = EvidenceSurfaceResolver(
+        substrate,
+        handle_labels={he.handle.handle_id: he.surface_label
+                       for he in compiler_result.handle_evidence},
+        bound_surfaces=bound_surfaces)
     ports = build_runtime_ports(model_port=port, ledger=ledger,
-                                cua_model=cua_model)
+                                cua_model=cua_model, extractor=extractor)
     runtime = compose_task_runtime(kernel, substrate=substrate,
-                                   ports=ports, model=model)
+                                   ports=ports, model=model,
+                                   surface_resolver=surface_resolver)
 
     # (10) optional projection registration — the PUBLIC lifecycle takes
     # over from here (POST /governance/start → driver → runtime → GUI)
@@ -510,4 +664,5 @@ def bootstrap_real_full(*, goal: str, sid: str,
                 substrate=substrate, ledger=ledger,
                 model_port=port, compiler=compiler, architect=architect,
                 compiler_result=compiler_result,
-                architecture=arch, surfaces=surface_infos)
+                architecture=arch, surfaces=surface_infos,
+                surface_resolver=surface_resolver)
