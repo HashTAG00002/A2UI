@@ -1,0 +1,415 @@
+"""python -m taskvm.workspace_ui.app_open — the TaskVM APP (Codex-like shell).
+
+RM.c.1 prep (2026-08-19): the user-visible APP a real human opens in a
+browser. Unlike ``demo_open`` (goal fixed on the launch line, bootstrap
+runs BEFORE the server), the APP boots EMPTY:
+
+    launch → empty store → UI hero "How can I help you today?"
+    user submits the first instruction
+      → POST /api/app/goals           (this module's route)
+      → background: stop old driver → drop old session →
+        bootstrap_real_full(goal …)   (the ONE composition, real model
+        calls: StateCompiler + TaskArchitect, gpt-5.6-sol via
+        HttpModelPort) → session registered in the projection store
+      → frontend polls /api/app/goals/<gid> until ready, then drives the
+        PUBLIC projection routes (select sid → SSE → governance start)
+
+Layering (why this file is legal):
+* ``taskvm/projection/`` is FROZEN — this module does NOT touch it. It
+  builds the stock app via ``workspace_ui.serve`` (composition seam) and
+  then adds APP-shell routes ON THE FLASK OBJECT from here
+  (``workspace_ui`` is the ACTIVE layer; session creation is composition
+  glue — exactly the place the contracts let wiring live).
+* autonomy is never started from here — the frontend calls the frozen
+  ``POST /api/sessions/<sid>/governance/start`` so the driver gets the
+  projection app's own SSE wiring.
+* the APP has NO reset/seed power (contract §4): the world is activated
+  ONCE, up-front, by the launch script's setup phase
+  (``scripts/app_mobilegym.sh`` → ``POST /api/reset/<sid>`` on the
+  bridge). Every goal runs on the SAME activated sid — one phone, one
+  live world; new goals see the world as the previous goal left it
+  (bottom-up projection, principle 1).
+
+Single-session honesty (bridge B-1: ONE active sid): the store keeps ONE
+session per bridge sid; a new goal stops the previous driver and
+re-registers under the same sid. The goal history (this process) is
+served for the hero's "recent tasks" chips.
+
+Screenshot side-channel (workspace_ui-owned, read-only): the runtime
+publishes ACTION_OBSERVED events whose ``artifact_ref`` is the bridge's
+``data:image/png;base64,…`` screenshot. A small poller thread decodes
+the latest one per sid and serves it at ``GET /api/app/screenshot`` so
+the surface card renders the live phone without a frozen-layer change.
+
+Usage
+-----
+    OPENAI_API_KEY=… python -m taskvm.workspace_ui.app_open \\
+        --host 0.0.0.0 --port 3016 --start-bridge
+    # (scripts/app_mobilegym.sh wraps this: sim + bridge + world reset
+    #  + this APP, all long-lived, pids under .run/)
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import subprocess
+import threading
+import time
+from typing import Any
+
+from taskvm.architect import ModelCallLedger
+from taskvm.projection.store import ProjectionSessionStore
+from taskvm.substrate import substrate_registry
+from taskvm.workspace_ui import serve
+from taskvm.workspace_ui.composition import bootstrap_real_full
+from taskvm.workspace_ui.demo_open import (
+    _ensure_mobilegym_bridge,          # closed-whitelist bridge glue (B-09)
+    _probe_observe,                    # one read-only observe() before serving
+)
+
+_GOAL_BOOTSTRAPPING = "bootstrapping"
+_GOAL_READY = "ready"
+_GOAL_FAILED = "failed"
+
+
+def _decode_data_url(ref: Any) -> tuple[str, bytes] | None:
+    """``data:image/…;base64,XXX`` → (mime, bytes); else None."""
+    if not (isinstance(ref, str) and ref.startswith("data:image/")):
+        return None
+    try:
+        head, b64 = ref.split(",", 1)
+        mime = head[5:].split(";", 1)[0] or "image/png"
+        return mime, base64.b64decode(b64)
+    except Exception:
+        return None
+
+
+class _ScreenshotPoller(threading.Thread):
+    """Per-session daemon: watch runtime events, keep the latest phone
+    screenshot bytes for ``GET /api/app/screenshot``. Read-only; exits
+    when its session is no longer the registered one."""
+
+    _POLL_S = 1.0
+
+    def __init__(self, app_state: "AppState", sid: str, sess: Any) -> None:
+        super().__init__(daemon=True, name=f"shot-{sid}")
+        self._app = app_state
+        self._sid = sid
+        self._sess = sess
+        self._seen = 0
+
+    def run(self) -> None:
+        while True:
+            time.sleep(self._POLL_S)
+            if self._app.store.get(self._sid) is not self._sess:
+                return          # dropped / replaced — stop watching
+            rt = getattr(self._sess, "runtime", None)
+            events_fn = getattr(rt, "runtime_events", None)
+            if not callable(events_fn):
+                return
+            try:
+                events = tuple(events_fn())
+            except Exception:
+                continue
+            for ev in events[self._seen:]:
+                decoded = _decode_data_url(getattr(ev, "artifact_ref", ""))
+                if decoded is not None:
+                    mime, data = decoded
+                    self._app.push_screenshot(self._sid, mime, data)
+            self._seen = len(events)
+
+
+class AppState:
+    """The APP shell's own mutable state (goals + latest screenshots)."""
+
+    def __init__(self, store: ProjectionSessionStore, *,
+                 sid: str, bridge_url: str, sim_url: str,
+                 model: str | None, apps: tuple[str, ...],
+                 offline: bool) -> None:
+        self.store = store
+        self.sid = sid
+        self.bridge_url = bridge_url
+        self.sim_url = sim_url
+        self.model = model
+        self.apps = apps
+        self.offline = offline
+        self._lock = threading.Lock()
+        self._goals: list[dict[str, Any]] = []
+        self._seq = 0
+        self._shots: dict[str, tuple[str, bytes, float]] = {}
+        self._shot_seq: dict[str, int] = {}
+        self._boot_lock = threading.Lock()   # one bootstrap at a time
+
+    # ── screenshots ────────────────────────────────────────────────────
+    def push_screenshot(self, sid: str, mime: str, data: bytes) -> None:
+        with self._lock:
+            self._shots[sid] = (mime, data, time.time())
+            self._shot_seq[sid] = self._shot_seq.get(sid, 0) + 1
+
+    def screenshot(self, sid: str) -> tuple[str, bytes, int] | None:
+        with self._lock:
+            shot = self._shots.get(sid)
+            if shot is None:
+                return None
+            mime, data, _ = shot
+            return mime, data, self._shot_seq.get(sid, 0)
+
+    # ── goals ──────────────────────────────────────────────────────────
+    def new_goal(self, goal: str, app: str) -> dict[str, Any]:
+        with self._lock:
+            self._seq += 1
+            gid = f"goal-{self._seq}"
+            rec = {"goal_id": gid, "sid": self.sid, "goal": goal,
+                   "app": app, "status": _GOAL_BOOTSTRAPPING,
+                   "error": "", "model_calls": 0,
+                   "created_at": time.time()}
+            self._goals.append(rec)
+            return rec
+
+    def goal(self, gid: str) -> dict[str, Any] | None:
+        with self._lock:
+            for g in self._goals:
+                if g["goal_id"] == gid:
+                    return dict(g)
+        return None
+
+    def goals(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [dict(g) for g in self._goals]
+
+    def finish(self, gid: str, *, ok: bool, error: str = "",
+               model_calls: int = 0) -> None:
+        with self._lock:
+            for g in self._goals:
+                if g["goal_id"] == gid:
+                    g["status"] = _GOAL_READY if ok else _GOAL_FAILED
+                    g["error"] = error
+                    g["model_calls"] = model_calls
+                    g["finished_at"] = time.time()
+
+    # ── the goal runner (one at a time; single world, single sid) ──────
+    def run_goal(self, rec: dict[str, Any]) -> None:
+        """Background: stop the old driver → drop the old session →
+        bootstrap the new goal on the SAME activated sid → expose the
+        model-call probe → start the screenshot poller."""
+        gid, goal, app = rec["goal_id"], rec["goal"], rec["app"]
+        ledger = ModelCallLedger()   # visible in the except path too —
+        #                            failures still report what they cost
+        try:
+            with self._boot_lock:
+                # (a) retire the previous session honestly: stop its
+                # autonomy loop BEFORE dropping it from the store.
+                old = self.store.get(self.sid)
+                if old is not None:
+                    driver = getattr(old, "driver", None)
+                    if driver is not None:
+                        try:
+                            driver.stop()
+                            driver.join(timeout=5.0)
+                        except Exception:
+                            pass        # best-effort; bootstrap proceeds
+                    self.store.drop(self.sid)
+                # (b) the ONE composition: real substrate session →
+                # bootstrap_real_full (compiler + architect REAL calls).
+                cua_model = None
+                if self.offline:
+                    from taskvm.workspace_ui.demo_open import _OfflineCUA
+                    cua_model = _OfflineCUA()
+                substrate = substrate_registry.create_session(
+                    "mobilegym",
+                    {"sid": self.sid, "bridge_url": self.bridge_url,
+                     "app": app})
+                bundle = bootstrap_real_full(
+                    goal=goal, sid=self.sid, substrate=substrate,
+                    ledger=ledger, store=self.store, model=self.model,
+                    cua_model=cua_model)
+                # (c) governance-bar probe: unified compiler+architect+CUA
+                # call count (read-only closure over the shared ledger).
+                sess = self.store.get(self.sid)
+                if sess is not None:
+                    sess.model_call_probe = ledger.total
+                    _ScreenshotPoller(self, self.sid, sess).start()
+                _ = bundle          # (bundle kept for debugging; the
+                #                      projection store is the UI's truth)
+                self.finish(gid, ok=True, model_calls=ledger.total())
+        except Exception as e:      # honest failure — surfaced in the UI,
+            #                       with the real cost of the failed attempt
+            self.finish(gid, ok=False,
+                        error=f"{type(e).__name__}: {e}",
+                        model_calls=ledger.total())
+
+
+def register_app_routes(app, store: ProjectionSessionStore,
+                        state: AppState) -> None:
+    """Add the APP-shell routes to the stock projection Flask app.
+
+    These are composition-seam routes (session creation + screenshot
+    side-channel); everything else stays on the frozen projection route
+    matrix."""
+
+    # ── GET /api/app/status — world + config for the empty-state hero ──
+    @app.route("/api/app/status")
+    def app_status():
+        shot = state.screenshot(state.sid)
+        return {
+            "ok": True, "app": "taskvm-app",
+            "world": {
+                "substrate": "mobilegym",
+                "sid": state.sid,
+                "bridge_url": state.bridge_url,
+                "sim_url": state.sim_url,
+                "apps": list(state.apps),
+                "model": (state.model
+                          or os.environ.get("TASKVM_MODEL", "gpt-5.6-sol")),
+                "offline": state.offline,
+                "openai_configured": bool(os.environ.get("OPENAI_API_KEY")),
+            },
+            "live_screenshot_seq": (shot[2] if shot else 0),
+            "goals": state.goals(),
+        }
+
+    # ── POST /api/app/goals — the first instruction creates the session ─
+    @app.route("/api/app/goals", methods=["POST"])
+    def app_create_goal():
+        from flask import jsonify, request
+        body = request.get_json(silent=True) or {}
+        goal = str(body.get("goal", "") or "").strip()
+        app_name = str(body.get("app", "") or "wechat").strip()
+        if not goal:
+            return jsonify({"ok": False, "error": "goal 不能为空"}), 400
+        if app_name not in state.apps:
+            return jsonify({"ok": False,
+                            "error": f"未知 app {app_name!r}（可用: "
+                                     f"{', '.join(state.apps)}）"}), 400
+        if not state.offline and not os.environ.get("OPENAI_API_KEY"):
+            return jsonify({"ok": False,
+                            "error": "OPENAI_API_KEY 未设置——编排阶段"
+                                     "（compiler+architect）需要真实模型"
+                                     "调用，没有手写兜底计划"}), 400
+        if any(g["status"] == _GOAL_BOOTSTRAPPING for g in state.goals()):
+            return jsonify({"ok": False,
+                            "error": "上一个任务还在编排中（同一时刻只"
+                                     "有一个活动世界）——请稍候"}), 409
+        rec = state.new_goal(goal, app_name)
+        threading.Thread(target=state.run_goal, args=(rec,), daemon=True,
+                         name=f"goal-{rec['goal_id']}").start()
+        return jsonify({"ok": True, "goal": rec}), 202
+
+    # ── GET /api/app/goals/<gid> — bootstrap status polling ────────────
+    @app.route("/api/app/goals/<gid>")
+    def app_goal_status(gid: str):
+        from flask import jsonify
+        rec = state.goal(gid)
+        if rec is None:
+            return jsonify({"ok": False, "error": "unknown goal"}), 404
+        return jsonify({"ok": True, "goal": rec})
+
+    # ── GET /api/app/screenshot?sid= — latest phone screenshot ─────────
+    @app.route("/api/app/screenshot")
+    def app_screenshot():
+        from flask import Response, request
+        sid = request.args.get("sid") or state.sid
+        shot = state.screenshot(sid)
+        if shot is None:
+            return Response(
+                json.dumps({"ok": False, "error": "no screenshot yet"}),
+                status=404, mimetype="application/json")
+        mime, data, _ = shot
+        return Response(data, mimetype=mime,
+                        headers={"Cache-Control": "no-cache"})
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(
+        prog="python -m taskvm.workspace_ui.app_open",
+        description="TaskVM APP — empty-state Codex-like shell; the first "
+                    "user instruction (POST /api/app/goals) bootstraps the "
+                    "real pipeline on the MobileGym substrate")
+    ap.add_argument("--host", default="0.0.0.0",
+                    help="bind host (default 0.0.0.0 — reachable from "
+                         "your laptop via port forwarding)")
+    ap.add_argument("--port", type=int, default=3016,
+                    help="APP UI port (default 3016)")
+    ap.add_argument("--sid", default="app",
+                    help="the bridge-activated session id the APP runs on "
+                         "(default: app; scripts/app_mobilegym.sh resets "
+                         "this sid once, up-front)")
+    ap.add_argument("--bridge-url", default=None,
+                    help="bridge base URL (default http://127.0.0.1:--bridge-port)")
+    ap.add_argument("--bridge-port", type=int, default=3019,
+                    help="bridge port (default 3019)")
+    ap.add_argument("--sim-url", default="http://localhost:3000",
+                    help="Vite sim URL (default http://localhost:3000)")
+    ap.add_argument("--start-bridge", action="store_true",
+                    help="spawn the bridge subprocess (closed whitelist, "
+                         "B-09) if no healthy bridge is found; the APP "
+                         "owns and kills only the bridge IT spawned")
+    ap.add_argument("--model", default=None,
+                    help="model override (default TASKVM_MODEL env or the "
+                         "port default gpt-5.6-sol)")
+    ap.add_argument("--apps", default="wechat,alipay",
+                    help="apps offered in the hero (comma-separated; "
+                         "default wechat,alipay — X ships an empty "
+                         "factory posts world)")
+    ap.add_argument("--offline", action="store_true",
+                    help="honest-FAIL placeholder CUA (compiler/architect "
+                         "still need OPENAI_API_KEY)")
+    return ap
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_arg_parser().parse_args(argv)
+    bridge_url = (args.bridge_url
+                  or f"http://127.0.0.1:{args.bridge_port}").rstrip("/")
+    apps = tuple(a.strip() for a in args.apps.split(",") if a.strip())
+
+    spawned_bridge = None
+    try:
+        # fail-closed bridge glue — identical semantics to demo_open
+        spawned_bridge = _ensure_mobilegym_bridge(args)
+
+        # one read-only observe() BEFORE serving: names what is missing
+        # (sim down / sid not activated) instead of a broken empty APP
+        session = substrate_registry.create_session(
+            "mobilegym", {"sid": args.sid, "bridge_url": bridge_url,
+                          "app": "wechat"})
+        _probe_observe(session, args.sid, bridge_url)
+
+        store = ProjectionSessionStore()          # EMPTY — the hero state
+        state = AppState(store, sid=args.sid, bridge_url=bridge_url,
+                         sim_url=args.sim_url, model=args.model,
+                         apps=apps, offline=args.offline)
+        app = serve(store)
+        register_app_routes(app, store, state)
+
+        print("=" * 62)
+        print("  TaskVM APP (empty state — no goal yet)")
+        print(f"  →  http://{args.host}:{args.port}")
+        print(f"  world: mobilegym sid '{args.sid}' · bridge {bridge_url}")
+        print(f"  sim (watch the phone): {args.sim_url}")
+        print(f"  apps: {', '.join(apps)} · model: "
+              f"{args.model or os.environ.get('TASKVM_MODEL', 'gpt-5.6-sol')}"
+              f"{' (OFFLINE CUA)' if args.offline else ''}")
+        print("  the first instruction you type in the browser runs the")
+        print("  REAL pipeline (StateCompiler → TaskArchitect → kernel →")
+        print("  AutonomyRuntime) — same bootstrap_real_full as the bench.")
+        if spawned_bridge is not None:
+            print("  bridge: SPAWNED by this APP (killed on exit)")
+        print("=" * 62)
+
+        app.run(host=args.host, port=args.port, threaded=True,
+                debug=False, use_reloader=False)
+    finally:
+        if spawned_bridge is not None:
+            spawned_bridge.terminate()
+            try:
+                spawned_bridge.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                spawned_bridge.kill()
+                spawned_bridge.wait(timeout=5)
+
+
+if __name__ == "__main__":
+    main()

@@ -17,6 +17,7 @@
       <div id="autonomy-badge" class="badge badge-idle">idle</div>
       <div id="epoch-badge" class="badge">epoch 0</div>
       <div id="model-calls" class="badge badge-ok">model: —</div>
+      <button id="btn-newtask" class="btn btn-default">+ New Task</button>
     </header>
 
     <!-- ── governance bar ────────────────────────────────── -->
@@ -35,7 +36,44 @@
       </div>
     </section>
 
-    <main class="main-grid">
+    <!-- ── empty-state hero (Codex-like: nothing until the first msg) ─ -->
+    <section id="hero" class="hero hidden">
+      <div class="hero-card">
+        <h1 class="hero-title">How can I help you today?</h1>
+        <p class="hero-sub" id="hero-world">connecting to the world…</p>
+        <div class="hero-input-row">
+          <select id="hero-app" class="hero-app-select">
+            <option value="wechat">微信</option>
+            <option value="alipay">支付宝</option>
+          </select>
+          <textarea id="hero-goal" rows="2"
+            placeholder="用一句话描述任务，例如：给黄勇发一条消息：我马上到"></textarea>
+          <button id="hero-send" class="btn btn-ok">发送 ⏎</button>
+        </div>
+        <div class="hero-chips" id="hero-chips">
+          <button class="chip" data-goal="给微信里的黄勇发一条消息：我马上到">给黄勇发微信：我马上到</button>
+          <button class="chip" data-goal="给张伟发条微信，告诉他明天上午十点开会">提醒张伟明天十点开会</button>
+          <button class="chip" data-goal="打开支付宝，查一下最近的转账记录，告诉我最大的一笔是多少钱、转给了谁">查支付宝最大一笔转账</button>
+        </div>
+        <p class="hero-hint" id="hero-hint"></p>
+      </div>
+    </section>
+
+    <!-- ── bootstrapping panel (compiler+architect running) ──────────── -->
+    <section id="boot-panel" class="boot-panel hidden">
+      <div class="boot-card">
+        <div class="boot-spinner"></div>
+        <div class="boot-text">
+          <div class="boot-title" id="boot-title">正在理解任务…</div>
+          <div class="boot-detail" id="boot-detail">StateCompiler 观察屏幕 → TaskArchitect 编排工作流（真实模型调用）</div>
+          <div class="boot-error hidden" id="boot-error"></div>
+          <button id="boot-back" class="btn btn-default hidden">← 返回重新输入</button>
+        </div>
+        <img id="boot-shot" class="boot-shot hidden" alt="">
+      </div>
+    </section>
+
+    <main class="main-grid" id="main-grid">
       <!-- ── left: workflow map ───────────────────────────── -->
       <section class="panel workflow-panel">
         <h2>Workflow</h2>
@@ -52,8 +90,15 @@
         </div>
       </section>
 
-      <!-- ── right: surfaces + checkpoints ─────────────────── -->
+      <!-- ── right: surfaces + checkpoints + live phone ─────────── -->
       <aside class="panel sidebar">
+        <section>
+          <h2>Live Phone <a id="sim-link" class="sim-link" href="#" target="_blank" title="在新标签页打开手机模拟器">↗</a></h2>
+          <div class="phone-shot-wrap">
+            <img id="phone-shot" class="phone-shot" alt="当前手机画面">
+            <div id="phone-shot-placeholder" class="placeholder">任务运行后这里显示实时手机画面</div>
+          </div>
+        </section>
         <section>
           <h2>Surfaces</h2>
           <div id="surface-cards" class="surface-cards">

@@ -1,5 +1,9 @@
 "use strict";
 let currentSid = null, sseSource = null, snapshot = null;
+let appStatus = null;          // GET /api/app/status payload
+let pollingGoal = null;        // goal_id while bootstrapping
+let shotSeq = 0;               // live screenshot cache-buster
+let appStatusTimer = null, bootTimer = null;
 
 async function api(path, opts = {}) {
   const res = await fetch(`/api/sessions/${currentSid}${path}`, {
@@ -16,6 +20,127 @@ function esc(s) {
   d.textContent = String(s ?? "");
   return d.innerHTML;
 }
+
+// ── APP shell (empty-state hero / goal bootstrap) ─────────────────────────
+
+async function loadAppStatus() {
+  try {
+    const res = await fetch("/api/app/status");
+    appStatus = res.ok ? await res.json() : null;
+  } catch { appStatus = null; }
+  return appStatus;
+}
+
+function renderHero() {
+  const hero = document.getElementById("hero");
+  if (!appStatus) { hero.classList.add("hidden"); return; }
+  const w = appStatus.world || {};
+  const names = { wechat: "微信", alipay: "支付宝", x: "X" };
+  const appSel = document.getElementById("hero-app");
+  appSel.innerHTML = "";
+  for (const a of w.apps || ["wechat"]) {
+    const o = document.createElement("option");
+    o.value = a; o.textContent = names[a] || a;
+    appSel.appendChild(o);
+  }
+  document.getElementById("hero-world").textContent =
+    `MobileGym 虚拟手机已就绪（${(w.apps || []).map(a => names[a] || a).join(" / ")}）· 模型 ${w.model || "?"}` +
+    (w.offline ? " · 离线 CUA" : "") +
+    (!w.openai_configured && !w.offline ? " · ⚠ OPENAI_API_KEY 未配置" : "");
+  document.getElementById("hero-hint").innerHTML =
+    `任务将驱动 <a href="${esc(w.sim_url)}" target="_blank">手机模拟器 ↗</a> 里的真实 GUI 完成 · ` +
+    `世界 sid <code>${esc(w.sid)}</code> · bridge <code>${esc(w.bridge_url)}</code>`;
+  hero.classList.remove("hidden");
+}
+
+function showView(which) {   // "hero" | "boot" | "dashboard"
+  document.getElementById("hero").classList.toggle("hidden", which !== "hero");
+  document.getElementById("boot-panel").classList.toggle("hidden", which !== "boot");
+  document.getElementById("main-grid").classList.toggle("hidden", which !== "dashboard");
+  document.getElementById("governance-bar").classList.toggle(
+    "hidden", which !== "dashboard" || !snapshot);
+}
+
+async function submitGoal(goal) {
+  goal = (goal || "").trim();
+  if (!goal) return;
+  const app = document.getElementById("hero-app").value || "wechat";
+  const res = await fetch("/api/app/goals", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ goal, app })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    document.getElementById("boot-error").textContent = data.error || `HTTP ${res.status}`;
+    document.getElementById("boot-error").classList.remove("hidden");
+    document.getElementById("boot-back").classList.remove("hidden");
+    showView("boot");
+    return;
+  }
+  pollingGoal = data.goal.goal_id;
+  document.getElementById("boot-title").textContent = "正在理解任务…";
+  document.getElementById("boot-detail").textContent =
+    "StateCompiler 观察屏幕 → TaskArchitect 编排工作流（真实模型调用）";
+  document.getElementById("boot-error").classList.add("hidden");
+  document.getElementById("boot-back").classList.add("hidden");
+  showView("boot");
+  if (bootTimer) clearInterval(bootTimer);
+  bootTimer = setInterval(pollGoal, 1500);
+}
+
+async function pollGoal() {
+  if (!pollingGoal) return;
+  let data;
+  try {
+    const res = await fetch(`/api/app/goals/${pollingGoal}`);
+    data = await res.json();
+  } catch { return; }
+  const g = data.goal;
+  if (!g) return;
+  const elapsed = Math.round((Date.now() / 1000) - g.created_at);
+  if (g.status === "bootstrapping") {
+    document.getElementById("boot-title").textContent = `正在理解任务…（${elapsed}s）`;
+    return;
+  }
+  clearInterval(bootTimer); bootTimer = null;
+  if (g.status === "failed") {
+    document.getElementById("boot-title").textContent = "编排失败（诚实报错，无兜底计划）";
+    document.getElementById("boot-error").textContent = g.error;
+    document.getElementById("boot-error").classList.remove("hidden");
+    document.getElementById("boot-back").classList.remove("hidden");
+    return;
+  }
+  // ready → dashboard: select the session, connect SSE, start autonomy
+  pollingGoal = null;
+  await loadSessions();
+  const sel = document.getElementById("session-select");
+  sel.value = g.sid;
+  onSessionChange();
+  showView("dashboard");
+  try {
+    await api("/governance/start", { method: "POST", body: JSON.stringify({ rationale: "APP first instruction" }) });
+  } catch (e) { console.warn("autostart failed:", e); }
+}
+
+function refreshLiveShot() {
+  const img = document.getElementById("phone-shot");
+  const ph = document.getElementById("phone-shot-placeholder");
+  fetch("/api/app/screenshot").then(r => {
+    if (!r.ok) throw new Error("none");
+    return r.blob();
+  }).then(blob => {
+    img.src = URL.createObjectURL(blob);
+    img.classList.remove("hidden");
+    ph.classList.add("hidden");
+  }).catch(() => { /* no shot yet — keep placeholder */ });
+  if (appStatus) {
+    const link = document.getElementById("sim-link");
+    if (appStatus.world && appStatus.world.sim_url) link.href = appStatus.world.sim_url;
+  }
+}
+
+// ── sessions / SSE / dashboard (projection plane) ──────────────────────────
 
 async function loadSessions() {
   const data = await fetch("/api/sessions").then(r => r.json());
@@ -56,7 +181,15 @@ function connectSSE() {
       loadSnapshot();
     }
   };
-  sseSource.onerror = () => {
+  sseSource.onerror = async () => {
+    // the session may have been replaced by a new goal — stop reconnecting
+    try {
+      const data = await fetch("/api/sessions").then(r => r.json());
+      if (!currentSid || !(data.sessions || []).includes(currentSid)) {
+        sseSource.close();
+        return;
+      }
+    } catch { /* fall through to reconnect */ }
     console.warn("SSE error, reconnecting in 3s…");
     setTimeout(() => { if (currentSid) connectSSE(); }, 3000);
   };
@@ -170,7 +303,7 @@ function renderSurfaces() {
     if (card.last_observed_at) html += ` · epoch ${card.last_observed_at}`;
     html += `</div>`;
     if (card.latest_artifact_ref) {
-      html += `<img class="artifact-thumb" src="/api/sessions/${currentSid}/artifacts/${esc(card.latest_artifact_ref)}" alt="screenshot">`;
+      html += `<img class="artifact-thumb" src="/api/sessions/${currentSid}/artifacts/${encodeURIComponent(card.latest_artifact_ref)}" alt="screenshot">`;
     }
     div.innerHTML = html;
     container.appendChild(div);
@@ -237,8 +370,28 @@ async function govCommand(cmd, body) {
 }
 
 // ── wire up ───────────────────────────────────────────────────────────────
-document.addEventListener("DOMContentLoaded", () => {
-  loadSessions();
+document.addEventListener("DOMContentLoaded", async () => {
+  await loadAppStatus();
+  renderHero();
+  await loadSessions();
+
+  // empty APP (no sessions) → hero; otherwise resume the dashboard
+  const sids = (await (await fetch("/api/sessions")).json()).sessions || [];
+  if (sids.length) {
+    const sel = document.getElementById("session-select");
+    sel.value = sids[0];
+    onSessionChange();
+    showView("dashboard");
+  } else {
+    showView("hero");
+  }
+
+  // periodic world-status + live screenshot refresh (cheap reads)
+  appStatusTimer = setInterval(async () => {
+    await loadAppStatus();
+    refreshLiveShot();
+  }, 2500);
+
   document.getElementById("session-select").onchange = onSessionChange;
   document.getElementById("btn-start").onclick = () => govCommand("start", { rationale: "UI start" });
   document.getElementById("btn-pause").onclick = () => govCommand("pause", { rationale: "UI pause" });
@@ -264,5 +417,33 @@ document.addEventListener("DOMContentLoaded", () => {
       || "UI goal patch";
     govCommand("goal_patch", { goal, constraints, rationale });
     document.getElementById("goal-modal").classList.add("hidden");
+  };
+
+  // APP shell: hero submit / chips / new task
+  document.getElementById("hero-send").onclick = () =>
+    submitGoal(document.getElementById("hero-goal").value);
+  document.getElementById("hero-goal").addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) {
+      submitGoal(document.getElementById("hero-goal").value);
+    }
+  });
+  document.querySelectorAll("#hero-chips .chip").forEach(chip => {
+    chip.onclick = () => {
+      document.getElementById("hero-goal").value = chip.dataset.goal;
+      submitGoal(chip.dataset.goal);
+    };
+  });
+  document.getElementById("btn-newtask").onclick = () => {
+    if (sseSource) sseSource.close();
+    pollingGoal = null;
+    if (bootTimer) { clearInterval(bootTimer); bootTimer = null; }
+    document.getElementById("hero-goal").value = "";
+    renderHero();
+    showView("hero");
+  };
+  document.getElementById("boot-back").onclick = () => {
+    pollingGoal = null;
+    if (bootTimer) { clearInterval(bootTimer); bootTimer = null; }
+    showView("hero");
   };
 });
