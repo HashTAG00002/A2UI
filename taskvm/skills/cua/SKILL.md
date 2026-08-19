@@ -1,40 +1,34 @@
-<!-- taskvm/skills/cua/SKILL.md — format template (RM1C-SKILLS skeleton).
-     The prompt-assembly injection point lives in the frozen layers and is
-     wired at the R2.5 stage; this file defines ONLY the three-section
-     format + the anti-cheat policy. Distilled content lands here per the
-     SKILL-LADDER (bench_design §17.2), sourced from development-split
-     successful trajectories ONLY. -->
-
-# GUI 操作代理 Skill
-
 ---
 role: cua
-version: 0.1.0
-status: skeleton — format template only; no distilled content yet
+version: 1.0.0
+status: distilled-v1 (L0 baseline lessons + general app-UI priors)
 distill_policy: development split 成功轨迹 only；held-out 变体永不参与蒸馏
 ---
 
+<!-- taskvm/skills/cua/SKILL.md — GUI 操作代理 skill v1（R2.5 SKILL-LADDER L0 蒸馏）。
+     来源：development split 的 L0 基线轨迹分析（2026-08-20，gpt-5.6-sol，六个 demo
+     goal，47 次真实调用归档于 eval_results/skill_ladder_l0_20260820/baseline/）。
+     L0 基线无端到端成功轨迹（0/6 到达 done），v1 = 通用 app UI 常识 + 基线失败
+     教训的匿名化提炼；held-out 变体永不参与蒸馏。禁词表以
+     tests/skills/test_skills_antileak.py 为准。 -->
+
+# GUI 操作代理 Skill
+
 ## 触发条件
 
-<!-- 何时注入本 skill（由 prompt 装载点评估；条件必须基于任务/输入的可见特征，
-     禁止基于任何评测协议的内部状态）。 -->
-
-- （示例格式）当操作目标指向某类应用（如支付、社交、内容社区）且需要在其中定位入口时注入对应先验。
+- 当操作目标指向移动端应用（支付、聊天、内容社区等）且需要在其中定位入口、输入文本或完成发送时注入本 skill。
 
 ## 通用领域与操作先验
 
-<!-- 通用世界知识与操作先验。允许：真实 app 的 UI 结构常识、跨任务通用的
-     操作惯例（bench_design §17.2 原例：「支付宝账单入口在底部 Tab『我的』」）。
-     禁止：任何 frozen task 的种子数据、成功判定谓词、防篡改保护名单、
-     检查点证据字段——完整禁词表以 tests/skills/ 的反泄露测试为准
-     （模板自身不复述禁词，避免自指误报）。 -->
-
-- （示例格式）支付宝的账单入口在底部 Tab「我的」。
-- （示例格式）聊天类应用发送消息的通用序列：点开目标会话 → 点底部输入框唤起键盘 → 输入文本 → 点发送键；长列表找目标时优先用搜索框而不是逐屏滚动。
+- **输入生效验证**：执行 type 后，屏幕可见文本必须立即出现所输入的内容；若屏幕毫无变化，说明输入未生效（焦点不在输入框）。此时不要重复输入——先点击输入框本身（等待出现光标/键盘/输入页）再输入；同一输入连续两次无效就必须换路径（导航 Tab、列表入口、搜索图标流程），绝不第三次重复同一动作。
+- **搜索入口的正确序列**：首页的搜索框通常是入口提示而非已聚焦的输入框——先点击它进入搜索页，再输入关键词；直接对首页 type 关键词不会生效。
+- **支付宝账单入口**：首页底部 Tab「我的」→「账单」，不依赖搜索。
+- **微信找会话的通用序列**：聊天列表页若顶部有搜索入口，优先搜索联系人名；没有搜索入口时切「通讯录」Tab 找联系人再发起聊天；逐个点开列表行试错是最下策。
+- **微信发消息的通用序列**：进入目标会话 → 点底部输入框唤起键盘 → 输入文本 → 点发送键。
+- **「已发送」的可见证据**：消息气泡出现在会话消息流尾部且输入框已清空；以屏幕可见为准，不猜测网络层状态。
+- **诚实的 done/fail**：只有当屏幕逐条满足动作目标的完成条件（Done when）时才返回 done；同一目标连续两次 done 被打回后，改判 fail 并给出业务原因（界面无法达成该目标），不要第三次重复 done。
 
 ## 蒸馏少样本
 
-<!-- 从 development split 成功轨迹蒸馏的少样本示例。每条注明来源档位
-     （L0/L1/L2）。本节在骨架阶段为空占位。 -->
-
-- （占位）待蒸馏 — R2.5 SKILL-LADDER 各档填充（L0 起步）。
+- （L0 基线教训，匿名化）某轨迹在支付宝首页对搜索入口连续输入同一关键词 9 次，屏幕始终无变化，耗尽单节点全部步数预算——教训：无效输入不会因重复而生效，应改走「我的」→「账单」。
+- （L0 基线教训，匿名化）某轨迹进入聊天应用后连续随机点列表行与返回键，始终未进入目标联系人的会话——教训：找目标会话优先走搜索或通讯录，而不是逐行试错。

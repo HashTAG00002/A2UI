@@ -1,39 +1,29 @@
-<!-- taskvm/skills/compiler/SKILL.md — format template (RM1C-SKILLS skeleton).
-     The prompt-assembly injection point lives in the frozen layers and is
-     wired at the R2.5 stage; this file defines ONLY the three-section
-     format + the anti-cheat policy. Distilled content lands here per the
-     SKILL-LADDER (bench_design §17.2), sourced from development-split
-     successful trajectories ONLY. -->
-
-# 状态编译器 Skill
-
 ---
 role: compiler
-version: 0.1.0
-status: skeleton — format template only; no distilled content yet
+version: 1.0.0
+status: distilled-v1 (L0 baseline lessons + general UI reading priors)
 distill_policy: development split 成功轨迹 only；held-out 变体永不参与蒸馏
 ---
 
+<!-- taskvm/skills/compiler/SKILL.md — 状态编译器 skill v1（R2.5 SKILL-LADDER L0 蒸馏）。
+     来源：development split 的 L0 基线轨迹分析（2026-08-20，gpt-5.6-sol，六个 demo
+     goal）。L0 基线无端到端成功轨迹，v1 = 通用界面解读惯例 + 基线失败教训的
+     匿名化提炼；held-out 变体永不参与蒸馏。禁词表以
+     tests/skills/test_skills_antileak.py 为准。 -->
+
+# 状态编译器 Skill
+
 ## 触发条件
 
-<!-- 何时注入本 skill（由 prompt 装载点评估；条件必须基于任务/输入的可见特征，
-     禁止基于任何评测协议的内部状态）。 -->
-
-- （示例格式）当输入包含「观察到的可见表面」且需要从中提取任务变量与绑定证据时注入。
+- 当输入包含「观察到的可见表面」且需要从中提取任务变量与绑定证据时注入。
 
 ## 通用领域与操作先验
 
-<!-- 通用世界知识与操作先验。允许：真实 app 的 UI 结构常识、跨任务通用的
-     观察解读惯例。禁止：任何 frozen task 的种子数据、成功判定谓词、防篡改
-     保护名单、检查点证据字段——完整禁词表以 tests/skills/ 的反泄露测试
-     为准（模板自身不复述禁词，避免自指误报）。 -->
-
-- （示例格式）微信的聊天列表按会话组织，每条会话显示联系人名称与最后一条消息预览；「变量」应绑定到这类屏幕可见的实体标签。
-- （示例格式）支付宝的账单记录中金额带正负号，负数表示支出、正数表示收入——解读金额变量时按此惯例。
+- **数值参数保持数字类型**：从目标文本提取的数量（天数、笔数、金额）建成 number 型变量时，desired 用数字字面量（如 30），不带引号——下游架构与写入动作会逐字比对类型，字符串形态的数字会成为整任务的死因。
+- **聊天类应用的界面组织**：聊天列表按会话组织（联系人名 + 最后一条消息预览）；「会话/联系人」类实体绑定到屏幕可见的名称标签。
+- **支付类应用的金额符号惯例**：账单记录中金额带符号，负数表示支出、正数表示收入；解读「最大支出」类变量时按符号方向取绝对值比较。
+- **导航状态不建写入变量**：「进入某应用」是位置变化不是业务写入——不要为它创建 editable 变量，避免下游被迫验证一个屏幕上不存在字面值的写入。
 
 ## 蒸馏少样本
 
-<!-- 从 development split 成功轨迹蒸馏的少样本示例。每条注明来源档位
-     （L0/L1/L2）。本节在骨架阶段为空占位。 -->
-
-- （占位）待蒸馏 — R2.5 SKILL-LADDER 各档填充（L0 起步）。
+- （L0 基线教训，匿名化）某编译把「最近 30 天」建为数值变量 desired=30，而后续架构给写入动作填了字符串 '30'，一致性检查拒绝、修复循环耗尽——教训：数值变量从源头就用数字字面量，给下游无歧义的类型锚点。

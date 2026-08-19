@@ -1,39 +1,29 @@
-<!-- taskvm/skills/verifier/SKILL.md — format template (RM1C-SKILLS skeleton).
-     The prompt-assembly injection point lives in the frozen layers and is
-     wired at the R2.5 stage; this file defines ONLY the three-section
-     format + the anti-cheat policy. Distilled content lands here per the
-     SKILL-LADDER (bench_design §17.2), sourced from development-split
-     successful trajectories ONLY. -->
-
-# 界面验证员 Skill
-
 ---
 role: verifier
-version: 0.1.0
-status: skeleton — format template only; no distilled content yet
+version: 1.0.0
+status: distilled-v1 (L0 baseline lessons + general evidence priors)
 distill_policy: development split 成功轨迹 only；held-out 变体永不参与蒸馏
 ---
 
+<!-- taskvm/skills/verifier/SKILL.md — 界面验证员 skill v1（R2.5 SKILL-LADDER L0 蒸馏）。
+     来源：development split 的 L0 基线轨迹分析（2026-08-20，gpt-5.6-sol，六个 demo
+     goal）。L0 基线无端到端成功轨迹，v1 = 通用判定证据惯例 + 基线失败教训的
+     匿名化提炼；held-out 变体永不参与蒸馏。禁词表以
+     tests/skills/test_skills_antileak.py 为准。 -->
+
+# 界面验证员 Skill
+
 ## 触发条件
 
-<!-- 何时注入本 skill（由 prompt 装载点评估；条件必须基于任务/输入的可见特征，
-     禁止基于任何评测协议的内部状态）。 -->
-
-- （示例格式）当输入包含「验证意图 + 写入后观察」且需要给出三态判定（changed / not_yet / cannot_verify）时注入。
+- 当输入包含「验证意图 + 写入后观察」且需要给出三态判定（changed / not_yet / cannot_verify）时注入。
 
 ## 通用领域与操作先验
 
-<!-- 通用世界知识与操作先验。允许：判定证据的通用惯例、常见界面的状态呈现
-     常识。禁止：任何 frozen task 的种子数据、成功判定谓词、防篡改保护名单、
-     检查点证据字段——完整禁词表以 tests/skills/ 的反泄露测试为准
-     （模板自身不复述禁词，避免自指误报）。 -->
-
-- （示例格式）判定 changed 必须引用屏幕上当前可见的证据（如刚发送的消息气泡、已点亮的点赞图标）；截图与可见文本不一致时倾向 cannot_verify，不要编造证据。
-- （示例格式）「已发送」的通用可见标志：消息气泡出现在会话尾部且输入框已清空——不是猜测网络层是否成功。
+- **导航完成的判据**：判定「进入某应用」类目标时，屏幕出现该应用的标志性界面（顶部应用名、主导航 Tab、应用特有列表）即为已变化——即使被验证项的字面值从未在屏幕上逐字出现，也不据此判 not_yet。
+- **消息已发送的判据**：消息气泡出现在会话消息流尾部、且输入框已清空；两者同时可见才算已变化。
+- **输入是否生效的判据**：判定输入类动作时，屏幕可见文本出现所输入的内容才算生效；屏幕无变化判 not_yet 并指出焦点可能不在输入框，而不是猜测输入已提交。
+- **证据优先于推断**：判定已变化必须引用屏幕当前可见的证据；观察与验证条件无法对应时倾向 cannot_verify，绝不编造证据或替界面找理由。
 
 ## 蒸馏少样本
 
-<!-- 从 development split 成功轨迹蒸馏的少样本示例。每条注明来源档位
-     （L0/L1/L2）。本节在骨架阶段为空占位。 -->
-
-- （占位）待蒸馏 — R2.5 SKILL-LADDER 各档填充（L0 起步）。
+- （L0 基线教训，匿名化）某验证面对「执行代理已进入聊天应用、屏幕可见聊天列表」仍对导航类写入判未完成，执行代理两次如实报完成被打回后升级——教训：导航完成以应用标志性界面可见为准，不苛求变量字面值上屏。

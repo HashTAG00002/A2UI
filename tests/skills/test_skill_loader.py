@@ -68,14 +68,24 @@ def test_explicit_off_values_return_the_same_object(monkeypatch):
         assert inject_skill("cua", prompt) is prompt, value
 
 
-def test_on_with_only_skeleton_files_is_still_the_same_object(monkeypatch):
-    """The repo's SKILL.md files are all skeleton at L0 start — turning
-    the flag ON must stay an honest no-op until distillation flips a
-    status. This is the clean-baseline lock for the L0 experiment."""
+def test_on_with_a_skeleton_status_file_is_still_the_same_object(
+        monkeypatch, tmp_path):
+    """A SKILL.md whose front-matter status starts with ``skeleton``
+    injects NOTHING even with the flag ON — placeholder text never
+    reaches a real prompt. Pinned with a FIXTURE file (not the repo's
+    real files) so the lock stays valid after real distillation
+    lands (the L0 v1 distillation flipped the repo files on
+    2026-08-20)."""
+    (tmp_path / "cua").mkdir()
+    (tmp_path / "cua" / "SKILL.md").write_text(
+        "---\nrole: cua\nversion: 0.1.0\n"
+        "status: skeleton — no distilled content yet\ndistill_policy: x\n"
+        "---\n\n## 触发条件\n- 占位\n", encoding="utf-8")
+    monkeypatch.setattr("taskvm.skills.loader.__file__",
+                        str(tmp_path / "loader.py"))
     monkeypatch.setenv(SKILL_ENV_FLAG, "on")
     prompt = "prompt"
-    for role in SKILL_ROLES:
-        assert inject_skill(role, prompt) is prompt, role
+    assert inject_skill("cua", prompt) is prompt
 
 
 def test_missing_role_directory_is_off(monkeypatch):
@@ -111,10 +121,17 @@ def test_on_flag_variants_enable_every_role(monkeypatch):
         assert all(skill_enabled(r) for r in SKILL_ROLES), value
 
 
-def test_read_skill_of_the_real_skeletons_is_none():
-    """The four real SKILL.md files are skeleton-status → no body."""
+def test_read_skill_of_the_real_files_is_distilled_v1():
+    """After the L0 distillation (2026-08-20, eval_results/
+    skill_ladder_l0_20260820/) the four real SKILL.md files carry
+    distilled v1 content: every role returns a non-empty body in the
+    frozen three-section shape the loader can inject."""
     for role in SKILL_ROLES:
-        assert read_skill(role) is None, role
+        body = read_skill(role)
+        assert body, role
+        for section in ("## 触发条件", "## 通用领域与操作先验",
+                        "## 蒸馏少样本"):
+            assert section in body, (role, section)
 
 
 # ── the wiring cannot silently rot ─────────────────────────────────────────
