@@ -17,6 +17,7 @@ dependencies = [
     "pillow>=10.0",
     "aiohttp>=3.9",             # MobileGym bridge async HTTP
     "jsonschema>=4.20",         # A2UI v0.9 schema validation (a2ui_schema_manager)
+    "a2ui-agent-sdk>=0.4.0",    # GenUI production layer: official catalog/validator (taskvm/genui)
     # playwright is installed separately (see README) because it needs `playwright install`
 ]
 
@@ -26,3 +27,6 @@ dev = ["pytest>=7.0"]
 
 [tool.setuptools.packages.find]
 include = ["taskvm*", "taskvm_bench*"]
+
+[tool.setuptools.package-data]
+taskvm = ["genui/prompts/*.md"]
