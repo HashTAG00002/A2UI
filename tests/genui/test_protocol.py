@@ -37,6 +37,29 @@ def test_catalog_id_matches_vendored_mirror():
     assert schema.get_catalog().catalog_id == protocol.CATALOG_ID
 
 
+# ── model-call role registration (A4 · workplan §20.2) ─────────────────────
+
+def test_decoder_role_registered_in_shared_ledger():
+    """Contract lock: genui's local role constant and the architect
+    ledger's MODEL_ROLES must name the same string, so the shared
+    ModelCallLedger buckets GenUI decoder calls under one key (the
+    verifier layer's MODEL_ROLE_MODEL_VERIFIER precedent)."""
+    from taskvm.architect.port import (
+        MODEL_ROLE_GENUI_DECODER, MODEL_ROLES,
+    )
+    assert protocol.GENUI_DECODER_MODEL_ROLE == MODEL_ROLE_GENUI_DECODER
+    assert MODEL_ROLE_GENUI_DECODER in MODEL_ROLES
+
+
+def test_shared_ledger_accepts_decoder_role_record():
+    from taskvm.architect.port import ModelCallLedger, ModelCallRecord
+    ledger = ModelCallLedger()
+    ledger.record(ModelCallRecord(
+        role=protocol.GENUI_DECODER_MODEL_ROLE, purpose="surface_compose",
+        model="gpt-5.6-sol", ok=True))
+    assert ledger.counts_by_role() == {"genui_decoder": 1}
+
+
 # ── surface id naming ──────────────────────────────────────────────────────
 
 def test_surface_id_naming_rules():

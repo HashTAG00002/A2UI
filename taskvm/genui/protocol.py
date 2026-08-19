@@ -84,6 +84,20 @@ GOVERNANCE_ACTION_NAMES: frozenset[str] = frozenset({
     "goal_patch", "recompose", "resolve_conflict",
 })
 
+#: The GenUI decoder's model-call role for the shared ledger. Identical
+#: string to ``taskvm.architect.port.MODEL_ROLE_GENUI_DECODER`` so the
+#: SAME ModelCallLedger instance buckets decoder calls under the key the
+#: benchmark reads (the architect layer is NOT imported here — genui is
+#: a plain-JSON port layer; a contract test pins the two constants
+#: together, mirroring taskvm/verifier/model_verifier.py's precedent).
+GENUI_DECODER_MODEL_ROLE: str = "genui_decoder"
+
+#: Model routing (workplan §20.2): the decoder may run on a cheaper
+#: faster model. Priority: constructor arg > this env var > the port's
+#: default. The chosen model id lands in every ledger row (``model``
+#: field) — honest accounting either way.
+GENUI_DECODER_MODEL_ENV: str = "TASKVM_GENUI_DECODER_MODEL"
+
 #: Component-id namespace reserved for the fixed Governance Shell. The
 #: dynamic surface must never create, hide or replace governance controls
 #: (workplan §4 `policy.py`).
