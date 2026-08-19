@@ -193,7 +193,10 @@ def test_first_trial_failure_does_not_block_second(
 
     assert r1.trial_verdict == "error"
     assert r1.failure_class == "architect_contract_error"
-    assert r2.trial_verdict == "pass"
+    # R1: trial 2 ran to completion but was never graded (no evidence
+    # recorder injected) — honest "pending", never a fake "pass"
+    assert r2.trial_verdict == "pending"
+    assert r2.failure_class == "ungraded"
     assert [op.kind for op in driver2.executed] == ["start", "stop"]
     for p in (p1, p2):
         assert json.load(open(p, encoding="utf-8"))["substrate"] == \
@@ -212,7 +215,8 @@ def test_failing_trial_never_inherits_previous_success(fake_bridge):
     ok = factory.run_trial(
         _spec(), bootstrap_fn=lambda **kw: {"sid": kw["sid"]},
         driver=FakeDriver())
-    assert ok.trial_verdict == "pass"
+    # R1: ungraded all-applied trial — honest "pending"
+    assert ok.trial_verdict == "pending"
     assert factory.last_bundle is not None
     assert factory.last_integrity == {"status": "ok", "detail": "",
                                       "final_state_hash": None} \
@@ -429,13 +433,17 @@ def test_cli_residual_leak_materializes_and_batch_continues(
     assert t0["trial_verdict"] == "error"
     assert "residual leak" in t0["evaluation_error"]
     assert t0["failure_class"] == "execution_error"
-    assert t1["trial_verdict"] == "pass"
+    # R1: trial 2 completed its ops but was never graded — "pending",
+    # and a pending trial is NOT a strict pass (mean/majority discipline:
+    # an unverified dimension is not a passed dimension)
+    assert t1["trial_verdict"] == "pending"
+    assert t1["failure_class"] == "ungraded"
     # the funnel saw both (2 materialized of 2 requested)
     funnel = json.load(open(d / "reports" / "funnel.json",
-                            encoding="utf-8"))
+                           encoding="utf-8"))
     assert funnel["trials_materialized"] == 2
     assert funnel["trials_missing"] == 0
-    assert funnel["strict_pass_count"] == 1
+    assert funnel["strict_pass_count"] == 0
 
 
 def test_cli_infrastructure_fatal_stops_batch_with_reason(

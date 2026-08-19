@@ -36,11 +36,17 @@ from typing import Any, Optional
 #: ``taskvm-userop-2`` (B-07, trial-integrity round) is ADDITIVE on top of
 #: ``taskvm-userop-1``: two new ``TrialRecord`` fields — ``stage_reached``
 #: and ``cua_entered`` — plus the closed ``STAGES`` / ``FAILURE_CLASSES``
-#: vocabularies below. No existing field changed meaning; old "-1"
-#: records read back with ``stage_reached == ""`` / ``cua_entered ==
-#: False`` which is exactly their honest default ("unknown / not
-#: observed"), so no re-interpretation of historical data is needed.
-SCHEMA_VERSION = "taskvm-userop-2"
+#: vocabularies below. No existing field changed meaning.
+#:
+#: ``taskvm-userop-3`` (R1 grader loop) is ADDITIVE on top of ``-2``: one
+#: new ``TrialRecord`` field — ``contract_verdict`` (the five-field
+#: deterministic grade) — AND a semantic correction to ``finalize()``:
+#: "all user ops applied" is no longer a PASS (applied is a diagnostic
+#: signal; the pass/fail decision belongs to the grader). Old "-2"
+#: records read back with ``contract_verdict == None`` — their historical
+#: pass/fail verdicts are re-interpreted honestly as op-level outcomes,
+#: never silently upgraded to graded passes.
+SCHEMA_VERSION = "taskvm-userop-3"
 
 #: B-07 trial-integrity: the CLOSED stage vocabulary — how far ONE trial
 #: actually got through the evaluation chain, in causal order.
@@ -142,6 +148,11 @@ class TrialRecord:
     #: that saw a real GUI action)? False is also honest when no telemetry
     #: was available — it never guesses True.
     cua_entered: bool = False
+    #: R1 (schema -3): the five-field deterministic grade
+    #: (``grader.ContractVerdict.to_json()``) — the ONLY source of a PASS
+    #: verdict. ``None`` = this trial has not been graded (an ungraded
+    #: trial whose ops all landed honestly reports ``pending``).
+    contract_verdict: Optional[dict] = None
     created_at: float = field(default_factory=time.time)
     development_only: bool = True                  # RM-0.B plumbing smoke
 
@@ -149,8 +160,13 @@ class TrialRecord:
         self.user_ops.append(asdict(record))
 
     def finalize(self) -> None:
-        """Trial verdict from per-op verdicts (mean/majority discipline —
-        one lucky op never passes a trial; any error is an error).
+        """Trial verdict from honest signals ONLY (R1 grader loop).
+
+        Per-op "applied" is a DIAGNOSTIC signal, never a pass: ops
+        landing is necessary but not sufficient. The pass/fail decision
+        belongs to ``grader.grade_task`` — its five-field verdict is
+        recorded in ``contract_verdict`` and is the ONLY path to
+        ``pass`` here.
 
         B-07 exactly-once discipline: an ``evaluation_error`` set by an
         earlier stage failure ALWAYS wins over the generic per-op
@@ -170,17 +186,31 @@ class TrialRecord:
             self.trial_verdict = "error"
             self.failure_class = "no-user-ops-recorded"
             return
-        if all(v == "applied" for v in verdicts):
-            self.trial_verdict = "pass"
+        if self.contract_verdict is not None:
+            # the graded path: pass/fail comes from the deterministic
+            # five-field verdict — never from op-level verdicts
+            self.trial_verdict = ("pass"
+                                  if self.contract_verdict.get("passed")
+                                  else "fail")
+            if self.trial_verdict == "fail" and not self.failure_class:
+                self.failure_class = "contract-violation"
             return
         if any(v == "error" for v in verdicts):
             self.trial_verdict = "error"
-        elif all(v in ("applied", "rejected") for v in verdicts):
+        elif all(v in ("applied", "rejected") for v in verdicts) \
+                and any(v == "rejected" for v in verdicts):
             self.trial_verdict = "fail"        # honest rejection ≠ crash
             self.failure_class = "user-op-rejected"
-        else:
+        elif any(v == "unsettled" for v in verdicts):
             self.trial_verdict = "fail"
             self.failure_class = "user-op-unsettled"
+        else:
+            # every op applied and NO grade has landed: the honest state
+            # is pending — the grading plane has not spoken yet. This is
+            # the abolished fake verdict's replacement: ops landing
+            # alone can never produce "pass".
+            self.trial_verdict = "pending"
+            self.failure_class = "ungraded"
 
 
 class RunDirectory:

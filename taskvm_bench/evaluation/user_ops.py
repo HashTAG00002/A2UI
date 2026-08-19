@@ -160,19 +160,27 @@ class OpOutcome:
     sse_window: list = field(default_factory=list)
     projection_before: dict = field(default_factory=dict)
     projection_after: dict = field(default_factory=dict)
+    #: world/protected diffs are filled by the HARNESS layer (the eval
+    #: plane brackets the op with hidden-oracle snapshots); the driver
+    #: itself can never read an oracle, so these stay honest ``None``
+    #: until someone who legitimately holds the world fills them.
+    world_diff: Optional[dict] = None
+    protected_diff: Optional[dict] = None
+    ledger_request_ids: Optional[list] = None
     detail: str = ""
 
     def to_record(self) -> dict:
-        """The B-05 persisted per-op record (world_diff/protected_diff and
-        ledger_request_ids are filled by the harness layer — honest
-        missing here, never fabricated)."""
+        """The B-05 persisted per-op record. ``world_diff`` /
+        ``protected_diff`` / ``ledger_request_ids`` carry the harness
+        layer's bracket measurements — honest ``None`` when the harness
+        had no oracle view, never fabricated here."""
         return dict(
             op_id=self.op.op_id, kind=self.op.kind, verdict=self.verdict,
-            world_diff=None, protected_diff=None,
+            world_diff=self.world_diff, protected_diff=self.protected_diff,
             projection=dict(before=self.projection_before,
                             after=self.projection_after),
             rollback=(self.response if self.op.kind == "rollback" else None),
-            ledger_request_ids=None,
+            ledger_request_ids=self.ledger_request_ids,
             timeline={k: self.timeline.get(k) for k in TIMELINE_KEYS},
             artifacts=[],
             http_status=self.http_status, response=self.response,
@@ -186,7 +194,13 @@ _VERIFIER_MARKERS = ("verif", "state.updated", "check")
 
 
 def _projection_digest(snapshot: dict) -> dict:
-    """Small, stable, PUBLIC summary of a snapshot for per-op records."""
+    """Small, stable, PUBLIC summary of a snapshot for per-op records.
+
+    The projection serves ``variables`` as a LIST of
+    ``{key, label, observed, desired, ...}`` rows — the digest keeps the
+    ``key -> [desired, observed]`` mapping so the grader's projection
+    consistency check can compare claimed observations against the
+    hidden world without re-fetching the full snapshot."""
     out: dict = {}
     if not isinstance(snapshot, dict):
         return out
@@ -200,7 +214,14 @@ def _projection_digest(snapshot: dict) -> dict:
             if isinstance(v, dict) else v
             for k, v in list(variables.items())[:64]}
     elif isinstance(variables, list):
-        out["variables"] = [str(v)[:80] for v in variables[:64]]
+        rows: dict = {}
+        for entry in variables[:64]:
+            if isinstance(entry, dict) and "key" in entry:
+                rows[str(entry["key"])] = (entry.get("desired"),
+                                            entry.get("observed"))
+            elif not isinstance(entry, dict):
+                rows[str(entry)[:80]] = entry
+        out["variables"] = rows
     return out
 
 

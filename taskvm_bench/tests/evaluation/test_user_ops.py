@@ -14,8 +14,11 @@ Iron rules pinned here (RM-0 work order §B-04):
   * per-op timeline records op_issued → http_accepted → first/last GUI
     action → verifier_completed → first_correct_projection → settled;
   * B-05: TrialRecord carries schema_version/git_sha/... and the TWO
-    DISTINCT concepts environment_seed vs sample_index; the verdict is
-    majority-honest (all-applied ⇒ pass, any-error ⇒ error).
+    DISTINCT concepts environment_seed vs sample_index;
+  * R1 (schema ``taskvm-userop-3``): per-op "applied" is a DIAGNOSTIC
+    signal — "all applied" alone reports honest "pending"; the ONLY
+    path to "pass" is a landed ``contract_verdict`` from the
+    deterministic grader (any-error still ⇒ error).
 """
 from __future__ import annotations
 
@@ -382,7 +385,11 @@ def test_trial_record_schema_fields():
     assert d["environment_seed"] == 42 and d["sample_index"] == 3
 
 
-def test_trial_verdict_aggregation_is_majority_honest():
+def test_trial_verdict_requires_a_grade_to_pass():
+    """R1: "all ops applied" is a DIAGNOSTIC signal, never a pass —
+    the abolished fake verdict's replacement. The pass/fail decision
+    belongs to ``grader.grade_task``; an ungraded all-applied trial
+    reports honest "pending"."""
     def op(verdict):
         return UserOpRecord(op_id=next_op_id(), kind="pause",
                             verdict=verdict)
@@ -391,13 +398,30 @@ def test_trial_verdict_aggregation_is_majority_honest():
     for _ in range(3):
         all_applied.add_op(op("applied"))
     all_applied.finalize()
-    assert all_applied.trial_verdict == "pass"
+    assert all_applied.trial_verdict == "pending"   # the fake pass is gone
+    assert all_applied.failure_class == "ungraded"
+
+    graded_pass = TrialRecord()
+    graded_pass.add_op(op("applied"))
+    graded_pass.contract_verdict = {"passed": True, "failure_codes": []}
+    graded_pass.finalize()
+    assert graded_pass.trial_verdict == "pass"
+    assert graded_pass.failure_class == ""
+
+    graded_fail = TrialRecord()
+    graded_fail.add_op(op("applied"))
+    graded_fail.contract_verdict = {
+        "passed": False, "failure_codes": ["WORLD_WITNESS_MISSING"]}
+    graded_fail.finalize()
+    assert graded_fail.trial_verdict == "fail"
+    assert graded_fail.failure_class == "contract-violation"
 
     one_lucky = TrialRecord()
     one_lucky.add_op(op("applied"))
     one_lucky.add_op(op("rejected"))
     one_lucky.finalize()
     assert one_lucky.trial_verdict == "fail"        # 1 lucky ≠ PASS
+    assert one_lucky.failure_class == "user-op-rejected"
 
     with_error = TrialRecord()
     with_error.add_op(op("applied"))

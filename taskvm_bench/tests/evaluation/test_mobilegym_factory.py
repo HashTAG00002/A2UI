@@ -328,7 +328,11 @@ def test_run_trial_full_chain_over_fakes(fake_bridge):
     assert [op.kind for op in driver.executed] == ["start", "stop"]
     # per-op records landed on the B-05 trial record
     assert [op["kind"] for op in record.user_ops] == ["start", "stop"]
-    assert record.trial_verdict == "pass"
+    # R1 semantics: no evidence recorder was injected, so no grade
+    # landed — all-applied alone is HONESTLY "pending", never "pass"
+    assert record.trial_verdict == "pending"
+    assert record.failure_class == "ungraded"
+    assert record.contract_verdict is None
     assert record.evaluation_error is None
     assert record.substrate == "mobilegym"
     assert record.condition == "taskvm-real-full"
@@ -494,10 +498,11 @@ def test_trial_isolation_rejects_second_concurrent(fake_bridge):
     assert "other/e0/s0" in str(ei.value)
     assert factory._busy_rejections == 1
     factory._trial_lock.release()
-    # after release the next trial runs normally
+    # after release the next trial runs normally (R1: ungraded honest
+    # pending — the grading plane has not spoken)
     rec = factory.run_trial(_spec(), bootstrap_fn=lambda **kw: {},
                             driver=FakeDriver())
-    assert rec.trial_verdict == "pass"
+    assert rec.trial_verdict == "pending"
 
 
 def test_trial_isolation_true_concurrency_is_rejected(fake_bridge):
