@@ -65,20 +65,23 @@ export function TaskExperience() {
       setLastAction(`rejected(${event.actionName}): ${event.reason}`);
       return;
     }
-    // The edited value lives in the CLIENT-side data model: the
-    // GenericBinder auto-generated setValue (dataContext.set) wrote it
-    // there on every keystroke (generic-binder.js "setters"). The
-    // protocol-native alternative — binding {"path": …} inside
-    // action.event.context — is rejected by the current genui policy
-    // layer (ticket A5-IFACE-01: docs/04_RM&APP时代/
-    // ticket_A5_IFACE_01_policy_databinding.md); this read is the
-    // interim, equally-honest path.
+    // The renderer hands us the action context AFTER resolving data
+    // bindings (web_core generic-binder resolveDeepSync) — a
+    // protocol-native {"path": …} value in the tree arrives here as a
+    // literal (policy-side: ticket A5-IFACE-01, adjudicated 2026-08-20).
+    // Trees that omit the value (semanticKey-only, the baseline form)
+    // read the CURRENT edited value from the client-side data model
+    // instead — the GenericBinder's setValue wrote it there on every
+    // keystroke. Equivalent, honest paths; never a guessed value.
     const surface = processorRef.current?.model.surfacesMap.get(
       action.surfaceId,
     );
-    const value = surface?.dataModel.get(
-      `/variables/${event.semanticKey}/desired`,
-    );
+    let value = event.value;
+    if (value === undefined) {
+      value = surface?.dataModel.get(
+        `/variables/${event.semanticKey}/desired`,
+      );
+    }
     if (value === undefined) {
       setLastAction(
         `rejected(${event.kind}): 读不到 ${event.semanticKey} 的编辑值`,

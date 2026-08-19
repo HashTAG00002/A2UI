@@ -34,6 +34,7 @@ SNAPSHOT = {
          "diverged": True, "mutability": "readonly", "editable": False,
          "confidence": 1.0},
         {"key": "budget", "label": "预算",
+         "value_type": "integer",
          "observed": 2000, "desired": 2000,
          "diverged": False, "mutability": "editable", "editable": True,
          "confidence": 1.0},

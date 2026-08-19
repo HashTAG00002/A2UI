@@ -21,7 +21,11 @@ Checks:
 3. actions: name must be in the surface allowlist (``taskvm.local_patch``
    only); governance names are rejected with an explicit
    governance-owned error; the action context's ``semanticKey`` must
-   exist and be editable;
+   exist and be editable; the context's ``value`` may be a LITERAL
+   (type-checked against the variable's value_type, bool never posing
+   as a number) or a protocol-native DataBinding ``{"path": …}``
+   (A5-IFACE-01: judged by the binding whitelist, never by literal
+   type checks — the client resolves bindings before dispatch);
 4. content: no absolute/deep-link URLs, no script-ish payloads; text
    length capped;
 5. governance shell integrity: component ids may never squat the
@@ -331,16 +335,35 @@ class SurfacePolicy:
 
     def _check_value_type(self, cid: str, key: str | None,
                           value: Any) -> list[str]:
+        """Type-check a LITERAL ``context.value``.
+
+        A protocol-native DataBinding ``{"path": …}`` (A5-IFACE-01,
+        option 1 of the ticket's adjudication) is NOT a literal: its
+        legality is the binding whitelist's to judge — the same rule as
+        every other binding in ``_check_bindings`` — and the eventual
+        resolved value's type is re-proved on the write path (the
+        client resolves bindings before dispatch, and the transport
+        re-validates the POSTed literal). Never isinstance it against
+        the variable's value_type."""
         var = self._context.variable(key) if key else None
         if var is None:
+            return []
+        if isinstance(value, dict) and set(value.keys()) == {"path"} \
+                and isinstance(value["path"], str):
+            p = value["path"]
+            if p not in self._whitelist:
+                return [
+                    f"component {cid!r}: action value binding path {p!r} "
+                    "is not a whitelisted path of the current data model"]
             return []
         vt = var.value_type
         if vt == "boolean" and not isinstance(value, bool):
             return [f"component {cid!r}: variable {key!r} expects a boolean"]
-        if vt == "number" and not isinstance(value, (int, float)) or \
-           vt == "integer" and not isinstance(value, int):
-            if vt in ("number", "integer"):
-                return [f"component {cid!r}: variable {key!r} expects a number"]
+        if vt in ("number", "integer") and (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or (vt == "integer" and not isinstance(value, int))):
+            return [f"component {cid!r}: variable {key!r} expects a number"]
         if vt in ("string", "date", "text", "status") and not isinstance(value, str):
             return [f"component {cid!r}: variable {key!r} expects a string"]
         return []

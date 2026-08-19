@@ -170,6 +170,91 @@ def test_action_missing_semantic_key_rejected(context, valid_components):
     assert any("semanticKey" in e for e in errors)
 
 
+# ── A5-IFACE-01: protocol-native DataBinding in action context values ─────
+
+def test_action_value_databinding_accepted(context, valid_components):
+    """A5-IFACE-01 (option 1): a ``{"path": …}`` value in the action
+    context is protocol-native (client_to_server.json: "after resolving
+    all data bindings") — judged by the binding whitelist, never by
+    literal type checks. The ticket's exact repro used to die with
+    "variable 'release_date' expects a string"."""
+    good = _replace(valid_components, "submit",
+                    action={"event": {
+                        "name": "taskvm.local_patch",
+                        "context": {
+                            "semanticKey": "release_date",
+                            "value": {"path":
+                                      "/variables/release_date/desired"},
+                        }}})
+    assert validate_components(good, context) == []
+
+
+def test_action_value_databinding_number_variable_accepted(
+        context, valid_components):
+    good = _replace(valid_components, "submit",
+                    action={"event": {
+                        "name": "taskvm.local_patch",
+                        "context": {
+                            "semanticKey": "budget",
+                            "value": {"path": "/variables/budget/desired"},
+                        }}})
+    assert validate_components(good, context) == []
+
+
+def test_action_value_databinding_unknown_path_rejected(
+        context, valid_components):
+    """The fix is NOT a blanket pass for every dict: a binding that
+    addresses a non-whitelisted path is still rejected (fail closed)."""
+    bad = _replace(valid_components, "submit",
+                   action={"event": {
+                       "name": "taskvm.local_patch",
+                       "context": {
+                           "semanticKey": "release_date",
+                           "value": {"path": "/variables/ghost/desired"},
+                       }}})
+    errors = validate_components(bad, context)
+    assert any("not a whitelisted path" in e for e in errors)
+
+
+def test_action_value_literal_type_still_checked(context, valid_components):
+    """Literals keep their type gate: a number literal for a string
+    variable is rejected (the whitelist does not vouch for literals)."""
+    bad = _replace(valid_components, "submit",
+                   action={"event": {
+                       "name": "taskvm.local_patch",
+                       "context": {"semanticKey": "release_date",
+                                   "value": 123},
+                   }})
+    errors = validate_components(bad, context)
+    assert any("expects a string" in e for e in errors)
+
+
+def test_action_value_boolean_never_poses_as_number(
+        context, valid_components):
+    """bool is an int subclass; the literal gate now rejects it for
+    number/integer variables (aligned with the transport's write-path
+    check — same semantics in both gates)."""
+    bad = _replace(valid_components, "submit",
+                   action={"event": {
+                       "name": "taskvm.local_patch",
+                       "context": {"semanticKey": "budget",
+                                   "value": True},
+                   }})
+    errors = validate_components(bad, context)
+    assert any("expects a number" in e for e in errors)
+
+
+def test_action_value_literal_of_right_type_accepted(
+        context, valid_components):
+    good = _replace(valid_components, "submit",
+                    action={"event": {
+                        "name": "taskvm.local_patch",
+                        "context": {"semanticKey": "budget",
+                                    "value": 3000},
+                    }})
+    assert validate_components(good, context) == []
+
+
 # ── layer 2: structure + limits ────────────────────────────────────────────
 
 def test_missing_root_rejected(context, valid_components):

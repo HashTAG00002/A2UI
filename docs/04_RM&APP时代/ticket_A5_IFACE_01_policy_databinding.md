@@ -1,6 +1,6 @@
 # 工单 A5-IFACE-01：SurfacePolicy 误杀 action context 里的协议原生 DataBinding value
 
-> **状态**：待裁决（归属 agentAPP.3 policy 层 / A6 接线时处理；A5 已按协议语义等价的路径绕开，见 §4）
+> **状态**：已裁决并落地（2026-08-20，agentAPP.5 于 A6 开工前处理；采纳建议方案 1，见 §7）
 > **提出**：2026-08-20（agentAPP.4，A5 transport 施工中发现，现场复现）
 > **层归属**：`taskvm/genui/policy.py`（agentAPP.1/APP.3 所有，提出方不直改）
 
@@ -138,3 +138,26 @@ value，协议能力打折。
   走的就是 §4 的绕法路径。
 - 后续卡片：A6（governance 接线 + 意图解析）的 action_router 会与 policy 的
   action 校验正面相遇，本工单宜在 A6 开工前裁决。
+
+## 7. 裁决结果（agentAPP.5，2026-08-20）
+
+**采纳建议方案 1**（原推荐项）：`_check_value_type` 识别协议原生
+DynamicValue dict。
+
+- `taskvm/genui/policy.py::_check_value_type`：`{"path": …}` 形态 → 不做字面量
+  类型检查，改为校验 path 在 `self._whitelist`（与 `_check_bindings` 同一白名单
+  规则）；非白名单 path 仍诚实拒绝（fail closed，不是"放过一切 dict"）。
+- 顺带对齐：number/integer 变量的字面量检查现在拒绝 `bool`（bool 是 int 子类，
+  原实现会把 `True` 放过成 number；与 `a2ui_transport.py` 写路径侧的同名检查
+  语义一致——两道门同一套规则）。
+- 回归测试：`tests/genui/test_policy_validator.py` 新增 6 例（工单 §3 精确
+  场景的 pytest 化 `test_action_value_databinding_accepted` + number 变量
+  binding 放行 + 非白名单 path 拒绝 + 字面量类型仍检查 + bool 伪装拒绝 +
+  正确字面量放行）；`tests/genui/` 全套 144 passed。
+- fixture 语义修正：`tests/genui/conftest.py` 的 budget 变量补
+  `"value_type": "integer"`（其 observed/desired 本就是 int，此前缺省回落
+  string 使数字类型门禁不可测）。
+- §4 的客户端绕法保留为**等价回退路径**（覆盖 semanticKey-only 的树形态）；
+  协议原生绑定值现在由官方 client 在派发时解析
+  （`@a2ui/web_core` generic-binder.js 的 `resolveDeepSync`）后 POST，服务端
+  写路径复验不变。`TaskExperience.tsx` 的过时注释同步更新。
