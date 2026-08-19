@@ -65,17 +65,17 @@ def _compiler_reply() -> dict:
     """A valid StateCompiler reply for the fake L1 observation.
 
     Evidence surface_label must match the compiler view's region label:
-    the mobilegym session's surface display_name is
-    ``surface_app.title()`` = "Wechat". No value_pattern → the regex
-    re-read check is skipped (the fake visible text carries no
-    machine-readable value syntax)."""
+    the mobilegym session's surface display_name comes from the app
+    catalog's user-visible name — "wechat" → "微信". No value_pattern
+    → the regex re-read check is skipped (the fake visible text carries
+    no machine-readable value syntax)."""
     return {
         "variables": [{
             "semantic_key": "wechat_peer", "label": "wechat_peer",
             "value_type": "text", "mutability": "editable",
             "observed": "黄勇", "confidence": 0.9,
             "evidence": [{
-                "surface_label": "Wechat", "visible_label": "黄勇",
+                "surface_label": "微信", "visible_label": "黄勇",
                 "visible_context": "微信 黄勇 通讯录"}]}],
         "ambiguities": [], "needs_clarification": False,
     }

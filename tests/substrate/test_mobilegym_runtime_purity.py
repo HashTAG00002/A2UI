@@ -11,8 +11,10 @@ directly. What is locked:
     deleted);
   * the evaluation/setup plane (reset) legitimately activates a sid, and
     the runtime then observes/acts WITHOUT any further state switching;
-  * the wechat rollback path fails with an honest 409 and NEVER falls
-    back to a set_state restore.
+  * the GENERIC mutate rollback path (undo via the injected CUA loop)
+    fails with an honest 409 and NEVER falls back to a set_state restore;
+  * the write route without the injected CUA loop / ModelVerifier answers
+    the honest 501 — no unverified ok, no fallback.
 """
 from __future__ import annotations
 
@@ -68,18 +70,49 @@ class FakeGuiExecutorFailure(Exception):
 
 
 class FakeCua:
-    """CUA loop double whose grounding loop honestly fails the undo."""
+    """CUA-loop double for the GENERIC write path. ``gui_act_async``
+    records the composed instruction and returns a trace whose ``done``
+    flag the test controls (the grounding loop honestly failing the undo
+    = done False)."""
 
     GuiExecutorFailure = FakeGuiExecutorFailure
+
+    def __init__(self, done: bool = True, steps: int = 3):
+        self.done = done
+        self.steps = steps
+        self.instructions: list[str | None] = []
 
     async def gui_write_async(self, **kw):
         raise FakeGuiExecutorFailure()
 
+    async def gui_act_async(self, env=None, page=None, instruction=None,
+                            navigate=None, wait_ready=None,
+                            screenshot_dir=None, max_steps=25):
+        self.instructions.append(instruction)
+        return {"done": self.done, "steps": self.steps,
+                "actions": [{"gesture": f"tap({500 + i},{500 + i})"}
+                            for i in range(self.steps)]}
 
-def _bridge(env: FakeEnv, cua=None) -> MobileGymBridge:
+
+class FakeVerifier:
+    """ModelVerifier double: records the business intent it was asked to
+    judge and returns a fixed three-state verdict."""
+
+    def __init__(self, verdict: str = "changed"):
+        self.verdict = verdict
+        self.intents: list[str | None] = []
+
+    async def verify_intent(self, observation=None, intent=None):
+        self.intents.append(intent)
+        return {"verdict": self.verdict,
+                "evidence": "fake screen evidence"}
+
+
+def _bridge(env: FakeEnv, cua=None, verifier=None) -> MobileGymBridge:
     b = MobileGymBridge(sim_url="http://localhost:3000")
     b.env = env                       # injected (start_env never called)
     b.cua = cua
+    b.verifier = verifier
     return b
 
 
@@ -146,9 +179,9 @@ def test_act_mismatched_sid_never_touches_reality():
 
 def test_mutate_mismatched_sid_never_touches_reality():
     env = FakeEnv()
-    b = _bridge(env, cua=FakeCua())
+    b = _bridge(env, cua=FakeCua(), verifier=FakeVerifier())
     with pytest.raises(HTTPConflict) as ei:
-        asyncio.run(b.mutate_wechat("sX", "chat1", "send_message", "hi"))
+        asyncio.run(b.mutate("sX", "wechat", "黄勇", "发送文本消息：hi"))
     assert "session mismatch" in ei.value.text
     assert env.calls == []
 
@@ -198,13 +231,17 @@ def test_matching_sid_act_is_a_real_gesture_only(fake_bench_env):
 
 # ── honest irreversibility: 409, never a set_state restore ─────────────────
 
-def test_wechat_rollback_fails_honestly_with_no_backdoor_restore():
+def test_undo_fails_honestly_with_no_backdoor_restore():
+    """The GENERIC undo path (mutate undo=True): the injected grounding
+    loop cannot complete an undo through the app's own UI → honest 409
+    irreversible. The bridge must NEVER fall back to set_state."""
     env = FakeEnv()
-    b = _bridge(env, cua=FakeCua())
+    b = _bridge(env, cua=FakeCua(done=False), verifier=FakeVerifier())
     asyncio.run(b.reset("s1"))
     env.calls.clear()
     with pytest.raises(HTTPConflict) as ei:
-        asyncio.run(b.mutate_wechat("s1", "chat1", "send_message", "msg:9"))
+        asyncio.run(b.mutate("s1", "wechat", "黄勇",
+                             "发送文本消息：今晚开会", undo=True))
     assert "irreversible" in ei.value.text.lower()
     switches = [c for c in env.calls if c[0] in ("set_state", "reset")]
     assert not switches, (
@@ -212,11 +249,27 @@ def test_wechat_rollback_fails_honestly_with_no_backdoor_restore():
 
 
 def test_forward_write_without_cua_is_honest_501_not_fallback():
+    """Missing the injected CUA loop (or ModelVerifier) → honest 501
+    BEFORE touching the world; never an unverified ok, never set_state."""
     env = FakeEnv()
-    b = _bridge(env, cua=None)         # bridge started without --cua-loop
+    b = _bridge(env, cua=None, verifier=FakeVerifier())
     asyncio.run(b.reset("s1"))
     from aiohttp.web import HTTPNotImplemented
     with pytest.raises(HTTPNotImplemented):
-        asyncio.run(b.mutate_wechat("s1", "chat1", "send_message", "hello"))
+        asyncio.run(b.mutate("s1", "wechat", "黄勇", "发送文本消息：hello"))
     assert not [c for c in env.calls if c[0] == "set_state"], (
         "no-cua must degrade to 501, never to a set_state shortcut")
+
+
+def test_forward_write_without_verifier_is_honest_501_not_fallback():
+    """The write contract is "execute via real gestures AND verify via the
+    model" — missing the ModelVerifier alone is ALSO a 501 (no unverified
+    ok, ever)."""
+    env = FakeEnv()
+    b = _bridge(env, cua=FakeCua(), verifier=None)
+    asyncio.run(b.reset("s1"))
+    from aiohttp.web import HTTPNotImplemented
+    with pytest.raises(HTTPNotImplemented):
+        asyncio.run(b.mutate("s1", "wechat", "黄勇", "发送文本消息：hello"))
+    assert not [c for c in env.calls if c[0] == "set_state"], (
+        "no-verifier must degrade to 501, never to an unverified ok")

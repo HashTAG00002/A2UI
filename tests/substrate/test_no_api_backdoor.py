@@ -123,11 +123,10 @@ def test_runtime_sessions_have_no_setup_powers():
 
 BRIDGE = SUBSTRATE / "mobilegym" / "bridge.py"
 
-#: bridge methods on the RUNTIME plane (backing /api/observe, /api/act and
-#: the legacy operator routes). ``_require_active`` must gate them and the
-#: reality-switching calls must be absent.
-BRIDGE_RUNTIME_METHODS = ("observe", "act_primitive",
-                          "mutate_wechat", "mutate_x")
+#: bridge methods on the RUNTIME plane (backing /api/observe, /api/act
+#: and the GENERIC task-level write route). ``_require_active`` must gate
+#: them and the reality-switching calls must be absent.
+BRIDGE_RUNTIME_METHODS = ("observe", "act_primitive", "mutate")
 REALITY_SWITCH_CALLS = ("_activate", "env.reset", "env.set_state")
 
 

@@ -15,49 +15,47 @@ NOT ``set_state`` (which MobileGym's runtime-api.md L276 defines as setup-only
 ``StateAdapter`` interface, so we adapt MobileGym to that interface HERE and
 leave ``rollback.py`` / ``reconciliation.py`` / ``verifier/`` untouched.
 
-**Non-invasive write/rollback boundary (load-bearing — handoff fix
-2026-08-10, see memory taskvm-non-invasive-write-rollback-boundary; Task3 E10
-rework 2026-08-11).** The wechat write path goes through ``gui_write_async``
-(Task3 — a REAL grounding loop: screenshot → model → ``env.step(Action.click/
-type/swipe)`` gestures; the model observes the chat page and decides how to
-send: tap composer → type text → Enter/send). NO ``set_state``, and NOT a
-hardcoded click sequence. The earlier hardcoded 7-step ``_send_message`` is
-retained below as DEAD CODE (superseded by ``gui_write_async``; not on the
-live path, kept for reference only).
+**Non-invasive write/rollback boundary (load-bearing).** The task-level
+write path is the GENERIC ``mutate`` route: ``gui_act_async`` — a REAL
+grounding loop (screenshot → model → ``env.step(Action.click/type/swipe)``
+gestures) driven by a natural-language intent composed from caller-supplied
+business language (app display name + user-visible entity label + intent).
+NO ``set_state``, no operator enum, no per-app branch, no internal id.
 
-The wechat rollback path: ``gui_write_async(undo=True)`` — the model observes
-the chat page + TRIES to find a delete/recall UI (long-press menu, recall
-button). MobileGym's wechat has NO such UI (verified — no long-press handler,
-no deleteMessage store action, append-only messages), so the model outputs
-``{"action":"fail"}`` and the bridge raises ``web.HTTPConflict`` (409). This
-is honest irreversibility PROVEN by the model's real attempt (Task3 replaced
-the old hardcoded 409 with model-driven discovery of the same conclusion).
-The bridge does NOT fall back to ``set_state`` to fake a byte-exact restore
-(that would undermine the compensation claim — a backdoor rollback proves "we
-have debug permission," not "TaskVM compensates"). ``rollback.py``'s saga undo
-catches the 409 → ``reverted=False``, ``partial_failure=True``; the verifier
-independently confirms the message is still there (fidelity=0.0).
+Undo runs the same loop with an undo-framed instruction — the model observes
+the live screen and TRIES to find a delete/recall/restore UI. If the app's
+UI offers no such path, the loop fails and the bridge raises the honest
+``web.HTTPConflict`` (409 irreversible): irreversibility is PROVEN by the
+model's real attempt, never pre-judged by a hardcoded per-app verdict. The
+bridge does NOT fall back to ``set_state`` to fake a byte-exact restore
+(that would undermine the compensation claim — a backdoor rollback proves
+"we have debug permission," not "TaskVM compensates").
 
-The X toggle write path (``mutate_x``) is also a real grounding loop
-(``gui_act_async``). E16-complete (2026-08-12): the model's instruction names
-NO post_id, NO post text, NO current toggle state — pure-vision CUA (the
-content_hint backdoor, whether from posts.json or from DOM textContent, is
-fully removed; see the in-method comment).
+After every write loop, a FRESH observation goes to the INJECTED verifier
+(``--verifier``, the taskvm.verifier ModelVerifier contract adapted at
+process assembly) which judges the business intent against what the screen
+now shows; only its ``changed`` verdict returns ``status:"ok"``.
 
 Routes (mirror the Drive app's contract, app-namespaced):
     GET  /health                              → {"status":"ok","site":"mobilegym"}
-    GET  /<sid>                               → minimal HTML view (data-chat-id DOM)
-    POST /api/reset/<sid>                     → env.reset(app_ids=[wechat,alipay,x]) [SETUP]
+    GET  /<sid>                               → minimal HTML view (generic, catalog-driven)
+    POST /api/reset/<sid>                     → env.reset(app_ids=<all store apps>) [SETUP]
     POST /api/inject_task/<sid>               → env.set_state(seed, deep=True) [SETUP-ONLY]
     GET  /api/observe/<sid>                   → screenshot+visible text (RUNTIME; requires active sid)
     POST /api/act/<sid>                       → env.step(real gesture) (RUNTIME; requires active sid)
-    GET  /api/session_state/<sid>             → summary only (n_chats, n_tx) — never GT
-    GET  /api/wechat_chats/<sid>              → flattened wechat chats (entities)
-    GET  /api/alipay_transactions/<sid>       → flattened alipay transferRecords
-    GET  /api/x_posts/<sid>                   → X post rows (toggle bools from store [non-invasive]; content best-effort from whatever is already on screen — see B-04)
-    GET  /api/x_state/<sid>                   → X toggle lists (liked/retweeted/bookmarked ids) [verifier read, store-only]
-    POST /api/wechat/<sid>/<eid>              → send_message via gui_write_async (real gestures) OR msg:<id> rollback (gui_write_async undo → 409 if irreversible)
-    POST /api/x/<sid>/<eid>                   → toggle_like/retweet/bookmark via gui_act_async (pure-vision CUA, E16-complete)
+    GET  /api/app_state/<sid>/<app_id>        → raw store state of ANY catalog app [oracle]
+    GET  /api/os_state/<sid>                  → OS runtime state (tasks/settings/...) [oracle]
+    GET  /api/session_state/<sid>             → generic per-app summary (legacy summary block kept as compat alias)
+    GET  /api/wechat_chats/<sid>              → flattened wechat chats (legacy compat alias)
+    GET  /api/alipay_transactions/<sid>       → flattened alipay transferRecords (legacy compat alias)
+    GET  /api/x_posts/<sid>                   → X post rows (legacy compat alias; non-invasive store read)
+    GET  /api/x_state/<sid>                   → X toggle lists (legacy compat alias)
+    POST /api/mutate/<sid>                    → GENERIC model-driven write: {"app","entity_ref","intent"}
+                                                via gui_act_async + ModelVerifier gate; undo → 409 if
+                                                irreversible. App-agnostic — no operator enum, no per-app
+                                                branch (catalog validation only).
+    POST /api/wechat/<sid>/<eid>              → 302 → /api/mutate/<sid> (compat alias, removal scheduled)
+    POST /api/x/<sid>/<eid>                   → 302 → /api/mutate/<sid> (compat alias, removal scheduled)
 
 B-1 (Oracle audit 2026-08-15): ONE active experimental session at a time.
 The evaluation/setup plane (reset/inject_task/oracle reads) activates a
@@ -95,12 +93,24 @@ from typing import Any, Awaitable, Callable
 
 from aiohttp import web
 
+from taskvm.substrate.mobilegym.app_catalog import (
+    ALL_APP_IDS,
+    STORE_APP_IDS,
+    get_display_name,
+    is_valid_app_or_raise,
+)
+
 logger = logging.getLogger(__name__)
 
 SITE = "mobilegym"
 DEFAULT_PORT = 3019
-# MobileGym apps this bridge exposes (demo scope: Top3 task = alipay→wechat).
-APPS = ["wechat", "alipay", "x"]
+# Catalog-driven discovery (app_catalog is the single source of truth —
+# generated from the sim's own manifests):
+#   ALL_APPS — every registered app (open whitelist; storeless apps like
+#              calculator/theme_store included: their state IS the screen)
+#   APPS     — the store-backed subset, for get_state(required_apps=...)
+ALL_APPS = list(ALL_APP_IDS)
+APPS = list(STORE_APP_IDS)
 # The Vite dev/preview server URL the env drives.
 DEFAULT_SIM_URL = "http://localhost:3000"
 
@@ -110,20 +120,24 @@ class MobileGymBridge:
 
     def __init__(self, sim_url: str, headless: bool = True,
                  screenshot_dir: str | None = None,
-                 cua: "CuaLoopModule | None" = None):
+                 cua: "CuaLoopModule | None" = None,
+                 verifier: "VerifierContract | None" = None):
         self.sim_url = sim_url
         self.headless = headless
-        self.screenshot_dir = screenshot_dir    # E9.4/task-3: auto step shots
+        self.screenshot_dir = screenshot_dir    # auto step shots
         self._shot_counter = 0                  # monotonic (Date.now banned)
-        # ── Agent B (substrate isolation): the CUA loops are INJECTED, never
-        # imported. The old ``from taskvm.execution.gui_executor_async import
-        # gui_write_async`` was a substrate→upper-layer reverse dependency
-        # (architecture-gate KNOWN DEBT, now repaid). ``cua`` is any object
-        # exposing ``gui_write_async`` / ``gui_act_async`` — e.g. the
-        # ``taskvm.execution.gui_executor_async`` module, passed at PROCESS
-        # ASSEMBLY time via ``--cua-loop``. Without it the mutate routes
-        # below answer 501 (honest unavailability — no fallback).
+        # ── substrate isolation: the CUA loops and the ModelVerifier are
+        # INJECTED, never imported. The substrate layer may not import upper
+        # layers (architecture gate); ``cua`` is any object exposing
+        # ``gui_write_async`` / ``gui_act_async`` / ``GuiExecutorFailure``;
+        # ``verifier`` is any object exposing an async
+        # ``verify_intent(observation, intent) -> {"verdict", "evidence"}``
+        # (the taskvm.verifier.ModelVerifier three-state contract, adapted
+        # at process assembly). Both are passed at PROCESS ASSEMBLY time via
+        # ``--cua-loop`` / ``--verifier``. Without them the write routes
+        # answer 501 (honest unavailability — no fallback).
         self.cua = cua
+        self.verifier = verifier
         self.env = None                      # MobileGymEnv, built in start()
         self._loop: asyncio.AbstractEventLoop | None = None
         # per-sid "live" snapshot = the full {os, apps} state currently
@@ -266,7 +280,7 @@ class MobileGymBridge:
             return {"status": "ok", "detail": "wait"}
         if kind == "open":
             target = str(action.get("target") or "")
-            known = [a for a in APPS if a == target]
+            known = [a for a in ALL_APPS if a == target]
             if not known:
                 return {"status": "failed",
                         "detail": f"unknown app {target!r}"}
@@ -581,12 +595,12 @@ class MobileGymBridge:
 
     async def x_state(self, sid: str) -> dict:
         """Read-only: the X app's toggle lists (liked/retweeted/bookmarked
-        post ids) for the given session. Used by ``run_x_toggle_rollback_
-        evaluation script`` (Task E, .mrules E15) to independently VERIFY that a
-        toggle write/rollback actually landed via ``get_state`` — the same
-        trusted read path ``mutate_x`` itself uses. This is a plain read (no
-        mutation, no set_state), so it does not touch the non-invasive
-        write/rollback boundary documented above."""
+        post ids) for the given session — an independent trusted read path
+        for verifying that a toggle write/rollback actually landed via
+        ``get_state``. This is a plain read (no mutation, no set_state), so
+        it does not touch the non-invasive write/rollback boundary
+        documented above. Legacy compat route: the generic oracle reads
+        are ``app_state`` / ``os_state``."""
         await self._activate(sid)
         state = self._sid_live.get(sid) or await self.env.get_state(required_apps=APPS)
         x_state = state.get("apps", {}).get("x", {}) or {}
@@ -599,383 +613,243 @@ class MobileGymBridge:
         }
 
     async def session_state(self, sid: str) -> dict:
+        """Generic catalog-driven summary: for every app present in the
+        live store, the top-level collection counts (``{field: n}`` for
+        each list/dict-valued field). No per-app field names are hardcoded
+        here — an app joins the summary by HAVING a store, not by being
+        enumerated. The legacy ``summary`` block (n_chats/n_contacts/n_tx/
+        balance) is retained as a compat alias for existing consumers
+        during the compat window (removal announced in the R3 report)."""
         await self._activate(sid)
         state = self._sid_live.get(sid) or await self.env.get_state(required_apps=APPS)
         apps = state.get("apps", {})
-        wechat = apps.get("wechat", {})
-        alipay = apps.get("alipay", {})
+        apps_summary: dict[str, dict[str, int]] = {}
+        for app_id, app_state in apps.items():
+            if not isinstance(app_state, dict):
+                continue
+            counts = {field: len(value)
+                      for field, value in app_state.items()
+                      if isinstance(value, (list, dict))}
+            if counts:
+                apps_summary[app_id] = counts
+        wechat = apps.get("wechat", {}) or {}
+        alipay = apps.get("alipay", {}) or {}
         return {"site": SITE, "sid": sid,
                 "has_task": True,
-                "summary": {"n_chats": len(wechat.get("chats", [])),
-                            "n_contacts": len(wechat.get("contacts", [])),
-                            "n_tx": len(alipay.get("transferRecords", [])),
-                            "balance": alipay.get("balance", {}).get("total")}}
+                "apps": apps_summary,
+                # legacy compat projection (fixed consumers read these)
+                "summary": {"n_chats": len(wechat.get("chats", []) or []),
+                            "n_contacts": len(wechat.get("contacts", []) or []),
+                            "n_tx": len(alipay.get("transferRecords", []) or []),
+                            "balance": (alipay.get("balance", {}) or {}).get("total")}}
 
-    # ── write path: send_message via REAL GUI gestures (no set_state) ───────
-    async def mutate_wechat(self, sid: str, eid: str, operator: str,
-                            value: Any) -> dict:
+    # ── generic oracle reads (evaluation/setup plane, catalog-driven) ──────
+    async def app_state(self, sid: str, app_id: str) -> dict:
+        """Raw store state of ANY catalog app (evaluation/benchmark only).
+
+        App-agnostic: the app_id is validated against the catalog (404 for
+        unknown apps) and the store slice is returned verbatim. Storeless
+        apps (calculator, theme_store) honestly return an empty state —
+        they are fully GUI-drivable, they simply have no backend store
+        (their state IS the screen)."""
+        try:
+            is_valid_app_or_raise(app_id)
+        except ValueError as e:
+            raise web.HTTPNotFound(text=str(e))
+        await self._activate(sid)
+        state = self._sid_live.get(sid) or await self.env.get_state(required_apps=APPS)
+        apps = state.get("apps", {})
+        return {"sid": sid, "app": app_id, "state": apps.get(app_id, {}) or {}}
+
+    async def os_state(self, sid: str) -> dict:
+        """OS runtime state (tasks, activeAppId, settings, notifications,
+        home_screen) — the part of the phone world that belongs to no app.
+        Evaluation/setup plane read, plain store projection."""
+        await self._activate(sid)
+        state = self._sid_live.get(sid) or await self.env.get_state(required_apps=APPS)
+        return {"sid": sid, "os": state.get("os", {}) or {}}
+
+    # ── generic write path: model-driven, app-agnostic (no operator enum) ──
+    async def mutate(self, sid: str, app: str, entity_ref: str, intent: str,
+                     *, undo: bool = False) -> dict:
+        """The ONE task-level write path: ``POST /api/mutate/<sid>``.
+
+        Contract: ``{"app": app_id, "entity_ref": <user-visible entity
+        label>, "intent": <natural-language intent>, "undo": bool}``.
+        App-agnostic by construction — the only app knowledge is the
+        catalog validation (any of the registered apps, storeless ones
+        included: calculator's state IS the screen, the CUA drives it the
+        same way). There is no operator enum, no per-app branch, no
+        internal id: ``entity_ref`` is what a real user would read on the
+        screen (a chat name, a post title), never a backend key.
+
+        Semantics (honest-boundary preserved):
+          * both the CUA loop and the ModelVerifier are INJECTED at process
+            assembly; missing either → honest 501 BEFORE touching the world;
+          * the write runs through ``gui_act_async`` — a real grounding
+            loop (screenshot → model → env.step gestures). NO set_state
+            backdoor, ever;
+          * after the loop, a FRESH observation goes to the injected
+            ModelVerifier against the business-language intent; ONLY the
+            ``changed`` verdict returns ``status:"ok"`` (``not_yet`` /
+            ``cannot_verify`` are honest non-ok statuses, not failures of
+            the route);
+          * ``undo=True`` runs the same loop with an undo-framed
+            instruction — the model plans the undo gestures from the live
+            screen. If no undo path exists in the app's UI, the loop fails
+            and the bridge answers the honest 409 irreversible (this is an
+            honesty boundary, not an enumeration).
+        """
         # B-1: runtime write path — requires the active session; never
         # context-switches reality underneath the CUA loop.
         await self._require_active(sid)
+        try:
+            is_valid_app_or_raise(app)
+        except ValueError as e:
+            raise web.HTTPBadRequest(text=str(e))
+        if not intent or not str(intent).strip():
+            raise web.HTTPBadRequest(text="intent is required (natural language)")
+        entity_ref = str(entity_ref or "").strip()
+        intent = str(intent).strip()
         async with self._lock:
-            if operator != "send_message":
-                raise web.HTTPBadRequest(
-                    text=f"wechat operator must be send_message, got {operator}")
-            if self.cua is None:
-                # Agent B: honest unavailability — the L2 CUA loop is not
-                # installed in this bridge process. NO fallback (neither a
-                # hardcoded gesture sequence NOR a set_state backdoor).
+            if self.cua is None or self.verifier is None:
+                # honest unavailability — the write route's contract is
+                # "execute via real gestures AND verify via the model";
+                # missing either component means we cannot honestly claim
+                # ok, so we refuse BEFORE touching the world (no fallback,
+                # no set_state backdoor).
+                missing = ("--cua-loop" if self.cua is None else "",
+                           "--verifier" if self.verifier is None else "")
                 raise web.HTTPNotImplemented(text=(
-                    "wechat send_message requires a CUA loop; this bridge was "
-                    "started without --cua-loop. Start it with a --cua-loop "
-                    "module exposing gui_write_async, or drive "
-                    "the L1 observe/act port (substrate/mobilegym/session.py) "
-                    "from the runtime."))
-            gui_write_async = self.cua.gui_write_async
-            GuiExecutorFailure = self.cua.GuiExecutorFailure
-            # ── rollback path: value is "msg:<id>" from a prior send_message ──
-            # Task3 (E10 rework): the rollback NO LONGER hardcodes "wechat has
-            # no delete UI → 409". It calls gui_write_async(undo=True) — a REAL
-            # grounding loop that observes the chat page + TRIES to find a
-            # delete/recall UI. If the model outputs {"action":"fail"}, THEN
-            # the bridge raises HTTP 409 — but now the irreversibility is PROVEN
-            # by the model's real attempt (handoff Task3: "结论可能不变，但证明
-            # 这个结论的方法论要和主线一致"), not a programmer's hardcoded
-            # pre-judgment. The old hardcoded 409 is replaced by model-driven
-            # discovery of the same conclusion.
-            if isinstance(value, str) and value.startswith("msg:"):
-                await self._screenshot("undo_attempt_gui_executor")
-                try:
-                    trace = await gui_write_async(
-                        env=self.env, page=self.env.page, sid=sid,
-                        chat_id=eid, text=value, undo=True,
-                        screenshot_dir=self.screenshot_dir)
-                    # if the model said DONE (found a delete/recall UI + used it),
-                    # verify via get_state that the message is actually gone
-                    state = await self.env.get_state(required_apps=APPS)
-                    self._sid_live[sid] = state
-                    logger.info(f"[bridge] rollback via gui_executor: done={trace['done']} "
-                                f"steps={trace['steps']}")
-                    if not trace["done"]:
-                        # model didn't finish + didn't fail → treat as irreversible
-                        # (honest: the model couldn't find/complete a delete path)
-                        raise web.HTTPConflict(text=(
-                            "wechat send_message rollback: the GUI executor "
-                            f"could not complete a delete/recall via the app's "
-                            f"UI (model did not report done after {trace['steps']} "
-                            f"steps). Treated as irreversible — no set_state "
-                            f"backdoor fallback."))
-                    return {"status": "ok", "operator": "send_message",
-                            "old": value, "new": "(deleted)", "chat_id": eid,
-                            "trace": trace}
-                except GuiExecutorFailure as e:
-                    # the model HONESTLY reported it cannot find a delete/recall
-                    # UI → 409. This is the same conclusion as the old hardcoded
-                    # 409, but now PROVEN by the model's real attempt.
-                    await self._screenshot("undo_fail_409_model_tried")
-                    raise web.HTTPConflict(text=(
-                        f"wechat send_message is irreversible in MobileGym: the "
-                        f"GUI executor observed the chat page + attempted to "
-                        f"find a delete/recall UI but could not (model output "
-                        f"{{\"action\":\"fail\"}}: {e.reason}). This conclusion "
-                        f"is now PROVEN by the model's real attempt, not "
-                        f"hardcoded. No set_state backdoor fallback."))
-            # ── forward write: Task3 — real grounding loop (replaces the
-            # hardcoded 7-step _send_message sequence). The model observes the
-            # chat page + decides how to send the message using the page's UI
-            # (tap composer → type → tap send / press enter). NOT a hardcoded
-            # click sequence. ──
-            # (task3 — real grounding loop; the model observes the chat page
-            # and decides how to send using the page's UI.)
-            trace = await gui_write_async(
-                env=self.env, page=self.env.page, sid=sid,
-                chat_id=eid, text=str(value), undo=False,
-                screenshot_dir=self.screenshot_dir)
-            if not trace["done"]:
-                raise web.HTTPInternalServerError(text=(
-                    f"gui_executor could not complete send_message via the UI "
-                    f"(model did not report done after {trace['steps']} steps); "
-                    f"no set_state backdoor. trace={trace['actions'][-3:]}"))
-            # verify the message landed (the trusted read path)
-            state = await self.env.get_state(required_apps=APPS)
-            self._sid_live[sid] = state
-            chats = state.get("apps", {}).get("wechat", {}).get("chats", []) or []
-            target = next((c for c in chats if c.get("id") == eid), None)
-            if target is None:
-                raise RuntimeError(f"chat {eid} not found after GUI send")
-            msgs = target.get("messages") or []
-            new_msg = next((m for m in reversed(msgs)
-                            if m.get("type") == "text" and m.get("content") == str(value)), None)
-            if not new_msg:
-                raise RuntimeError(
-                    f"sent text not found in chat {eid} after the GUI gesture "
-                    f"loop — the type/send gestures may not have reached the "
-                    f"composer. trace={trace['actions'][-3:]}")
-            logger.info(f"[bridge] send_message via gui_executor (no hardcoded "
-                        f"sequence): chat={eid} msg_id={new_msg.get('id')!r}")
-            return {"status": "ok", "operator": "send_message",
-                    "old": f"msg:{new_msg.get('id')}", "new": str(value),
-                    "chat_id": eid, "n_messages": len(msgs),
-                    "message_id": new_msg.get("id"), "trace": trace}
-
-    # ── write path: X toggle (toggleLike/toggleRetweet/toggleBookmark) ──────
-    # E14 (2026-08-11): the FIRST non-wechat MobileGym write path. X's
-    # ``XPostActionBar`` binds toggleLike / toggleRetweet / toggleBookmark to
-    # single tap targets — these are DISCRETE one-click writes (vs. wechat's
-    # type+send sequence), so they're the natural existence proof that the
-    # TaskVM grounding loop can drive MobileGym when the harness coordinate
-    # pipeline is correct (2026-08-11 fix: clicks now go through
-    # ``env.step(Action.click(...))`` + MobileGym's own norm_0_1000 -> CSS
-    # calibration, NOT the old wrong-viewport ``page.mouse.click``).
-    async def mutate_x(self, sid: str, eid: str, operator: str,
-                       value: Any, *, verify_mode: str = "specific",
-                       instruction_override: str | None = None) -> dict:
-        # B-1: runtime write path — requires the active session; never
-        # context-switches reality underneath the CUA loop.
-        await self._require_active(sid)
-        async with self._lock:
-            if operator not in ("toggle_like", "toggle_retweet",
-                                "toggle_bookmark"):
-                raise web.HTTPBadRequest(text=(
-                    f"x operator must be toggle_like / toggle_retweet / "
-                    f"toggle_bookmark, got {operator}"))
-            if verify_mode not in ("specific", "any_new"):
-                raise web.HTTPBadRequest(text=(
-                    f"verify_mode must be 'specific' or 'any_new', got "
-                    f"{verify_mode!r}"))
-            post_id = eid
-            # Open X app FIRST so the timeline is visible on screen — the
-            # grounding loop screenshots THIS view + the model finds the
-            # target post purely by what it sees (E16-complete: NO content
-            # hint, NO post_id injection — pure vision CUA).
-            await self.env.open_app("x", wait_stable=True)
-            # Wait for timeline to render post action buttons.
-            for _ in range(8):
-                await asyncio.sleep(0.5)
-                ready = await self.env.page.evaluate(
-                    "() => { const b = document.querySelectorAll("
-                    "'[data-action-params]'); for (const e of b) { "
-                    "if ((e.getAttribute('data-action')||'')"
-                    ".includes('.post.')) return true; } return false; }")
-                if ready:
-                    break
-
-            # ── E17-A Option B: any-new-post before-snapshot ───────────────
-            # For verify_mode='any_new' the instruction tells the CUA to "find
-            # ANY un-toggled post and tap it" — so the verifier must check that
-            # A NEW post entered the toggle list, NOT that the specific `eid`
-            # did. This requires a BEFORE snapshot of the list. Crucially this
-            # read is SERVER-SIDE ONLY (verification) — it is NEVER placed in
-            # the instruction/prompt (that was the E16 leak; this does not
-            # repeat it). 'specific' mode skips this read entirely → zero
-            # change to the existing rollback-evaluation path (zero regression).
-            before_ids: set[str] | None = None
-            if verify_mode == "any_new":
-                _st = await self.env.get_state(required_apps=APPS)
-                _xu = ((_st.get("apps", {}) or {}).get("x", {}) or {}).get("user", {}) or {}
-                _fld = {"toggle_like": "likedPostIds",
-                        "toggle_retweet": "retweetedPostIds",
-                        "toggle_bookmark": "bookmarkedPostIds"}[operator]
-                before_ids = set(_xu.get(_fld, []) or [])
-
-            verb_map = {
-                "toggle_like": ("like", "heart icon", "pink/red"),
-                "toggle_retweet": ("retweet", "repost icon (green arrows)",
-                                    "green"),
-                "toggle_bookmark": ("bookmark", "bookmark icon", "blue"),
-            }
-            verb, icon_desc, done_color = verb_map[operator]
-
-            # ── E16 non-invasive fix (.mrules E16) ───────────────────────────
-            # Direction inference: derived PURELY from the `value` argument
-            # passed by the caller (TaskVM dispatcher), NOT from get_state().
-            #
-            # Why get_state() was wrong here (E16 bug):
-            #   The previous code called ``env.get_state()`` to read whether
-            #   the post is currently in likedPostIds, then told the model
-            #   "it is currently FILLED/OUTLINE right now". This leaks the
-            #   backend store's contents into the model's prompt — the model
-            #   should infer the icon's current visual state from the SCREENSHOT,
-            #   not from a backdoor read of the zustand store.  In a real CUA
-            #   (OSWorld/real phone) there is no such API; the agent must look
-            #   at the screen.
-            #
-            # Convention (same as other adapters):
-            #   value=True  → target end-state is ACTIVE/FILLED  (write path)
-            #   value=False → target end-state is INACTIVE/OUTLINE (rollback)
-            # The caller (the evaluation entry point) already
-            # encodes this: write uses value=True, rollback uses value=False.
-            _want_active = bool(value)  # True=filled, False=outline
-            if _want_active:
-                direction_verb = verb
-                target_state_desc = f"{done_color} and FILLED (active)"
-                fail_hint = "still OUTLINE/uncolored"
-            else:
-                direction_verb = f"un-{verb}" if verb != "retweet" else "un-retweet"
-                target_state_desc = "OUTLINE/uncolored (inactive)"
-                fail_hint = f"still {done_color} and FILLED"
-
-            # ── GG.3/§1.3: the bridge no longer has its own instruction template ──
-            # The CUA instruction MUST come from the governance layer
-            # (GovernanceInterpreter → SubgoalInstruction.natural_language) via
-            # ``instruction_override``. The old inline f-string templates (the
-            # E14 "old" ablation branch + the E16 "new" inline branch) are
-            # DELETED — they were hardcoded bridge templates (GG §1.3 condemns
-            # "bridge 内不再有自己的 instruction 模板"). The E16 content_hint /
-            # posts.json / DOM-textContent backdoor history is preserved in
-            # .mrules E16; the code no longer carries it. If no override is
-            # supplied, the bridge honest-fails (it cannot fabricate a goal
-            # instruction — that is the governance layer's job).
-            logger.info(f"[bridge] mutate_x: post={post_id} want_active={_want_active} "
-                        f"verify_mode={verify_mode} "
-                        f"instruction_override={'yes' if instruction_override else 'no'}")
-            if not instruction_override:
-                return {"status": "error", "app": "x",
-                        "error": ("GG.3: mutate_x requires instruction_override "
-                                  "(the governance layer's SubgoalInstruction NL). "
-                                  "The bridge no longer fabricates a goal instruction."),
-                        "post_id": post_id, "operator": operator}
-            instruction = instruction_override
-
-            if self.cua is None:
-                raise web.HTTPNotImplemented(text=(
-                    "x mutate requires a CUA loop; this bridge was started "
-                    "without --cua-loop (no fallback, no set_state backdoor)."))
+                    "generic mutate requires BOTH an injected CUA loop "
+                    "(--cua-loop) and an injected ModelVerifier (--verifier); "
+                    f"missing: {[m for m in missing if m]}. No fallback."))
             gui_act_async = self.cua.gui_act_async
             GuiExecutorFailure = self.cua.GuiExecutorFailure
-            # X app is already open + the timeline readiness poll above
-            # passed, so navigate=None / wait_ready=None — the grounding loop
-            # starts immediately on the current timeline view (screenshot →
-            # model, pure vision).
+            # Bring the app to the foreground the way a real user would —
+            # the grounding loop is pure-vision: it finds the target purely
+            # from what the screen shows, never from backend data.
+            await self.env.open_app(app, wait_stable=True)
+            # The instruction is COMPOSED from caller-supplied business
+            # language (app display name + visible entity label + NL
+            # intent) — the bridge fabricates no task semantics of its own.
+            app_name = get_display_name(app)
+            if undo:
+                instruction = (
+                    f"在「{app_name}」中，撤销刚才对「{entity_ref}」执行的"
+                    f"操作（{intent}）。请观察当前界面，找到可行的撤销方式"
+                    f"（如删除、撤回、取消、还原等）并完成它；如果界面上"
+                    f"不存在任何可行的撤销方式，请如实报告失败。")
+                verify_intent = f"刚才对「{entity_ref}」执行的操作（{intent}）已经被撤销"
+            else:
+                instruction = (
+                    f"在「{app_name}」中，找到「{entity_ref}」，然后执行："
+                    f"{intent}。请通过界面上的真实操作完成，完成后报告。")
+                verify_intent = f"在「{app_name}」中对「{entity_ref}」执行了：{intent}"
             trace = await gui_act_async(
                 env=self.env, page=self.env.page, instruction=instruction,
                 navigate=None, wait_ready=None,
                 screenshot_dir=self.screenshot_dir, max_steps=25)
             if not trace["done"]:
+                if undo:
+                    # no undo path reachable through the app's own UI —
+                    # the honest irreversibility verdict (NOT a backdoor
+                    # set_state restore).
+                    raise web.HTTPConflict(text=(
+                        f"undo of {intent!r} is irreversible: the GUI "
+                        f"executor could not complete an undo path via the "
+                        f"app's UI (model did not report done after "
+                        f"{trace['steps']} steps). No set_state backdoor "
+                        f"fallback."))
                 raise web.HTTPInternalServerError(text=(
-                    f"gui_executor could not complete {operator} via the UI "
-                    f"(model did not report done after {trace['steps']} steps); "
-                    f"no set_state backdoor. trace={trace['actions'][-3:]}"))
-            # verify the toggle landed (trusted read path).
-            #
-            # Task E fix (.mrules E15): must check against the EXPECTED
-            # direction (_currently_on before this call), not hardcode
-            # "must now be in the list". Bug this replaces: the old check
-            # was `if not now_liked: raise` unconditionally — correct for
-            # the write path (outline->filled, expect now_in_list=True) but
-            # WRONG for a rollback call (filled->outline, expect
-            # now_in_list=False). On rollback the gesture genuinely
-            # succeeded (post correctly left the list) but this stale check
-            # still raised, turning a real success into a spurious HTTP 500
-            # — caught by the Task E evaluation: every rollback call returned
-            # http_status=500 even though the independent trusted-read
-            # verification (the legacy phase entry point's own
-            # get_state check) confirmed the post really left the list.
-            state = await self.env.get_state(required_apps=APPS)
-            self._sid_live[sid] = state
-            x_state = state.get("apps", {}).get("x", {}) or {}
-            user = x_state.get("user", {}) or {}
-            field_map = {
-                "toggle_like": "likedPostIds",
-                "toggle_retweet": "retweetedPostIds",
-                "toggle_bookmark": "bookmarkedPostIds",
-            }
-            ids_list = user.get(field_map[operator], []) or []
-            now_in_list = post_id in ids_list
-            # _want_active: the target end-state (True=FILLED, False=OUTLINE)
-            # derived from `value` — no prior get_state() needed (E16 fix).
-            logger.info(f"[bridge] {operator} via gui_act_async: "
-                        f"post={post_id} now_in_list={now_in_list} "
-                        f"want_active={_want_active} steps={trace['steps']} "
-                        f"verify_mode={verify_mode}")
-
-            # ── E17-A Option B: branch the verifier on verify_mode ──────────
-            # 'specific' (default, zero-regression): the specific `eid` post's
-            #   membership must match _want_active. This is what the rollback
-            #   evaluation path (x-toggle rollback) relies on — unchanged.
-            # 'any_new' (Option B, x-toggle evaluation): the instruction says
-            #   "find ANY un-toggled post and tap it", so the verifier checks
-            #   that the toggle list GREW (write) or SHRANK (rollback) by ≥1
-            #   vs the before-snapshot — i.e. SOME post transitioned. This
-            #   aligns verifier semantics with the any-post instruction
-            #   (fixes the .mrules E17 §0-B ill-posed-task contradiction).
-            #   The newly-transitioned post_id is returned for per_post tracking.
-            toggled_post_id = None
-            if verify_mode == "any_new":
-                after_ids = set(ids_list)
-                if before_ids is None:
-                    before_ids = set()  # defensive — should have been captured
-                if _want_active:
-                    # write: expect a NEW post entered the list
-                    gained = after_ids - before_ids
-                    any_new = len(gained) > 0
-                    toggled_post_id = next(iter(gained), None)
-                    verified = any_new
-                    fail_msg = (f"{operator} (any_new/write) did not add any post "
-                                f"to {field_map[operator]} — before={sorted(before_ids)} "
-                                f"after={sorted(after_ids)}")
-                else:
-                    # rollback: expect a post LEFT the list
-                    lost = before_ids - after_ids
-                    any_new = len(lost) > 0
-                    toggled_post_id = next(iter(lost), None)
-                    verified = any_new
-                    fail_msg = (f"{operator} (any_new/rollback) did not remove any "
-                                f"post from {field_map[operator]} — "
-                                f"before={sorted(before_ids)} after={sorted(after_ids)}")
-                if not verified:
-                    raise RuntimeError(
-                        f"{fail_msg} after the GUI gesture loop. "
-                        f"trace={trace['actions'][-3:]}")
-                return {"status": "ok", "operator": operator,
-                        "want_active": _want_active, "now_in_list": now_in_list,
-                        "post_id": post_id, "verify_mode": verify_mode,
-                        "toggled_post_id": toggled_post_id,
-                        "before_count": len(before_ids),
-                        "after_count": len(after_ids), "trace": trace}
-
-            # 'specific' path (unchanged behavior — zero regression)
-            if now_in_list != _want_active:
-                raise RuntimeError(
-                    f"{operator} on post {post_id} did not reach target state — "
-                    f"want_active={_want_active} but now_in_list={now_in_list} "
-                    f"after the GUI gesture loop. "
-                    f"trace={trace['actions'][-3:]}")
-            return {"status": "ok", "operator": operator,
-                    "want_active": _want_active, "now_in_list": now_in_list,
-                    "post_id": post_id, "verify_mode": verify_mode,
+                    f"gui_executor could not complete the intent via the UI "
+                    f"(model did not report done after {trace['steps']} "
+                    f"steps); no set_state backdoor. "
+                    f"trace={trace['actions'][-3:]}"))
+            try:
+                # fresh observation → the injected ModelVerifier judges the
+                # business intent against what the screen NOW shows
+                obs = await self.observe(sid)
+                verdict = await self.verifier.verify_intent(
+                    observation=obs, intent=verify_intent)
+            except GuiExecutorFailure as e:  # pragma: no cover — verifier is not the cua loop
+                raise web.HTTPInternalServerError(
+                    text=f"verifier raised: {e}")
+            v = (verdict or {}).get("verdict")
+            evidence = str((verdict or {}).get("evidence", ""))
+            if v not in ("changed", "not_yet", "cannot_verify"):
+                raise web.HTTPInternalServerError(text=(
+                    f"injected verifier returned a malformed verdict "
+                    f"{v!r} — expected one of changed/not_yet/"
+                    f"cannot_verify with an evidence string."))
+            status = "ok" if v == "changed" else v
+            return {"status": status, "app": app, "entity_ref": entity_ref,
+                    "intent": intent, "undo": undo,
+                    "verify": {"verdict": v, "evidence": evidence},
                     "trace": trace}
 
-    # GG.4: the dead ``_send_message`` method (7-step hardcoded sequence with
-    # the ``openApp('wechat','/chat/{chat_id}')`` deep-link + a programmatic
-    # ``textarea.focus()`` backdoor) is DELETED. It was superseded by
-    # ``gui_executor_async.gui_write_async`` (the real grounding loop) — the
-    # earlier exploration confirmed zero live callers. The deep-link was a
-    # wxid backdoor (a real user can't deep-link to a chat by an internal id);
-    # the live path now opens wechat + lets the grounding model tap the contact
-    # by visible peer_name (gui_write_async._resolve_peer_name). History in
-    # .mrules E10/E15.
+    # The per-app operator-enum write paths (wechat send_message /
+    # x toggle_*) are REPLACED by the generic ``mutate`` above. Their HTTP
+    # routes answer 302 → /api/mutate/<sid> for the compat window (one
+    # commit), then are deleted. The non-invasive read helpers they shared
+    # (``_flatten_wechat_chats`` / ``_flatten_alipay_txs`` /
+    # ``_x_toggle_rows``) stay — the legacy oracle read routes still use
+    # them.
 
 
-    # ── minimal HTML view (data-*-id DOM for replay_engine.capture_obs) ─────
+    @staticmethod
+    def _generic_app_sections(apps: dict) -> str:
+        """Render every non-legacy app's store generically: one section per
+        app (catalog display name as the heading), one table per top-level
+        list field, one row per item, one ``data-field`` cell per scalar
+        field (values stringified, escaped, capped at 120 chars). Pure
+        projection of ``app_state`` + catalog metadata — zero per-app
+        knowledge. Apps already served by the legacy tables (wechat /
+        alipay) are skipped here so their markup stays byte-stable."""
+        sections: list[str] = []
+        for app_id in APPS:
+            if app_id in ("wechat", "alipay"):
+                continue                      # legacy tables own these
+            app_state = apps.get(app_id)
+            if not isinstance(app_state, dict) or not app_state:
+                continue                      # no store / empty store
+            for field, items in app_state.items():
+                if not isinstance(items, list) or not items:
+                    continue
+                rows = []
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    cells = "".join(
+                        f'<td data-field="{_esc(k)}">'
+                        f'{_esc(str(v)[:120])}</td>'
+                        for k, v in item.items()
+                        if isinstance(v, (str, int, float, bool)))
+                    if cells:
+                        rows.append(f"<tr>{cells}</tr>")
+                if rows:
+                    sections.append(
+                        f"<h2>{_esc(get_display_name(app_id))} · "
+                        f"{_esc(field)} ({len(rows)})</h2>"
+                        f"<table><tbody>{''.join(rows)}</tbody></table>")
+        return "\n".join(sections)
+
+    # ── minimal HTML view (rendered-GUI observation for the compiler) ───────
     def html_view(self, sid: str) -> str:
         """The rendered-GUI observation the COMPILER reads (read-path-is-GUI,
-        no-leak). Emitted as parseable ``<tr data-{chat,transaction}-id>`` rows
-        with ``<td data-field="...">`` cells — the SAME DOM contract the core
-        apps use (``replay_engine.parse_dom_entities`` matches
-        ``data-(event|task|file|mail|appointment|chat|transaction)-id`` rows +
-        ``data-field`` cells). This lets evaluation scripts capture obs
-        via the standard ``GET /<sid>`` route + feed it to ``compile_binding``
-        for REAL model-discovered binding (task-4 — the alipay→wechat binding
-        was previously GT-given; now a frontier model discovers it from this
-        rendered view alone).
+        no-leak): parseable ``<tr>`` rows with ``<td data-field="...">`` cells
+        — the SAME DOM contract the core apps use
+        (``replay_engine.parse_dom_entities`` + ``_row_fields``).
 
-        The field cells mirror what ``_flatten_wechat_chats`` /
-        ``_flatten_alipay_txs`` project (so ``assert_obs_matches_state`` — DOM
-        vs ``read_canonical`` — passes). The combined page shows BOTH apps'
-        rows; the kill-test splits the parsed entities by id-attribute kind
-        (``data-chat-id`` → wechat, ``data-transaction-id`` → alipay) into
-        per-app observations."""
+        Catalog-driven and app-agnostic: the two legacy projections
+        (wechat chats / alipay transactions) keep their byte-stable table
+        markup for existing consumers; EVERY OTHER app with a store is
+        rendered generically — one section per app (titled by its catalog
+        display name), one table per top-level list field, one row per
+        item, one ``data-field`` cell per scalar field. No app is enumerated
+        in code; an app appears here by having store data. Storeless apps
+        (calculator, theme_store) simply have no section — their state IS
+        the live screen, which ``observe`` serves."""
         live = self._sid_live.get(sid, {})
         apps = live.get("apps", {})
         chats = apps.get("wechat", {}).get("chats", []) or []
@@ -1010,6 +884,7 @@ td{{border:1px solid #30363d;padding:3px 6px}} .meta{{color:#8b949e;font-size:11
 <table><tbody>{chat_rows or '<tr><td>no chats</td></tr>'}</tbody></table>
 <h2>alipay transactions ({len(txs)})</h2>
 <table><tbody>{tx_rows or '<tr><td>no txs</td></tr>'}</tbody></table>
+{self._generic_app_sections(apps)}
 <p class="meta">mobilegym bridge sid={_esc(sid)} · live sim at {_esc(self.sim_url)} · rendered-GUI observation for the compiler (no GT)</p>
 </body></html>"""
 
@@ -1068,23 +943,57 @@ def build_app(bridge: MobileGymBridge) -> web.Application:
         return web.json_response(await bridge.act_primitive(sid, action))
 
     async def api_wechat_mutate(request):
+        """Compat alias: the per-app wechat operator route is superseded by
+        the generic ``POST /api/mutate/<sid>`` (NL intent, no operator
+        enum). Answer 302 pointing at the new route for the compat window;
+        the body describes the migration so a scripted caller can adapt
+        without guessing."""
         sid = request.match_info["sid"]
-        eid = request.match_info["eid"]
-        data = await request.json()
-        return web.json_response(await bridge.mutate_wechat(
-            sid, eid, data.get("operator"), data.get("value")))
+        raise web.HTTPFound(
+            f"/api/mutate/{sid}",
+            text=json.dumps({
+                "migrated": True,
+                "old_route": f"/api/wechat/{sid}/<eid>",
+                "new_route": f"/api/mutate/{sid}",
+                "new_payload": {"app": "<app_id>",
+                                "entity_ref": "<user-visible entity label>",
+                                "intent": "<natural-language intent>",
+                                "undo": False},
+            }, ensure_ascii=False))
 
     async def api_x_mutate(request):
+        """Compat alias: the per-app X operator route is superseded by the
+        generic ``POST /api/mutate/<sid>`` (same migration as wechat)."""
         sid = request.match_info["sid"]
-        eid = request.match_info["eid"]
+        raise web.HTTPFound(
+            f"/api/mutate/{sid}",
+            text=json.dumps({
+                "migrated": True,
+                "old_route": f"/api/x/{sid}/<eid>",
+                "new_route": f"/api/mutate/{sid}",
+                "new_payload": {"app": "<app_id>",
+                                "entity_ref": "<user-visible entity label>",
+                                "intent": "<natural-language intent>",
+                                "undo": False},
+            }, ensure_ascii=False))
+
+    async def api_mutate(request):
+        sid = request.match_info["sid"]
         data = await request.json()
-        # E17-A Option B: verify_mode='any_new' (x-toggle evaluation) vs
-        # 'specific' (default — rollback evaluation, unchanged).
-        # E17-B: instruction_override (governance-supplied NL — de-segmentation).
-        return web.json_response(await bridge.mutate_x(
-            sid, eid, data.get("operator"), data.get("value"),
-            verify_mode=data.get("verify_mode", "specific"),
-            instruction_override=data.get("instruction_override")))
+        return web.json_response(await bridge.mutate(
+            sid, str(data.get("app") or ""),
+            str(data.get("entity_ref") or ""),
+            str(data.get("intent") or ""),
+            undo=bool(data.get("undo", False))))
+
+    async def api_app_state(request):
+        sid = request.match_info["sid"]
+        app_id = request.match_info["app_id"]
+        return web.json_response(await bridge.app_state(sid, app_id))
+
+    async def api_os_state(request):
+        sid = request.match_info["sid"]
+        return web.json_response(await bridge.os_state(sid))
 
     app.router.add_get("/health", health)
     app.router.add_get("/{sid}", view_sid)
@@ -1095,6 +1004,10 @@ def build_app(bridge: MobileGymBridge) -> web.Application:
     app.router.add_get("/api/{resource}/{sid}", api_resource)
     app.router.add_get("/api/observe/{sid}", api_observe)
     app.router.add_post("/api/act/{sid}", api_act)
+    app.router.add_post("/api/mutate/{sid}", api_mutate)
+    app.router.add_get("/api/app_state/{sid}/{app_id}", api_app_state)
+    app.router.add_get("/api/os_state/{sid}", api_os_state)
+    # compat aliases (one-commit window; deletion announced in the R3 report)
     app.router.add_post("/api/wechat/{sid}/{eid}", api_wechat_mutate)
     app.router.add_post("/api/x/{sid}/{eid}", api_x_mutate)
     return app
@@ -1116,13 +1029,19 @@ def main(argv=None):
                              "Pass '' to disable. The '我现在啥也看不见，你要录下来' "
                              "deliverable — works headless.")
     parser.add_argument("--cua-loop", default=None,
-                        help="dotted module path of the L2 CUA loop module to "
-                             "INJECT (any module "
-                             "must expose gui_write_async / gui_act_async / "
-                             "GuiExecutorFailure). Without it the legacy "
-                             "mutate routes answer 501 — the bridge never "
-                             "imports upper layers itself (substrate "
-                             "isolation, Agent B).")
+                        help="dotted module path of the CUA loop module to "
+                             "INJECT (must expose gui_write_async / "
+                             "gui_act_async / GuiExecutorFailure). Without "
+                             "it the write routes answer 501 — the bridge "
+                             "never imports upper layers itself (substrate "
+                             "isolation).")
+    parser.add_argument("--verifier", default=None,
+                        help="dotted module path of the ModelVerifier "
+                             "adapter module to INJECT (must expose "
+                             "make_verifier() -> object with async "
+                             "verify_intent(observation, intent)). Without "
+                             "it the generic mutate route answers 501 — "
+                             "no unverified ok, ever.")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s")
@@ -1141,8 +1060,8 @@ def main(argv=None):
     if os.path.isdir(cl):
         os.environ["LD_LIBRARY_PATH"] = cl + ":" + os.environ.get("LD_LIBRARY_PATH", "")
 
-    # CUA loop injection (process ASSEMBLY — the only legitimate way an
-    # upper-layer loop reaches into this bridge process).
+    # CUA loop + verifier injection (process ASSEMBLY — the only legitimate
+    # way upper-layer loops/reachers enter this bridge process).
     cua = None
     if args.cua_loop:
         import importlib
@@ -1158,6 +1077,20 @@ def main(argv=None):
                 f"module (needs gui_write_async/gui_act_async/"
                 f"GuiExecutorFailure): {e}")
 
+    verifier = None
+    if args.verifier:
+        import importlib
+        try:
+            vmod = importlib.import_module(args.verifier)
+            verifier = vmod.make_verifier()
+            if not hasattr(verifier, "verify_intent"):
+                raise AttributeError("verify_intent")
+        except (ImportError, AttributeError) as e:
+            raise SystemExit(
+                f"--verifier {args.verifier!r} is not a valid verifier "
+                f"adapter module (needs make_verifier() -> object with "
+                f"async verify_intent(observation, intent)): {e}")
+
     ts = time.strftime("%Y%m%d_%H%M%S")
     shot_dir = args.screenshot_dir
     if shot_dir is None:
@@ -1166,7 +1099,8 @@ def main(argv=None):
         shot_dir = None
 
     bridge = MobileGymBridge(sim_url=args.sim_url, headless=not args.headed,
-                             screenshot_dir=shot_dir, cua=cua)
+                             screenshot_dir=shot_dir, cua=cua,
+                             verifier=verifier)
 
     async def on_startup(app):
         await bridge.start_env()

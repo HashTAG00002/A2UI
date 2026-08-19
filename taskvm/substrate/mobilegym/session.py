@@ -23,6 +23,7 @@ from typing import Any
 
 import requests
 
+from taskvm.substrate.mobilegym.app_catalog import get_display_name
 from taskvm.substrate.port import (
     ActionReceipt,
     GuiAction,
@@ -39,15 +40,20 @@ logger = logging.getLogger(__name__)
 class MobileGymSubstrateSession:
     """Port session over the bridge's L1 primitive routes."""
 
-    def __init__(self, sid: str, bridge_url: str,
-                 surface_app: str = "wechat", timeout: float = 30.0):
+    def __init__(self, sid: str, bridge_url: str, surface_app: str,
+                 timeout: float = 30.0):
+        """``surface_app`` is REQUIRED (catalog-validated at the provider;
+        the display name comes from the catalog's user-visible Chinese
+        name, e.g. "wechat" → "微信"). The surface is the session's home
+        label only — every catalog app remains reachable at runtime via
+        GuiAction(kind="open", target=<app_id>)."""
         self._sid = sid
         self._bridge = bridge_url.rstrip("/")
         self._app = surface_app
         self._timeout = timeout
         self._surface = SurfaceInfo(
             surface_id=f"mobilegym:{surface_app}",
-            display_name=surface_app.title(),
+            display_name=get_display_name(surface_app),
             surface_kind="app",
         )
         self._revision = 0
