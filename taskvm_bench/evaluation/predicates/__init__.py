@@ -16,7 +16,10 @@ Modules:
   restored + irreversible objects preserved + real GUI compensation
   trajectory + no hidden world-write restore);
 * :mod:`.local_patch` — the LOCAL_PATCH template (patched keys landed
-  through governance, nothing else moved).
+  through governance, nothing else moved);
+* :mod:`.pause_resume` — the PAUSE_RESUME + STOP template (runtime-
+  generated GT: zero TaskVM-caused world writes inside the pause
+  window and after the stop ack; post-stop trace terminality).
 """
 from __future__ import annotations
 
@@ -76,6 +79,15 @@ class CheckResult:
 #: * ``LOCAL_PATCH_KEY_MISSING``       — a patched key did not land at the
 #:   patched value in the bracket's oracle after-state;
 #:
+#: pause/resume + stop group (PAUSE_RESUME / STOP interventions only):
+#: * ``PAUSE_RESUME_WINDOW_WROTE``     — a world change no explanation
+#:   channel owns (eval-plane write, injection bracket, ENV ledger row)
+#:   appeared inside the pause window — a TaskVM-caused write;
+#: * ``STOP_AFTER_WRITE``             — the same, after the stop ack;
+#: * ``STOP_TRACE_EVENT_AFTER``       — a runtime-trace event is anchored
+#:   at/after the stop (execution never terminated), judged only when a
+#:   trace was collected;
+#:
 #: governance group (any user-op bundle):
 #: * ``GOVERNANCE_OP_REJECTED``        — some user op was honestly rejected;
 #: * ``GOVERNANCE_OP_UNSETTLED``       — some user op never settled;
@@ -104,6 +116,9 @@ FAILURE_CODES = (
     "ROLLBACK_DISPOSITION_INCOMPLETE",
     "LOCAL_PATCH_NOT_APPLIED",
     "LOCAL_PATCH_KEY_MISSING",
+    "PAUSE_RESUME_WINDOW_WROTE",
+    "STOP_AFTER_WRITE",
+    "STOP_TRACE_EVENT_AFTER",
     "GOVERNANCE_OP_REJECTED",
     "GOVERNANCE_OP_UNSETTLED",
     "LEDGER_INTEGRITY_BROKEN",
@@ -116,12 +131,18 @@ FAILURE_CODES = (
 def predicate_modules() -> dict[str, str]:
     """Intervention kind → predicate module name (the dispatch table).
     ``world`` is the always-on base group; the rest key on the
-    intervention kinds the bundle actually carries."""
+    intervention kinds the bundle actually carries. The pause/resume/
+    stop flow kinds (user ops) and the ``pause_resume`` injection alias
+    all resolve to the ONE pause_resume template."""
     return {
         "world": "taskvm_bench.evaluation.predicates.world",
         "rollback": "taskvm_bench.evaluation.predicates.rollback",
         "rollback_request": "taskvm_bench.evaluation.predicates.rollback",
         "local_patch": "taskvm_bench.evaluation.predicates.local_patch",
+        "pause": "taskvm_bench.evaluation.predicates.pause_resume",
+        "resume": "taskvm_bench.evaluation.predicates.pause_resume",
+        "stop": "taskvm_bench.evaluation.predicates.pause_resume",
+        "pause_resume": "taskvm_bench.evaluation.predicates.pause_resume",
     }
 
 
@@ -137,15 +158,18 @@ def run_predicates(spec: TaskSpec,
     # base group first (frozen contract)
     world = import_module(table["world"])
     results.extend(world.checks(spec, bundle))
-    # one evaluation per DISTINCT intervention kind present
+    # ONE evaluation per DISTINCT predicate module present — the kinds
+    # pause/resume/stop/pause_resume all resolve to the same module, so
+    # keying ``seen`` on the MODULE (not the kind) keeps a mixed-flow
+    # bundle evaluated exactly once per intervention family
     seen: set[str] = set()
     for iv in bundle.interventions:
         key = iv.kind if iv.kind in table else iv.kind.replace(
             "_request", "")
         module_name = table.get(key)
-        if module_name is None or key in seen:
+        if module_name is None or module_name in seen:
             continue
-        seen.add(key)
+        seen.add(module_name)
         mod = import_module(module_name)
         if hasattr(mod, "checks"):
             results.extend(mod.checks(spec, bundle))
