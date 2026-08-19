@@ -75,11 +75,15 @@ class TaskSurfaceContextBuilder:
             for v in variables_in
         ]
 
+        # GUI-only rule: a missing user-visible label degrades to "" — NEVER
+        # to the compiler's internal node_id / kind / status vocabulary
+        # (repo contract §3: if a real user cannot see it on a rendered
+        # screen, it does not enter model input).
         nodes = [
             WorkflowNodeView(
-                label=str(n.get("label") or n.get("node_id", "")),
-                kind=str(n.get("kind_label") or n.get("kind", "")),
-                status=str(n.get("status_label") or n.get("status", "")),
+                label=str(n.get("label") or ""),
+                kind=str(n.get("kind_label") or ""),
+                status=str(n.get("status_label") or ""),
                 depth=int(n.get("depth", 0)),
                 is_checkpoint=bool(n.get("is_checkpoint", False)),
             )

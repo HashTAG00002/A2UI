@@ -99,6 +99,25 @@ def test_payload_json_contains_no_internal_id_values(snapshot, context):
         assert needle not in blob, f"internal id {needle!r} leaked as a value"
 
 
+def test_missing_node_labels_never_fall_back_to_internal_ids(snapshot):
+    """P2 (GUI-only): a workflow node without a user-visible label/kind/
+    status must degrade to \"\" — never to the compiler's internal
+    node_id / kind / status vocabulary."""
+    for n in snapshot["workflow"]["nodes"]:
+        n.pop("label", None)
+        n.pop("kind_label", None)
+        n.pop("status_label", None)
+    ctx = TaskSurfaceContextBuilder().build(snapshot)
+    assert all(node.label == "" for node in ctx.workflow.nodes)
+    blob = json.dumps(ctx.to_payload(), ensure_ascii=False)
+    for needle in ("n-01", "n-02", "n-03"):
+        assert needle not in blob, f"internal node id {needle!r} leaked"
+    # the raw kernel enums (kind/status) must not survive either
+    kinds = {node.kind for node in ctx.workflow.nodes}
+    statuses = {node.status for node in ctx.workflow.nodes}
+    assert kinds == {""} and statuses == {""}
+
+
 # ── purity ─────────────────────────────────────────────────────────────────
 
 def test_builder_is_pure(snapshot):
