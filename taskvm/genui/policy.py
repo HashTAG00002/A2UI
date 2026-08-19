@@ -9,7 +9,10 @@ human-readable error — no best-effort repair, no silent coercion.
 Checks:
 1. structure: exactly one root; children ids resolve; no orphans, no
    cycles; component count ≤ 80; tree depth ≤ 8; children are plain id
-   arrays (template children are out of scope for wave 1);
+   arrays (template children are out of scope for wave 1); components
+   referenced only via single-id refs (Button/Card ``child``, Modal
+   ``trigger``/``content``, Tabs tab children — the official sample
+   form) count as reachable;
 2. bindings: every ``{"path": ...}"` must address a whitelisted data-model
    path; the WRITE channel of INPUT components (TextField/CheckBox/
    ChoicePicker/Slider/DateTimeInput — their ``value`` property) may only
@@ -46,6 +49,32 @@ INPUT_COMPONENT_TYPES = frozenset({
 
 #: All container-ish components that reference children by id.
 _CONTAINER_CHILD_KEYS = ("children",)
+
+#: Single-id child references (official sample form: a Button's label
+#: Text need not hang in any children array — Button.child IS its edge).
+#: Used for ORPHAN reachability only; depth and multi-parent checks stay
+#: on the plain children arrays (a Button label is a leaf, not a subtree).
+_SINGLE_REF_KEYS = ("child", "trigger", "content")
+
+
+def _referenced_ids(comp: Mapping) -> list[str]:
+    """Every component id ``comp`` points at: children array entries,
+    single-id refs (Button/Card ``child``, Modal ``trigger``/``content``)
+    and Tabs tab children. Used by the orphan-reachability walk."""
+    ids: list[str] = []
+    children = comp.get("children")
+    if isinstance(children, list):
+        ids.extend(ch for ch in children if isinstance(ch, str))
+    for key in _SINGLE_REF_KEYS:
+        value = comp.get(key)
+        if isinstance(value, str):
+            ids.append(value)
+    tabs = comp.get("tabs")
+    if isinstance(tabs, list):
+        for tab in tabs:
+            if isinstance(tab, dict) and isinstance(tab.get("child"), str):
+                ids.append(tab["child"])
+    return ids
 
 _FORBIDDEN_TEXT_MARKERS = ("<script", "javascript:", "data:text/html")
 
@@ -175,7 +204,10 @@ class SurfacePolicy:
                     parents[ch] = cid
                 edges[cid] = list(children)
 
-        # orphans: every non-root must be reachable from root
+        # orphans: every non-root must be reachable from root — via
+        # children arrays AND single-id refs (Button.child et al., the
+        # official sample form: the button label Text hangs only off the
+        # Button, never in a container's children list)
         if ROOT_COMPONENT_ID in by_id:
             seen = set()
             stack = [ROOT_COMPONENT_ID]
@@ -184,7 +216,8 @@ class SurfacePolicy:
                 if cur in seen:
                     continue
                 seen.add(cur)
-                stack.extend(edges.get(cur, ()))
+                stack.extend(cid for cid in _referenced_ids(by_id[cur])
+                             if cid in by_id)
             for cid in by_id:
                 if cid not in seen:
                     errors.append(

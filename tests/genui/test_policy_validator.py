@@ -194,6 +194,18 @@ def test_orphan_component_rejected(context, valid_components):
     assert any("unreachable" in e for e in errors)
 
 
+def test_button_label_official_form_is_reachable(context, valid_components):
+    """Official sample form (a2ui_protocol.md contact_form_1): the
+    Button's label Text hangs ONLY off the Button's ``child`` ref — not
+    in any children array. It is reachable, not an orphan (Tabs tab
+    children and Card/Modal single refs follow the same rule)."""
+    tree = [c for c in valid_components if c["id"] != "root"]
+    tree.insert(0, {"id": "root", "component": "Column",
+                    "children": ["title", "date_field", "budget_field",
+                                 "status_text", "submit"]})
+    assert validate_components(tree, context) == []
+
+
 def test_unknown_child_rejected(context, valid_components):
     bad = _replace(valid_components, "root", children=["title", "ghost"])
     errors = validate_components(bad, context)
