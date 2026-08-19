@@ -60,9 +60,11 @@ import time
 from typing import Any
 
 from taskvm.architect import ModelCallLedger
+from taskvm.architect.http_port import HttpModelPort
 from taskvm.projection.store import ProjectionSessionStore
 from taskvm.substrate import substrate_registry
 from taskvm.workspace_ui import serve
+from taskvm.workspace_ui.call_archive import maybe_recording_port
 from taskvm.workspace_ui.composition import bootstrap_real_full
 from taskvm.workspace_ui.demo_open import (
     _ensure_mobilegym_bridge,          # closed-whitelist bridge glue (B-09)
@@ -221,10 +223,17 @@ class AppState:
                     "mobilegym",
                     {"sid": self.sid, "bridge_url": self.bridge_url,
                      "app": app})
+                # full-fidelity model-call archiving (opt-in): when
+                # TASKVM_CALL_ARCHIVE_DIR is set, EVERY provider request
+                # (compiler / architect / CUA) lands one verbatim txt +
+                # image files in that dir; without the var this is a
+                # pass-through and behavior is unchanged.
+                port = maybe_recording_port(HttpModelPort())
+                _archive_session_note(gid, goal, app, self)
                 bundle = bootstrap_real_full(
                     goal=goal, sid=self.sid, substrate=substrate,
                     ledger=ledger, store=self.store, model=self.model,
-                    cua_model=cua_model)
+                    model_port=port, cua_model=cua_model)
                 # (c) governance-bar probe: unified compiler+architect+CUA
                 # call count (read-only closure over the shared ledger).
                 sess = self.store.get(self.sid)
@@ -239,6 +248,30 @@ class AppState:
             self.finish(gid, ok=False,
                         error=f"{type(e).__name__}: {e}",
                         model_calls=ledger.total())
+
+
+def _archive_session_note(gid: str, goal: str, app: str,
+                          state: "AppState") -> None:
+    """When call archiving is on, drop a session header file into the
+    archive dir (goal, sid, model, time) so the folder is self-describing."""
+    import os as _os
+    d = _os.environ.get("TASKVM_CALL_ARCHIVE_DIR", "").strip()
+    if not d:
+        return
+    try:
+        _os.makedirs(d, exist_ok=True)
+        with open(_os.path.join(d, "00_SESSION.txt"), "a",
+                  encoding="utf-8") as f:
+            f.write("═" * 78 + "\n")
+            f.write(f"goal_id : {gid}\n")
+            f.write(f"goal    : {goal}\n")
+            f.write(f"surface : {app}\n")
+            f.write(f"sid     : {state.sid}\n")
+            f.write(f"model   : {state.model or 'TASKVM_MODEL env or default'}\n")
+            f.write(f"time    : {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("═" * 78 + "\n")
+    except Exception:
+        pass  # archiving is observability, never a failure path
 
 
 def register_app_routes(app, store: ProjectionSessionStore,

@@ -3293,3 +3293,51 @@ model/provider dependence。
 [11]: https://www.microsoft.com/en-us/research/?p=1134898&utm_source=chatgpt.com "Intent Tagging: Exploring Micro-Prompting Interactions for Supporting Granular Human-GenAI Co-Creation Workflows - Microsoft Research"
 [12]: https://www.microsoft.com/en-us/research/publication/dreamgarden-a-designer-assistant-for-growing-games-from-a-single-prompt/?lang=ja&utm_source=chatgpt.com "DreamGarden: A Designer Assistant for Growing Games from a Single Prompt - Microsoft Research"
 [13]: https://chi2027.acm.org/guide-to-a-successful-submission/?utm_source=chatgpt.com "Guide to a Successful Submission - ACM CHI 2027"
+
+---
+
+# 十七、2026-08-19 owner 追加指令：SKILL-LADDER、术语钉死、分级模型
+
+> 本节为 owner 于 2026-08-19 下达的追加指令，与前文冲突处以本节为准；执行调度以 `docs/04_RM&APP时代/00_MASTER_HANDOVER_两线总调度.md` 的 R2.5 卡为准。
+
+## 17.1 术语钉死：「10 条」到底是什么
+
+依据本文件 §六评估层级、§七与 §十一 Development anchors：
+
+- 「10 条」= **10 个 development anchor**，每族 1 个（§十一原文："每个族一条，共约十条……目标是至少出现稳定的 full-chain success"）；
+- 1 条 = **1 个完整运行轨迹**（1 个 Task Instance：初始执行 episode + 全部注入干预 episode；每个 episode 内含多个 user op，每个 op 内含多个 GUI action/checkpoint）；
+- **不是** 10 个孤立任务变体、不是 10 个事件、不是 10 个用户动作、不是 10 个 GUI 动作；
+- 10 条 dev anchor 全部通过后才扩成 10 族 × 3 = 30 formal frozen tasks。
+
+## 17.2 SKILL-LADDER：先易后难的蒸馏螺旋（修订 §十一的迭代顺序）
+
+十族 anchor 不再一次性满配迭代，而是沿难度阶梯爬升，档间插入 skill 蒸馏检查点：
+
+```text
+L0 简单轨迹（无干预、单 app、1-3 步，纯 plumbing；复用已有 demo goal，不新写 benchmark task）
+→ 蒸馏 skill v1
+→ L1 单一治理干预轨迹（一个 episode、一种干预类型，development_only TaskSpec）
+→ 蒸馏 skill v2
+→ L2 十族满配 dev anchor（多 episode、混合干预、跨 app/surface）
+→ 蒸馏终版 skill，随 8/28 freeze 锁死
+```
+
+理由（owner 2026-08-19）：当前模型要扮演的角色太多、各自上下文太重，且本 bench 的要求严于纯 CUA bench——纯 CUA 能完成的轨迹可能因治理不忠实而判 FAIL。所以必须以 harness 先验（skill）逐步补位：一找到能过的任务，二把经验固化成 harness 的一部分。
+
+### Skill 机制规格
+
+- **目录**：`taskvm/skills/{compiler,architect,cua,verifier}/`（每角色一个子目录；GenUI decoder 的 skill 在 `taskvm/genui/skills/`，归 agentAPP）；
+- **格式**：markdown——触发条件 + 通用领域/操作先验（如"支付宝账单入口在底部 Tab『我的』"）+ 从真实成功轨迹蒸馏的少样本；
+- **装载**：由各角色 prompt 组装点按触发条件注入；装载点位于冻结层（architect/compiler 等），本节即 RFC 授权（模式同 PURETY-GEN）；
+- **反作弊硬规则**：
+  1. skill 只允许含通用世界知识与操作先验；禁止含任何 frozen task 的 seed 值、success 谓词、protected 集、witness；
+  2. 蒸馏源仅限 development split 的成功轨迹；held-out 变体永不参与蒸馏（§十一防 cherry-picking 协议的天然延伸）；
+  3. skill 集版本 + 内容 hash 写入 frozen manifest；FREEZE 后改动=新版本号+相关数据重跑；
+  4. 论文如实披露 skill 机制及其版本（先例：AppAgent 的 knowledge-based 操作模式——harness 经验是贡献的一部分，不是作弊）。
+- **验收**：每档蒸馏后同档任务重跑成功率提升有 ledger 证据；skill 文件 anti-leak grep 零 GT 字段。
+
+## 17.3 分级模型（bench 侧口径）
+
+- 正式 30-task suite 与正式评测：条件内模型 pinned 不变（B-06 纪律）；
+- SKILL-LADDER 的 L0/L1 档（plumbing 迭代）允许指定更便宜的模型，manifest 必须记录 model id + `development_only: true`；每族 L2 档 sign-off 必须用 pinned 主模型；
+- APP 侧（非 bench）的意图解析、结构化→自然语言润色、GenUI 结构生成可用小快模型（Qwen 级），详见 workplan §20。

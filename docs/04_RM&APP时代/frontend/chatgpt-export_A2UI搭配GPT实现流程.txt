@@ -1,0 +1,6027 @@
+A2UI搭配GPT实现流程
+=============
+
+【提问 轮数1】
+A2UI 0.9协议搭配GPT-5.6-SOL如何实现呢？给出完整的流程，我需要在本地准备什么东西？如何渲染，模型应该返回什么呢？需要有本地素材库吗？
+
+【回答内容 轮数1.A】
+可以，而且 **A2UI 0.9 + GPT-5.6-SOL** 这套组合非常适合做“模型生成界面，但客户端不执行模型生成代码”的 Generative UI。
+
+先把最重要的架构关系定下来：
+
+```text
+┌───────────────────────────────────────────────────────┐
+│                    GPT-5.6-SOL                        │
+│                                                       │
+│  输入：用户意图 + 当前状态 + A2UI Catalog + 规则       │
+│  输出：A2UI JSON / JSONL                              │
+└───────────────────────┬───────────────────────────────┘
+                        │
+                        ▼
+                A2UI Validator
+                        │
+                        ▼
+               SSE / WebSocket
+                        │
+                        ▼
+┌───────────────────────────────────────────────────────┐
+│                  Local Renderer                       │
+│                                                       │
+│  A2UI MessageProcessor                                │
+│           ↓                                           │
+│  Surface / DataModel                                  │
+│           ↓                                           │
+│  Component Catalog                                    │
+│           ↓                                           │
+│  React / Angular / Lit / Flutter 原生组件              │
+└───────────────────────┬───────────────────────────────┘
+                        │
+                    用户点击/输入
+                        │
+                        ▼
+                 action + context
+                        │
+                        ▼
+                  GPT-5.6-SOL
+```
+
+**模型不生成 React，不生成 HTML，不生成 JS。模型生成的就是 UI 的“声明”。**
+
+A2UI v0.9 本身就是 JSON-based streaming UI protocol，服务端向客户端发送 `createSurface`、`updateComponents`、`updateDataModel`、`deleteSurface` 四类消息；组件结构和 Data Model 是分开的，因此后续只更新数据也不用重发整棵 UI。turn736390view0
+
+---
+
+# 一、完整流程
+
+我建议你的实现按照下面这 10 步做。
+
+1. **客户端启动时准备 Component Catalog。** 比如允许 GPT 使用 `Text / Image / Row / Column / Card / Button / TextField / ChoicePicker / Slider`，或者你自己的 `ProductCard / StockChart / WeatherCard`。Catalog 本质上是 **Agent 与 Renderer 之间的契约**；A2UI 官方也建议让 Catalog 直接对应你现有的 Design System。
+
+2. **把 Catalog 描述提供给 GPT-5.6-SOL。** 后端 System/Developer Prompt 告诉模型：“你只能使用这些组件，它们有哪些属性，输出必须符合 A2UI v0.9。”A2UI 0.9 特别改成了 prompt-first 设计，即协议/schema 描述本来就是设计成可以直接放进模型上下文的。
+
+3. **用户发送自然语言请求。** 例如：“帮我做一个创建会议的表单，需要标题、日期、参会人和确认按钮。”
+
+4. **后端调用 OpenAI Responses API。** 使用 `model: "gpt-5.6-sol"`。GPT-5.6 Sol 当前支持 Responses API、Streaming、Function Calling 和 Structured Outputs。
+
+5. **模型返回 A2UI JSONL。** 第一个消息通常创建 Surface；之后发组件；然后发初始 Data Model。A2UI 使用逐消息流式处理，所以 Renderer 可以 progressive render。turn736390view0
+
+6. **服务端不要直接信任模型输出。** 每一个完整 JSON 对象先做 JSON parse，再用 A2UI `server_to_client + common_types + catalog` 做 schema validation，同时检查 component id、root、children 引用和 catalog 权限。A2UI 0.9 官方明确指出 prompt-first 的代价就是需要更强的生成后验证与纠错。turn455456view2
+
+7. **验证成功后通过 SSE/WebSocket 发给前端。** A2UI 不限定 transport，只要求消息有序、有明确 framing；JSONL、SSE event、WebSocket frame 都可以。
+
+8. **前端 MessageProcessor 消费消息并渲染 Surface。** 官方 Web Renderer 已有 React、Angular、Lit；Web 端共享 `@a2ui/web_core`，React 提供 `MessageProcessor`、`A2UISurface` 和 `useA2UI()`。Flutter 则可用 GenUI SDK。
+
+9. **用户输入首先修改客户端 Data Model。** TextField、CheckBox、Slider、ChoicePicker、DateTimeInput 都支持 two-way binding；用户每敲一个字不会自动请求模型，而是先更新本地状态。
+
+10. **Button action 再发回 Agent。** Renderer 解析 action 的 `context`，把当前输入发送给你的 Agent；Agent/GPT 根据结果返回新的 `updateComponents` 或 `updateDataModel`，页面增量变化，不必重新创建整个页面。turn449956view0
+
+这就是完整闭环：
+
+```text
+User Prompt
+   ↓
+GPT
+   ↓
+createSurface
+   ↓
+updateComponents
+   ↓
+updateDataModel
+   ↓
+Renderer
+   ↓
+User Input
+   ↓
+local DataModel
+   ↓
+Button Action
+   ↓
+Backend / GPT
+   ↓
+updateDataModel / updateComponents
+   ↓
+Renderer update
+```
+
+---
+
+# 二、你本地到底需要准备什么？
+
+如果用 **React + Node.js**，我会搭成这样：
+
+```text
+my-a2ui-app/
+│
+├─ frontend/
+│  ├─ src/
+│  │  ├─ a2ui/
+│  │  │  ├─ renderer.ts
+│  │  │  ├─ action-handler.ts
+│  │  │  ├─ catalog.ts
+│  │  │  └─ asset-resolver.ts
+│  │  │
+│  │  ├─ components/
+│  │  │  ├─ ProductCard.tsx
+│  │  │  ├─ Chart.tsx
+│  │  │  └─ ...
+│  │  │
+│  │  └─ App.tsx
+│
+├─ backend/
+│  ├─ agent.ts
+│  ├─ prompt.ts
+│  ├─ a2ui-validator.ts
+│  ├─ stream-parser.ts
+│  └─ server.ts
+│
+├─ a2ui/
+│  ├─ common_types.json
+│  ├─ server_to_client.json
+│  └─ catalog.json
+│
+└─ assets/
+   ├─ icons/
+   ├─ images/
+   └─ ...
+```
+
+其中真正不可缺的是：
+
+| 东西 | 是否必须 | 作用 |
+|---|---:|---|
+| GPT API backend | ✅ | 调 GPT-5.6-SOL |
+| A2UI Renderer | ✅ | JSON → UI |
+| Component Catalog | ✅ | 定义模型能用哪些组件 |
+| MessageProcessor | ✅ | Surface/DataModel 状态管理 |
+| Validator | ✅ 强烈建议 | 防止模型非法输出 |
+| SSE/WebSocket | 推荐 | 流式 UI |
+| 本地素材库 | ❌ | 图片/图标可选 |
+| 自定义组件库 | ❌ 起步 / ✅生产推荐 | 保证产品 UI 风格 |
+
+官方 React renderer 安装方式目前是：
+
+```bash
+npm install @a2ui/react @a2ui/web_core
+```
+
+官方 Lit：
+
+```bash
+npm install @a2ui/lit @a2ui/web_core
+```
+
+Flutter：
+
+```bash
+flutter pub add flutter_genui
+```
+
+React、Lit、Angular 和 Flutter 都已有官方 v0.9 Renderer 支持。
+
+---
+
+# 三、Catalog 才是整个方案最关键的东西
+
+很多人第一次理解 A2UI 会把 **Catalog** 和“素材库”混为一谈。
+
+其实不是。
+
+Catalog 更像：
+
+```text
+GPT 可使用 UI API
+```
+
+假设你告诉 GPT：
+
+```json
+{
+  "components": {
+    "Text": {},
+    "Button": {},
+    "Card": {},
+    "Column": {},
+    "ProductCard": {},
+    "Price": {},
+    "StockChart": {}
+  }
+}
+```
+
+Renderer 端则存在真正的实现：
+
+```text
+"Text"        → <Text />
+"Button"      → <MyButton />
+"Card"        → <MyCard />
+"ProductCard" → <ProductCard />
+"StockChart"  → <StockChart />
+```
+
+所以 GPT 输出：
+
+```json
+{
+  "id": "chart",
+  "component": "StockChart",
+  "symbol": "AAPL",
+  "period": "1M"
+}
+```
+
+它**没有生成 Chart 的 JavaScript**。
+
+你的客户端只是看到：
+
+```text
+component = StockChart
+```
+
+然后从 Registry 中找到：
+
+```tsx
+StockChart
+```
+
+再进行渲染。
+
+这也是 A2UI 安全模型的核心：Agent 请求的是你预先允许的 trusted components，而不是下发任意代码。
+
+---
+
+# 四、模型到底应该返回什么？
+
+比如用户说：
+
+> 给我一个填写姓名并提交的界面。
+
+模型理想输出不是：
+
+```html
+<form>
+...
+</form>
+```
+
+而应该是一串 **A2UI JSONL**：
+
+```jsonl
+{"version":"v0.9","createSurface":{"surfaceId":"profile_form","catalogId":"https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json","sendDataModel":true}}
+{"version":"v0.9","updateComponents":{"surfaceId":"profile_form","components":[{"id":"root","component":"Card","child":"content"},{"id":"content","component":"Column","children":["title","name","submit"]},{"id":"title","component":"Text","text":"# 创建个人资料"},{"id":"name","component":"TextField","label":"姓名","value":{"path":"/form/name"},"variant":"shortText"},{"id":"submit_text","component":"Text","text":"确认"},{"id":"submit","component":"Button","child":"submit_text","variant":"primary","action":{"event":{"name":"submitProfile","context":{"name":{"path":"/form/name"}}}}}]}}
+{"version":"v0.9","updateDataModel":{"surfaceId":"profile_form","value":{"form":{"name":""}}}}
+```
+
+这个结构包含三件事情。
+
+第一条：
+
+```text
+createSurface
+```
+
+意思是：
+
+> Renderer，创建一个叫 profile_form 的 UI 区域。
+
+第二条：
+
+```text
+updateComponents
+```
+
+定义：
+
+```text
+Card
+ └── Column
+      ├── Text
+      ├── TextField
+      └── Button
+```
+
+A2UI 0.9 要求 Surface 最终存在一个 `id: "root"` 的组件作为组件树根节点。
+
+第三条：
+
+```text
+updateDataModel
+```
+
+提供：
+
+```json
+{
+  "form": {
+    "name": ""
+  }
+}
+```
+
+然后：
+
+```json
+"value": {
+  "path": "/form/name"
+}
+```
+
+就建立：
+
+```text
+TextField
+     ⇅
+DataModel.form.name
+```
+
+A2UI 的 binding 使用 JSON Pointer，并且 input component 会把输入即时写回本地 Data Model。turn736390view2
+
+---
+
+# 五、用户点“确认”之后发生什么？
+
+上面的 Button：
+
+```json
+{
+  "action": {
+    "event": {
+      "name": "submitProfile",
+      "context": {
+        "name": {
+          "path": "/form/name"
+        }
+      }
+    }
+  }
+}
+```
+
+假设用户输入：
+
+```text
+张三
+```
+
+Renderer 会解析 context，发给后端类似：
+
+```json
+{
+  "type": "action",
+  "surfaceId": "profile_form",
+  "name": "submitProfile",
+  "context": {
+    "name": "张三"
+  }
+}
+```
+
+如果 `createSurface.sendDataModel = true`，客户端还可以随 action 把 Surface 的完整当前 Data Model 发给创建它的 server。
+
+你的 Backend 可以先执行真正业务：
+
+```text
+saveProfile("张三")
+```
+
+然后再把：
+
+```text
+action result
++
+current surface
++
+current data model
+```
+
+交给 GPT。
+
+GPT 不需要重新做整个 UI。
+
+它可以只返回：
+
+```json
+{
+  "version": "v0.9",
+  "updateDataModel": {
+    "surfaceId": "profile_form",
+    "path": "/status",
+    "value": "success"
+  }
+}
+```
+
+或者替换部分组件：
+
+```text
+Form
+↓
+Success Card
+```
+
+这就是 A2UI 很漂亮的地方：**UI 是 stateful、incremental 的，而不是每轮重新生成整个 HTML。** turn455456view3
+
+---
+
+# 六、GPT-5.6-SOL 这边怎么调用？
+
+后端推荐直接使用 Responses API。GPT-5.6 Sol 当前支持 Responses API 和 streaming。turn615714view1
+
+Node.js 最小结构：
+
+```ts
+import OpenAI from "openai";
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
+
+const stream = await openai.responses.create({
+  model: "gpt-5.6-sol",
+
+  input: [
+    {
+      role: "developer",
+      content: A2UI_SYSTEM_PROMPT
+    },
+    {
+      role: "user",
+      content: userMessage
+    }
+  ],
+
+  stream: true
+});
+
+for await (const event of stream) {
+  if (event.type === "response.output_text.delta") {
+    consumeA2UIDelta(event.delta);
+  }
+}
+```
+
+Responses streaming 会提供诸如 `response.output_text.delta` 的 typed events。turn615714view2
+
+你的 `consumeA2UIDelta()` 不要每来几个 token 就 `JSON.parse()`。
+
+而应该维护 buffer：
+
+```ts
+let buffer = "";
+
+function consumeA2UIDelta(delta: string) {
+  buffer += delta;
+
+  while (buffer.includes("\n")) {
+    const index = buffer.indexOf("\n");
+
+    const line = buffer.slice(0, index).trim();
+    buffer = buffer.slice(index + 1);
+
+    if (!line) continue;
+
+    try {
+      const message = JSON.parse(line);
+
+      validateA2UI(message);
+
+      sendToBrowser(message);
+    } catch (err) {
+      // invalid A2UI
+    }
+  }
+}
+```
+
+也就是说：
+
+```text
+OpenAI token stream
+       ↓
+JSONL buffer
+       ↓
+完整一行 JSON
+       ↓
+JSON.parse
+       ↓
+A2UI Schema Validator
+       ↓
+Renderer
+```
+
+而不是：
+
+```text
+GPT token
+↓
+直接 Renderer
+```
+
+---
+
+# 七、System Prompt 应该怎么设计？
+
+我会让 Agent Prompt 大致长这样：
+
+```text
+You are an A2UI v0.9 UI generation agent.
+
+Your job is to translate the user's intent into A2UI protocol messages.
+
+RULES:
+
+1. Output A2UI JSON objects only.
+2. Use JSONL: exactly one complete JSON object per line.
+3. Never output Markdown fences.
+4. Never output HTML, CSS, JavaScript, JSX or React code.
+5. Only use components defined by the supplied catalog.
+6. Every new surface must first emit createSurface.
+7. Every surface must eventually contain a component with id "root".
+8. Use updateDataModel for content/state changes whenever rebuilding the
+   component tree is unnecessary.
+9. Use JSON Pointer paths for data binding.
+10. Interactive controls must bind their value to the data model.
+11. Buttons should dispatch semantic action names.
+12. Never invent component types or component properties.
+
+AVAILABLE CATALOG:
+
+<CATALOG HERE>
+
+CURRENT SURFACES:
+
+<CURRENT STATE HERE>
+```
+
+然后放进去：
+
+```text
+common_types
++
+catalog definition
++
+必要的 A2UI protocol instructions
+```
+
+这是比较符合 **A2UI 0.9 自身设计方向** 的做法，因为 v0.9 从以 Structured Outputs 为中心转成了 prompt-first，并明确要求生成后的验证。
+
+---
+
+# 八、那 GPT-5.6-SOL 明明支持 Structured Outputs，要不要用？
+
+**可以用，但我不会把“完整原版 A2UI v0.9 schema + strict Structured Outputs”作为第一版架构。**
+
+原因很简单。
+
+OpenAI 的 Structured Outputs 确实能保证模型遵循所给 JSON Schema，但 strict mode 支持的是 JSON Schema 的一个子集。
+
+而 A2UI 0.9 自己之所以转向 prompt-first，就是为了不再受 Structured Output schema 表达能力限制，支持更丰富的 Catalog/schema。
+
+所以我建议：
+
+```text
+GPT
+ │
+ │ prompt-first
+ ▼
+A2UI JSONL
+ │
+ ▼
+Schema validator
+ │
+ ├─ valid ─────────→ Renderer
+ │
+ └─ invalid
+      ↓
+   repair/retry
+```
+
+而不是一开始做：
+
+```text
+整个 A2UI schema
+      ↓
+OpenAI strict structured output
+```
+
+当然，如果你自己的 Catalog 很小，例如只有：
+
+```text
+Card
+Text
+Button
+Image
+Row
+Column
+```
+
+那么完全可以做一个简化后的 JSON Schema，再让 GPT-5.6-SOL Structured Outputs 强约束。
+
+---
+
+# 九、Renderer 到底做什么？
+
+Renderer 实际上就是：
+
+```text
+A2UI JSON
+      ↓
+MessageProcessor
+      ↓
+Surface state
+      ↓
+component.id graph
+      ↓
+Catalog lookup
+      ↓
+React Component
+```
+
+例如收到：
+
+```json
+{
+  "id": "submit",
+  "component": "Button",
+  "variant": "primary"
+}
+```
+
+Renderer 会做类似：
+
+```ts
+const Component = registry["Button"];
+```
+
+然后：
+
+```tsx
+<Component {...props} />
+```
+
+所以 Renderer 才是真正决定：
+
+```text
+圆角多少
+字体多大
+hover 什么效果
+暗黑模式什么颜色
+是否支持 animation
+是否符合品牌 Design System
+```
+
+GPT 并不决定这些。
+
+这也是为什么同样一份 A2UI JSON 可以由 React、Angular、Lit 或 Flutter Renderer 映射为各自原生 UI。turn449956view0
+
+---
+
+# 十、是否需要“本地素材库”？
+
+**协议层面完全不需要。**
+
+你真正需要的是：
+
+> **本地 Component Catalog**
+
+而不是：
+
+> 本地图片素材库。
+
+Basic Catalog 已经包含 `Image`、`Video`、`AudioPlayer` 这类基于 URL 的媒体组件，以及使用预定义系统图标的 `Icon`。
+
+所以最简单可以：
+
+```json
+{
+  "component": "Image",
+  "src": "..."
+}
+```
+
+然后 Renderer 加载 URL。
+
+不过生产环境我会再加一层：
+
+```text
+GPT
+ ↓
+logical asset
+ ↓
+Asset Resolver
+ ↓
+allowlist / CDN / local assets
+```
+
+例如不要让 GPT 自己随便生成：
+
+```text
+https://random-domain.example/x.png
+```
+
+而是自定义：
+
+```json
+{
+  "component": "BrandImage",
+  "assetId": "product_iphone_17"
+}
+```
+
+Renderer：
+
+```ts
+assetResolver("product_iphone_17")
+```
+
+得到你真正允许的资源。
+
+这样你可以控制：
+
+```text
+品牌图片
+产品图
+icon
+avatar
+背景
+CDN
+授权素材
+```
+
+---
+
+# 十一、我更推荐你做“领域组件”，而不是全部让 GPT 拼 Row/Column
+
+这会直接决定最终体验。
+
+第一版很多人会做：
+
+```text
+Text
+Row
+Column
+Image
+Button
+Card
+```
+
+于是 GPT 得自己拼：
+
+```text
+Column
+├── Row
+│   ├── Image
+│   └── Column
+│       ├── Text
+│       └── Text
+├── Divider
+└── Button
+```
+
+能用，但是模型 token 多，而且 UI 容易变化。
+
+生产系统更适合定义：
+
+```text
+ProductCard
+HotelCard
+FlightCard
+UserCard
+StockChart
+OrderSummary
+PaymentMethodSelector
+CalendarPicker
+AddressForm
+ConfirmDialog
+```
+
+于是 GPT 只需要说：
+
+```json
+{
+  "id": "product",
+  "component": "ProductCard",
+  "productId": "123",
+  "showBuyButton": true
+}
+```
+
+Renderer 自己保证它长这样：
+
+```text
+┌────────────────────┐
+│      Product image │
+│                    │
+│ MacBook Pro        │
+│ ¥14,999            │
+│ ★ 4.8              │
+│                    │
+│     [立即购买]      │
+└────────────────────┘
+```
+
+A2UI 官方也明确推荐 custom catalog 尽量直接对应你自己的设计系统，而不是在通用 Catalog 和产品组件之间套很多转换层。
+
+---
+
+# 十二、我会怎么搭你的正式架构
+
+如果这是我来做，我会定成：
+
+```text
+                        ┌──────────────┐
+                        │     User     │
+                        └──────┬───────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────┐
+│ React                                                │
+│                                                      │
+│ Chat UI                                              │
+│ A2UI Surface Host                                    │
+│       │                                              │
+│       ▼                                              │
+│ @a2ui/react                                          │
+│       │                                              │
+│       ▼                                              │
+│ Custom Catalog                                       │
+│       │                                              │
+│       ├─ ProductCard                                 │
+│       ├─ Chart                                       │
+│       ├─ Form                                        │
+│       ├─ Button                                      │
+│       └─ ...                                         │
+└──────────────────────┬───────────────────────────────┘
+                       │
+                  action / prompt
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│ Node Backend                                         │
+│                                                      │
+│ Session Manager                                      │
+│       │                                              │
+│       ├──── current Surface State                    │
+│       ├──── current DataModel                        │
+│       └──── Catalog                                  │
+│                                                      │
+│ Prompt Builder                                       │
+│       ↓                                              │
+│ GPT-5.6-SOL                                          │
+│       ↓                                              │
+│ JSONL Parser                                         │
+│       ↓                                              │
+│ A2UI Validator                                       │
+│       ↓                                              │
+│ Policy / Security                                    │
+│       ↓                                              │
+│ SSE                                                  │
+└──────────────────────┬───────────────────────────────┘
+                       │
+                       ▼
+                  React Renderer
+```
+
+这套结构里，**GPT-5.6-SOL 是 Planner / UI Composer，不是 Renderer。**
+
+A2UI 是：
+
+```text
+GPT → Renderer
+```
+
+之间的 UI IR / DSL。
+
+Catalog 是：
+
+```text
+GPT ↔ Renderer
+```
+
+之间的 ABI / contract。
+
+Data Model 是：
+
+```text
+UI state
+```
+
+Surface 是：
+
+```text
+一块独立、持续存在、可增量更新的 UI
+```
+
+而 Component Library 才是：
+
+```text
+真正显示给用户的 UI
+```
+
+这几个概念分开之后，整个 A2UI 就很好理解了。
+
+**最小可用版，你本地甚至完全不需要素材库：`React + @a2ui/react + @a2ui/web_core + Basic Catalog + Node 后端 + GPT-5.6-SOL + SSE + Validator` 就可以跑起来。** 官方 React Renderer 已负责 MessageProcessor 和 Surface 渲染部分；GPT-5.6 Sol 则可以通过 Responses API 流式产生 Agent 输出。turn825560view3
+
+如果目标是正式产品，我会在此基础上增加 **Custom Catalog + 本地 Design System + Asset Resolver + A2UI validator/repair layer**。这里面最值得投入的其实不是 Prompt，而是 **Catalog 设计**——Catalog 设计得好，GPT 输出会非常稳定，UI 也会真正像你的产品，而不是“AI 临时拼出来的页面”。
+
+
+【回答内容 轮数1.B】
+可以，而且 **A2UI 0.9 + GPT-5.6 Sol 是很自然的一套组合**。核心不是“让 GPT 写前端”，而是：
+
+> **GPT-5.6 Sol 负责生成 A2UI JSON → 你的后端负责校验/转发 → 本地 Renderer 把 JSON 映射成你自己的 React/Flutter/Angular 组件。**
+
+A2UI 本身就是声明式协议，不允许 Agent 直接下发任意可执行 UI 代码。v0.9 采用的是 **Prompt-First** 设计，让模型根据 Catalog 和协议说明生成 JSON。turn840412view0
+
+先提醒一个版本点：截至现在，**v0.9.1 是当前 production 版本，v0.9 是 previous stable，v1.0 还是 Candidate**。如果你没有必须严格兼容 `"version":"v0.9"` 的历史系统，我实际开发会建议你直接按 **0.9.1** 做；架构和下面讲的 0.9 基本一致。
+
+---
+
+# 一、整个系统到底长什么样
+
+最推荐的架构是：
+
+```text
+┌─────────────────────────────┐
+│          Browser/App        │
+│                             │
+│  React / Flutter / Angular  │
+│            ↓                │
+│       A2UI Renderer         │
+│            ↓                │
+│ Component Catalog          │
+│ Text/Card/Button/...        │
+└──────────────┬──────────────┘
+               │
+         user action
+               │
+               ▼
+┌─────────────────────────────┐
+│       Your Backend          │
+│                             │
+│  /chat                      │
+│  /a2ui/action               │
+│                             │
+│  Prompt Builder             │
+│  A2UI Validator             │
+│  Session/Surface Store      │
+└──────────────┬──────────────┘
+               │
+       Responses API
+               │
+               ▼
+┌─────────────────────────────┐
+│       GPT-5.6 Sol           │
+│                             │
+│ 输入：                       │
+│ 用户请求                     │
+│ A2UI 0.9 协议                │
+│ 可用 Catalog                 │
+│ 当前 surface 状态            │
+│                             │
+│ 输出：                       │
+│ A2UI JSONL                   │
+└─────────────────────────────┘
+```
+
+**Renderer 才是真正画 UI 的东西。GPT 不画 UI。**
+
+A2UI 官方的典型流程也是：
+
+```text
+User
+ ↓
+Agent generates A2UI
+ ↓
+stream A2UI messages
+ ↓
+Client renderer
+ ↓
+native UI
+ ↓
+User action
+ ↓
+Agent
+ ↓
+updated A2UI
+```
+
+协议本身把传输层解耦了，你可以用 SSE、WebSocket、A2A，甚至自己定义 HTTP transport。
+
+---
+
+# 二、你本地到底需要准备什么
+
+如果我们以 **React + Node.js + GPT-5.6 Sol** 为例，至少准备下面这些。
+
+```text
+my-a2ui-app/
+│
+├── frontend/
+│   ├── src/
+│   │   ├── a2ui/
+│   │   │   ├── renderer/
+│   │   │   ├── catalog/
+│   │   │   ├── components/
+│   │   │   ├── functions/
+│   │   │   └── transport/
+│   │   │
+│   │   ├── assets/
+│   │   └── App.tsx
+│   │
+│   └── package.json
+│
+├── backend/
+│   ├── src/
+│   │   ├── openai.ts
+│   │   ├── prompt.ts
+│   │   ├── a2ui-validator.ts
+│   │   ├── surfaces.ts
+│   │   └── server.ts
+│   │
+│   └── package.json
+│
+└── shared/
+    └── catalog/
+        └── my-catalog.json
+```
+
+前端官方已经提供 Web Renderer 基础设施。React 可以安装：
+
+```bash
+npm install @a2ui/react @a2ui/web_core
+```
+
+官方目前推荐 Web 端优先利用 `@a2ui/web_core`，让它处理 message processing、surface state、data binding、component tree 等，而不是自己重新写协议运行时。
+
+另外你需要 OpenAI SDK：
+
+```bash
+npm install openai
+```
+
+环境变量：
+
+```bash
+OPENAI_API_KEY=...
+```
+
+GPT-5.6 Sol 的 API 模型可以使用：
+
+```text
+gpt-5.6
+```
+
+这个 alias 当前指向 GPT-5.6 Sol。官方模型文档显示 Sol 支持最高到 `max` reasoning effort。
+
+---
+
+# 三、最重要的东西：Catalog
+
+你问到：
+
+> 需要有本地素材库吗？
+
+严格来说：
+
+**不需要“素材库”，但必须有“组件能力库 / Catalog”的概念。**
+
+这是两件完全不同的事情。
+
+### Catalog
+
+Catalog 告诉模型：
+
+```text
+你只能用：
+
+Text
+Button
+Image
+Card
+Row
+Column
+TextField
+Checkbox
+List
+Tabs
+...
+
+不能自己发明组件。
+```
+
+同时告诉 Renderer：
+
+```text
+A2UI 的 Button
+↓
+对应我的 React Button
+
+A2UI 的 Card
+↓
+对应我的 DesignSystem.Card
+```
+
+这就是 A2UI 安全模型里最核心的一层：Agent 只能请求使用预先批准的组件。
+
+官方 Basic Catalog 本身就包含 Text、Image、Icon、Row、Column、Button、TextField 等组件以及客户端函数。turn803814view4
+
+---
+
+# 四、Catalog 和“素材库”的区别
+
+比如你的公司已经有：
+
+```text
+MyButton
+MyCard
+MyProductCard
+MyPrice
+MyAvatar
+MyChart
+MyMap
+MyDatePicker
+```
+
+那么你可以创建自己的：
+
+```text
+https://yourcompany.com/a2ui/catalog/v1
+```
+
+模型收到的是这个 Catalog 的定义。
+
+例如：
+
+```json
+{
+  "catalogId": "https://example.com/a2ui/catalog/v1",
+  "components": {
+    "ProductCard": {
+      "properties": {
+        "title": {},
+        "price": {},
+        "image": {},
+        "productId": {}
+      }
+    }
+  }
+}
+```
+
+而前端：
+
+```tsx
+const componentRegistry = {
+  Text: A2UIText,
+  Button: MyButton,
+  Card: MyCard,
+  ProductCard: MyProductCard
+};
+```
+
+于是模型返回：
+
+```json
+{
+  "id": "product1",
+  "component": "ProductCard",
+  "title": "MacBook Pro",
+  "price": "14999",
+  "image": "/assets/macbook.jpg",
+  "productId": "123"
+}
+```
+
+Renderer 最后执行：
+
+```tsx
+<MyProductCard
+  title="MacBook Pro"
+  price="14999"
+  image="/assets/macbook.jpg"
+/>
+```
+
+注意：
+
+**模型没有返回 JSX。**
+
+模型只是返回：
+
+```json
+"component": "ProductCard"
+```
+
+---
+
+# 五、图片素材要不要存在本地？
+
+不强制。
+
+A2UI Basic Catalog 的 `Image` 接收的是一个 `url`，所以它可以指向 CDN、你自己的 API、静态资源服务等。
+
+例如：
+
+```json
+{
+  "id": "hero",
+  "component": "Image",
+  "url": "https://cdn.example.com/product/123.jpg",
+  "description": "产品图片",
+  "fit": "cover"
+}
+```
+
+因此你可以采用三种模式。
+
+### 模式 A：远程 CDN
+
+```text
+https://cdn.xxx.com/image1.webp
+```
+
+最简单。
+
+### 模式 B：本地静态资源
+
+```text
+/assets/product-a.png
+```
+
+也没问题。
+
+### 模式 C：素材 ID
+
+我其实更推荐企业系统使用：
+
+```json
+{
+  "component": "ProductImage",
+  "assetId": "product_123_main"
+}
+```
+
+本地 Renderer 自己：
+
+```ts
+assetRegistry.resolve("product_123_main")
+```
+
+得到：
+
+```text
+https://cdn.xxx.com/products/123/main.webp
+```
+
+这样 **GPT 根本不需要知道真实 URL**。
+
+这个方式更安全，也更容易换 CDN。
+
+所以：
+
+```text
+组件库：强烈需要
+素材库：可选
+Asset Registry：复杂产品推荐有
+```
+
+---
+
+# 六、GPT-5.6 Sol 到底应该返回什么？
+
+这是整个方案最关键的问题。
+
+## 不要返回这个
+
+```tsx
+<div>
+  <Card>
+    <Button onClick={...}>
+      提交
+    </Button>
+  </Card>
+</div>
+```
+
+也不要：
+
+```html
+<button onclick="...">
+```
+
+更不要 JavaScript。
+
+---
+
+# 七、应该返回 A2UI JSONL
+
+A2UI v0.9 server → client 主要有四种消息：
+
+```text
+createSurface
+updateComponents
+updateDataModel
+deleteSurface
+```
+
+turn185834view0
+
+一个最小页面可以让 GPT 返回：
+
+```jsonl
+{"version":"v0.9","createSurface":{"surfaceId":"weather-001","catalogId":"https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"}}
+{"version":"v0.9","updateComponents":{"surfaceId":"weather-001","components":[{"id":"root","component":"Column","children":["title","temperature","refresh-button"]},{"id":"title","component":"Text","text":"北京天气","variant":"h2"},{"id":"temperature","component":"Text","text":{"path":"/weather/temperature"}},{"id":"refresh-label","component":"Text","text":"刷新"},{"id":"refresh-button","component":"Button","child":"refresh-label","variant":"primary","action":{"event":{"name":"refresh_weather"}}}]}}
+{"version":"v0.9","updateDataModel":{"surfaceId":"weather-001","path":"/weather","value":{"temperature":"28°C"}}}
+```
+
+这三个 JSON 就足够 Renderer 画 UI。
+
+---
+
+# 八、为什么一定有一个 `root`
+
+在 `updateComponents` 中：
+
+```json
+{
+  "id": "root",
+  "component": "Column"
+}
+```
+
+非常重要。
+
+A2UI 0.9 要求 component tree 中有一个：
+
+```text
+id = "root"
+```
+
+它就是 UI 树的根。
+
+Renderer 在收到 root 之前可以先缓存其他 component；一旦 root 出现，就可以开始 progressive rendering。
+
+---
+
+# 九、组件为什么是“平铺”的
+
+你可能会觉得奇怪，为什么不是：
+
+```json
+{
+  "Column": {
+    "children": [
+      {
+        "Text": {}
+      },
+      {
+        "Button": {}
+      }
+    ]
+  }
+}
+```
+
+而是：
+
+```json
+[
+  {
+    "id": "root",
+    "component": "Column",
+    "children": ["title", "button"]
+  },
+  {
+    "id": "title",
+    "component": "Text"
+  },
+  {
+    "id": "button",
+    "component": "Button"
+  }
+]
+```
+
+这是 A2UI 很漂亮的地方。
+
+它是 **adjacency list**。
+
+这样 GPT 可以分块输出：
+
+```text
+root
+↓
+header
+↓
+form
+↓
+buttons
+↓
+footer
+```
+
+不需要一次把一个巨大嵌套 JSON 闭合完。
+
+同时修改某个组件时：
+
+```json
+{
+  "updateComponents": {
+    "surfaceId": "xxx",
+    "components": [
+      {
+        "id": "submit-label",
+        "component": "Text",
+        "text": "提交成功"
+      }
+    ]
+  }
+}
+```
+
+就能局部更新。
+
+这也是 A2UI 为 LLM streaming 特意做的设计。
+
+---
+
+# 十、UI 数据和 UI 结构最好分开
+
+这是非常重要的工程实践。
+
+不要让 GPT 每次修改温度都重新生成：
+
+```text
+Column
+Text
+Card
+Button
+...
+```
+
+应该第一次：
+
+```text
+updateComponents
+```
+
+建立 UI。
+
+然后：
+
+```json
+{
+  "version": "v0.9",
+  "updateDataModel": {
+    "surfaceId": "weather-001",
+    "path": "/weather/temperature",
+    "value": "31°C"
+  }
+}
+```
+
+组件：
+
+```json
+{
+  "id": "temperature",
+  "component": "Text",
+  "text": {
+    "path": "/weather/temperature"
+  }
+}
+```
+
+Renderer 自动重新渲染。
+
+A2UI 的 `updateDataModel` 就是为了在不重复发送组件结构的情况下更新内容；path 使用 JSON Pointer。
+
+---
+
+# 十一、表单又怎么工作？
+
+例如 GPT 创建：
+
+```json
+{
+  "id": "name",
+  "component": "TextField",
+  "label": "姓名",
+  "value": {
+    "path": "/form/name"
+  },
+  "variant": "shortText"
+}
+```
+
+初始：
+
+```json
+{
+  "version": "v0.9",
+  "updateDataModel": {
+    "surfaceId": "form-1",
+    "path": "/form",
+    "value": {
+      "name": ""
+    }
+  }
+}
+```
+
+用户输入：
+
+```text
+张三
+```
+
+本地 DataModel 变成：
+
+```json
+{
+  "form": {
+    "name": "张三"
+  }
+}
+```
+
+**这个过程完全可以在浏览器本地发生。**
+
+不是每输入一个字符都请求 GPT。
+
+A2UI 明确规定 two-way binding 可以是客户端本地行为，只有 action 发生时才需要把数据发给服务器。
+
+---
+
+# 十二、按钮点击之后发生什么？
+
+模型定义：
+
+```json
+{
+  "id": "submit",
+  "component": "Button",
+  "child": "submit-label",
+  "action": {
+    "event": {
+      "name": "submit_order",
+      "context": {
+        "name": {
+          "path": "/form/name"
+        }
+      }
+    }
+  }
+}
+```
+
+用户点击。
+
+Renderer 会解析 path。
+
+然后发给后端类似：
+
+```json
+{
+  "version": "v0.9",
+  "action": {
+    "name": "submit_order",
+    "surfaceId": "form-1",
+    "sourceComponentId": "submit",
+    "timestamp": "2026-08-19T07:10:00Z",
+    "context": {
+      "name": "张三"
+    }
+  }
+}
+```
+
+A2UI 0.9 的 client → server action 就包含 `name`、`surfaceId`、`sourceComponentId`、timestamp 和 context。
+
+然后你的 Backend 再调用 GPT-5.6。
+
+---
+
+# 十三、GPT 第二轮不需要重新创建整个 UI
+
+假设用户提交成功。
+
+GPT 可以只返回：
+
+```jsonl
+{"version":"v0.9","updateDataModel":{"surfaceId":"form-1","path":"/status","value":"success"}}
+{"version":"v0.9","updateComponents":{"surfaceId":"form-1","components":[{"id":"submit-label","component":"Text","text":"提交成功"}]}}
+```
+
+这就是 A2UI 的：
+
+**incremental UI update。**
+
+---
+
+# 十四、GPT-5.6 Sol 后端怎么调用
+
+我建议直接使用 **Responses API**。OpenAI 当前也推荐新的 agent/workflow 使用 Responses API；它支持 streaming、Structured Outputs、function calling 等能力。
+
+基础代码：
+
+```ts
+import OpenAI from "openai";
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
+
+const stream = await openai.responses.create({
+  model: "gpt-5.6",
+
+  reasoning: {
+    effort: "medium"
+  },
+
+  input: [
+    {
+      role: "developer",
+      content: A2UI_SYSTEM_PROMPT
+    },
+    {
+      role: "user",
+      content: userMessage
+    }
+  ],
+
+  stream: true
+});
+```
+
+GPT-5.6 Sol 这种 UI planning，大多数情况：
+
+```text
+medium
+```
+
+已经可以。
+
+复杂 dashboard：
+
+```text
+high
+```
+
+非常复杂的业务编排才建议：
+
+```text
+xhigh / max
+```
+
+GPT-5.6 的模型文档目前支持 `none / low / medium / high / xhigh / max`。
+
+---
+
+# 十五、System Prompt 应该是什么样
+
+这是你的整个系统第二重要的东西。
+
+类似：
+
+```text
+You are an A2UI v0.9 UI generation agent.
+
+You MUST generate A2UI v0.9 messages only.
+
+Protocol:
+- Every message must contain "version": "v0.9".
+- Available server messages:
+  createSurface
+  updateComponents
+  updateDataModel
+  deleteSurface
+
+Surface rules:
+- createSurface before updating a new surface.
+- Exactly one component ID must be "root".
+- Never generate HTML.
+- Never generate JavaScript.
+- Never generate JSX.
+- Never generate CSS.
+- Never invent components.
+- Only use components available in the catalog.
+
+Catalog:
+...
+
+Client capabilities:
+...
+
+Existing surfaces:
+...
+
+Output:
+JSON Lines only.
+One complete JSON object per line.
+No markdown.
+No ``` fences.
+No explanatory text.
+```
+
+然后把你的 Catalog 加进去。
+
+---
+
+# 十六、不要把完整 Catalog 每轮都傻乎乎重复发送
+
+开发阶段当然可以：
+
+```text
+SYSTEM
++ A2UI spec
++ catalog
++ examples
++ user request
+```
+
+生产环境最好：
+
+```text
+静态 A2UI prompt
+静态 Catalog
+静态 examples
+───────────────
+尽量命中 prompt cache
+
+动态：
+user
+surface state
+business data
+```
+
+这样成本会低很多。
+
+---
+
+# 十七、GPT Stream 怎么变成 A2UI Stream
+
+OpenAI Responses API 开 streaming 后，本身也是 SSE streaming。
+
+但是要注意：
+
+模型可能先给你：
+
+```text
+{"vers
+```
+
+下一 chunk：
+
+```text
+ion":"v0.9"
+```
+
+下一 chunk：
+
+```text
+,...
+}
+```
+
+所以**不能一个 token delta 就喂 Renderer**。
+
+你需要一个 buffer：
+
+```ts
+let buffer = "";
+
+for await (const event of stream) {
+
+  if (event.type !== "response.output_text.delta") {
+    continue;
+  }
+
+  buffer += event.delta;
+
+  while (buffer.includes("\n")) {
+
+    const index = buffer.indexOf("\n");
+
+    const line = buffer.slice(0, index).trim();
+
+    buffer = buffer.slice(index + 1);
+
+    if (!line) continue;
+
+    const message = JSON.parse(line);
+
+    validateA2UI(message);
+
+    sendToFrontend(message);
+  }
+}
+```
+
+变成：
+
+```text
+OpenAI token stream
+       ↓
+JSONL buffer
+       ↓
+完整 JSON object
+       ↓
+schema validation
+       ↓
+frontend
+```
+
+这层我通常叫：
+
+```text
+A2UI Gateway
+```
+
+---
+
+# 十八、千万不要模型一生成就直接 render
+
+生产环境推荐：
+
+```text
+GPT
+ ↓
+JSON parse
+ ↓
+Protocol validation
+ ↓
+Catalog validation
+ ↓
+Security validation
+ ↓
+Renderer
+```
+
+而不是：
+
+```text
+GPT
+ ↓
+Renderer
+```
+
+A2UI 官方自己描述的推荐循环就是：
+
+```text
+Prompt
+↓
+Generate
+↓
+Validate
+```
+
+
+
+例如：
+
+```ts
+const obj = JSON.parse(line);
+
+assertVersion(obj);
+assertMessageType(obj);
+assertSurface(obj);
+validateProtocolSchema(obj);
+validateCatalogComponents(obj);
+validateAssetUrls(obj);
+
+send(obj);
+```
+
+---
+
+# 十九、Structured Outputs 要不要用？
+
+这里很容易走错。
+
+OpenAI 的 Structured Outputs 确实可以用 JSON Schema 强制模型符合 schema。
+
+但针对 **A2UI v0.9**：
+
+### 我不建议：
+
+```text
+把整个 A2UI Catalog
++ server schema
++ component schema
+全部塞到 text.format strict schema
+```
+
+因为 A2UI 0.9 本身已经从 v0.8 的 structured-output-first 转成 **prompt-first**。
+
+实际最好是：
+
+```text
+GPT JSONL
++
+AJV validation
++
+invalid-output retry
+```
+
+Structured Output 可以拿来约束你自己的“中间协议”，但没有必要替代 A2UI 原生 prompt-first 工作方式。
+
+---
+
+# 二十、最稳的模型生成逻辑
+
+建议后端做：
+
+```text
+               ┌──────────────┐
+               │ User request │
+               └──────┬───────┘
+                      ↓
+            ┌──────────────────┐
+            │ Prompt Builder   │
+            │                  │
+            │ A2UI rules       │
+            │ Catalog          │
+            │ Examples         │
+            │ Surface state    │
+            └────────┬─────────┘
+                     ↓
+               GPT-5.6 Sol
+                     ↓
+                JSONL stream
+                     ↓
+             JSON parse/validate
+               ↓            ↓
+             valid        invalid
+               ↓            ↓
+             client      repair prompt
+                            ↓
+                         GPT-5.6
+```
+
+比如错误：
+
+```text
+Unknown component: ProductGrid
+```
+
+你再给模型：
+
+```text
+Your previous output was invalid.
+
+Validation errors:
+- ProductGrid is not part of the supported catalog.
+
+Supported alternatives:
+- Row
+- Column
+- List
+- Card
+
+Return corrected A2UI messages only.
+```
+
+通常一次 repair 就够。
+
+---
+
+# 二十一、Client Capabilities 也非常重要
+
+如果你的 App 只实现：
+
+```text
+BasicCatalog
+CompanyCatalog
+```
+
+应该告诉 Agent。
+
+A2UI 的 client capabilities 里会声明：
+
+```json
+{
+  "v0.9": {
+    "supportedCatalogIds": [
+      "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json",
+      "https://example.com/a2ui/catalog/v1"
+    ]
+  }
+}
+```
+
+这就是 Renderer 告诉 Agent：
+
+> “我能画这些 UI。”
+
+A2UI v0.9 为此专门定义了 `supportedCatalogIds` 和可选 inline catalogs。
+
+---
+
+# 二十二、`catalogId` 不一定真的能访问
+
+一个很有意思的细节：
+
+```json
+"catalogId":
+"https://example.com/a2ui/catalog/v1"
+```
+
+虽然长得像 URL，但 **它实际上首先是 identifier**。
+
+不要求浏览器真的：
+
+```http
+GET https://example.com/a2ui/catalog/v1
+```
+
+官方明确说明 `catalogId` 可以使用 URI 风格避免命名冲突，但它并不要求是实际可下载地址。
+
+所以你完全可以：
+
+```ts
+catalogRegistry.register(
+  "https://mycompany.com/a2ui/v1",
+  MyCompanyCatalog
+);
+```
+
+---
+
+# 二十三、本地 Renderer 本质上是什么
+
+如果你不用官方 Renderer，自己做其实也是：
+
+```ts
+function renderComponent(id: string) {
+
+  const node = surface.components.get(id);
+
+  switch (node.component) {
+
+    case "Text":
+      return (
+        <Text>
+          {resolve(node.text)}
+        </Text>
+      );
+
+    case "Column":
+      return (
+        <Column>
+          {node.children.map(renderComponent)}
+        </Column>
+      );
+
+    case "Button":
+      return (
+        <Button
+          onClick={() => dispatch(node.action)}
+        >
+          {renderComponent(node.child)}
+        </Button>
+      );
+
+    default:
+      return null;
+  }
+}
+```
+
+真正复杂的部分不是 JSX。
+
+而是：
+
+```text
+surface lifecycle
+component buffer
+JSON pointer
+data binding
+template lists
+two-way binding
+actions
+function calls
+validation
+progressive rendering
+```
+
+这也是为什么官方建议 Web 端使用 `@a2ui/web_core`，而不是自己重新实现这一层。
+
+---
+
+# 二十四、一个真正完整的例子
+
+用户说：
+
+> “给我生成一个登记表，姓名、手机号，下面有提交按钮。”
+
+## 请求
+
+```text
+Browser
+→ POST /api/chat
+```
+
+```json
+{
+  "message": "给我生成一个登记表，姓名、手机号，下面有提交按钮"
+}
+```
+
+---
+
+## Backend → GPT
+
+```text
+SYSTEM:
+A2UI protocol
+Catalog
+rules
+
+USER:
+给我生成一个登记表，姓名、手机号，下面有提交按钮
+```
+
+---
+
+## GPT 返回
+
+```jsonl
+{"version":"v0.9","createSurface":{"surfaceId":"register-1","catalogId":"https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json","sendDataModel":true}}
+{"version":"v0.9","updateComponents":{"surfaceId":"register-1","components":[{"id":"root","component":"Card","child":"form"},{"id":"form","component":"Column","children":["title","name","phone","submit"]},{"id":"title","component":"Text","text":"用户登记","variant":"h2"},{"id":"name","component":"TextField","label":"姓名","value":{"path":"/form/name"},"variant":"shortText"},{"id":"phone","component":"TextField","label":"手机号","value":{"path":"/form/phone"},"variant":"shortText"},{"id":"submit-label","component":"Text","text":"提交"},{"id":"submit","component":"Button","child":"submit-label","variant":"primary","action":{"event":{"name":"submit_register","context":{"name":{"path":"/form/name"},"phone":{"path":"/form/phone"}}}}}]}}
+{"version":"v0.9","updateDataModel":{"surfaceId":"register-1","path":"/form","value":{"name":"","phone":""}}}
+```
+
+---
+
+## Renderer
+
+最终用户看到：
+
+```text
+┌─────────────────────────────┐
+│ 用户登记                    │
+│                             │
+│ 姓名                        │
+│ ┌─────────────────────────┐ │
+│ │                         │ │
+│ └─────────────────────────┘ │
+│                             │
+│ 手机号                      │
+│ ┌─────────────────────────┐ │
+│ │                         │ │
+│ └─────────────────────────┘ │
+│                             │
+│       [ 提交 ]              │
+└─────────────────────────────┘
+```
+
+GPT 从来没生成这个 CSS，也不知道你的圆角是多少。
+
+圆角、字体、品牌色都是 Renderer / Design System 决定的。
+
+---
+
+# 二十五、用户填：
+
+```text
+姓名：王小明
+手机：13800138000
+```
+
+本地：
+
+```json
+{
+  "form": {
+    "name": "王小明",
+    "phone": "13800138000"
+  }
+}
+```
+
+点击“提交”。
+
+浏览器：
+
+```json
+{
+  "version": "v0.9",
+  "action": {
+    "name": "submit_register",
+    "surfaceId": "register-1",
+    "sourceComponentId": "submit",
+    "timestamp": "2026-08-19T07:20:00Z",
+    "context": {
+      "name": "王小明",
+      "phone": "13800138000"
+    }
+  }
+}
+```
+
+如果 createSurface 使用了：
+
+```json
+"sendDataModel": true
+```
+
+那么 Renderer 还可以把完整 surface data model 随 client → server transport metadata 一起发送。
+
+---
+
+# 二十六、Backend 处理提交
+
+这里有两个选择。
+
+### 确定性业务逻辑
+
+不要调用 GPT：
+
+```ts
+if (action.name === "submit_register") {
+  await db.users.create(action.context);
+}
+```
+
+然后自己发：
+
+```json
+{
+  "version": "v0.9",
+  "updateDataModel": {
+    "surfaceId": "register-1",
+    "path": "/status",
+    "value": "success"
+  }
+}
+```
+
+这是最好的。
+
+---
+
+### Agentic 逻辑
+
+如果下一步需要 GPT 决策：
+
+```text
+Action:
+submit_register
+
+Context:
+{
+  name: 王小明,
+  phone: 13800138000
+}
+
+Current UI state:
+...
+
+Determine the next A2UI update.
+```
+
+GPT：
+
+```jsonl
+{"version":"v0.9","updateComponents":{"surfaceId":"register-1","components":[{"id":"title","component":"Text","text":"登记成功","variant":"h2"},{"id":"submit-label","component":"Text","text":"已提交"}]}}
+```
+
+---
+
+# 二十七、什么时候不要调用 GPT
+
+这一点非常重要。
+
+不要把：
+
+```text
+用户点加号
+用户关 modal
+用户切 tab
+表单 validation
+展开 collapse
+datepicker
+slider
+```
+
+全部传 GPT。
+
+能本地处理的：
+
+```text
+local UI function
+```
+
+本地处理。
+
+A2UI 0.9 action 本身支持：
+
+```text
+server event
+```
+
+以及：
+
+```text
+client-side functionCall
+```
+
+
+
+例如：
+
+```json
+{
+  "action": {
+    "functionCall": {
+      "call": "openUrl",
+      "args": {
+        "url": "..."
+      }
+    }
+  }
+}
+```
+
+不需要 GPT 再绕一圈。
+
+---
+
+# 二十八、我推荐的“本地能力库”
+
+如果你真的准备做一个产品，而不是 Demo，我会把本地库分成四层：
+
+```text
+Catalog
+│
+├── Components
+│   ├── Text
+│   ├── Button
+│   ├── Card
+│   ├── Input
+│   ├── ProductCard
+│   ├── Chart
+│   └── Map
+│
+├── Functions
+│   ├── openUrl
+│   ├── formatDate
+│   ├── copyText
+│   └── navigate
+│
+├── Assets
+│   ├── logo
+│   ├── icons
+│   ├── product images
+│   └── illustrations
+│
+└── Theme
+    ├── typography
+    ├── spacing
+    ├── radius
+    └── colors
+```
+
+其中：
+
+**Catalog + Renderer 是必须认真设计的。**
+
+Asset Registry 是增强项。
+
+---
+
+# 二十九、不要让 GPT 控制这些东西
+
+我不建议给模型：
+
+```json
+{
+  "style": {
+    "position": "fixed",
+    "zIndex": 999999,
+    "background": "...",
+    "html": "...",
+    "javascript": "..."
+  }
+}
+```
+
+也不要给：
+
+```text
+raw HTML
+raw SVG
+arbitrary iframe
+arbitrary JS
+arbitrary CSS
+```
+
+正确的做法：
+
+```json
+{
+  "component": "Alert",
+  "variant": "warning"
+}
+```
+
+然后本地决定：
+
+```css
+warning 是什么颜色
+```
+
+这也是 A2UI 相对于“LLM 直接生成 React/HTML”的主要安全价值。
+
+---
+
+# 三十、一个生产级最小技术栈
+
+如果你现在让我从零搭，我会选：
+
+```text
+Frontend
+────────────────────────
+React
+TypeScript
+@a2ui/react
+@a2ui/web_core
+你现有 Design System
+
+Backend
+────────────────────────
+Node.js
+TypeScript
+OpenAI SDK
+Responses API
+GPT-5.6 Sol
+AJV
+Express / Fastify
+
+Transport
+────────────────────────
+第一版：SSE + POST action
+
+State
+────────────────────────
+Redis（多实例时）
+开发期 Map 即可
+
+Schema
+────────────────────────
+A2UI v0.9 / 推荐 v0.9.1
+Basic Catalog
++
+Company Catalog
+
+Assets
+────────────────────────
+CDN / Object Storage
++
+可选 Asset Registry
+```
+
+React、Angular 和 Lit 是官方 Web 路径，Flutter 也有对应客户端路径。
+
+---
+
+# 三十一、接口我会设计成这样
+
+## 开始对话
+
+```http
+POST /api/chat
+```
+
+```json
+{
+  "conversationId": "abc",
+  "message": "帮我做一个登录页面"
+}
+```
+
+返回：
+
+```text
+SSE
+```
+
+其中 payload：
+
+```json
+{
+  "version": "v0.9",
+  "createSurface": {}
+}
+```
+
+---
+
+## UI Action
+
+```http
+POST /api/a2ui/action
+```
+
+```json
+{
+  "conversationId": "abc",
+  "action": {
+    "name": "login",
+    "surfaceId": "login-1",
+    "sourceComponentId": "login-button",
+    "timestamp": "...",
+    "context": {}
+  }
+}
+```
+
+---
+
+# 三十二、Surface Store
+
+Backend 至少记：
+
+```ts
+type Session = {
+  conversationId: string;
+
+  surfaces: Map<string, {
+    catalogId: string;
+    components: Map<string, unknown>;
+    dataModel: unknown;
+  }>;
+
+  openaiResponseId?: string;
+};
+```
+
+当然，你也可以让客户端成为 surface state 的主要持有者，然后依赖：
+
+```json
+"sendDataModel": true
+```
+
+降低服务器 session state。
+
+---
+
+# 三十三、GPT 上下文不要每次塞整个 UI
+
+第一轮：
+
+```text
+create Surface
++
+全部 components
++
+data
+```
+
+第二轮不要重新把 150 个组件告诉模型。
+
+可以给：
+
+```text
+Surface: checkout
+Known component ids:
+root
+header
+product-list
+total
+submit-button
+
+Relevant state:
+{
+  total: 1280,
+  selectedPayment: "wechat"
+}
+
+Action:
+payment_changed
+```
+
+然后让它产生 delta。
+
+这会明显降低 token 成本。
+
+---
+
+# 三十四、最后给你一个最直观的判断
+
+你可以把这套系统理解为：
+
+```text
+GPT-5.6 Sol
+=
+动态 UI Planner
+```
+
+不是：
+
+```text
+GPT-5.6 Sol
+=
+Frontend Runtime
+```
+
+而：
+
+```text
+A2UI
+=
+GPT 和你的 Frontend Runtime
+之间的 UI DSL / Wire Protocol
+```
+
+Catalog 则是：
+
+```text
+GPT 可以使用的 UI API
+```
+
+Renderer 是：
+
+```text
+这个 UI API 在 React/Flutter/iOS
+到底对应什么真实控件
+```
+
+Asset Registry 则是：
+
+```text
+这些控件可以安全引用哪些素材
+```
+
+---
+
+## 所以你真正需要本地准备的东西
+
+如果压缩成最核心的一张表：
+
+| 本地东西 | 是否必须 | 作用 |
+|---|---:|---|
+| GPT-5.6 API Backend | ✅ | 生成 A2UI |
+| A2UI System Prompt | ✅ | 教模型协议 |
+| Catalog | ✅ | 限制模型能使用什么组件 |
+| Renderer | ✅ | JSON → React/Flutter |
+| Component Registry | ✅ | A2UI type → 本地组件 |
+| DataModel Store | ✅ | UI 状态与绑定 |
+| Action Dispatcher | ✅ | UI → Backend |
+| JSON Schema Validator | **强烈推荐** | 防止错误 JSON |
+| SSE/WebSocket | ✅ 选一种 | Streaming |
+| Asset Library | ❌ | 图片等素材 |
+| Asset Registry | ❌但推荐 | 安全管理素材 |
+| 自定义 Design System | ❌ | 品牌视觉 |
+| A2A / AG-UI | ❌ | 更复杂 Agent 架构 |
+
+**最关键的一句话是：不要让 GPT-5.6 Sol 返回“最终 UI”，让它返回“受 Catalog 约束的 UI 描述”。**
+
+这正是 A2UI 的价值所在。
+
+如果你目前技术栈是 **React + TypeScript + Node.js**，下一步其实就可以直接落到代码：一个约 5～7 个文件的最小 Demo 就能跑通“GPT-5.6 → JSONL → A2UI Renderer → 点击按钮 → action → GPT → 局部更新”的完整闭环。
+
+
+【提问 轮数2】
+[文件不支持导出]
+请你充分阅读现在的这个文件格式,然后理解它的现在我们要做什么。其中主要是几个文档,以及要同步整个代码库,然后现在有最大的问题在于,现在我将给出你一大段一大段审计agent给出的这个建议,以及我的要求,然后你大约分析一下,你刚才说的这个A2UI在我们场景下怎么用比较合适。因为我也觉得是,尤其是相当于你在本地用GPT渲染之后,现在好像完全不支持A2UI。我希望有点久,然后现在的问题在于GPT返回了一大段这样的描述之后,我本地首先一没有素材库,二就算能渲染出来的话,我现在之前我跟我本地的审计agent讨论的一直是说,当用户进行重新交付,想把这个东西转换为投影的时候,需要有一个东西来把用户的意图重新翻译成自然语言,再把这个自然语言重新发送给CUA或者是GUIAgent去做具体的操作。但是现在这一步是缺失的,所以我想到会用A2UI来去做,但之前好像一直都没有落地实现成A2UI。
+
+
+```
+什么意思？现在的mutate_wechat操作不是GUI吗？现在的GUI Agent返回的原生信息是什么？不是点击屏幕坐标吗？屏幕坐标不是通用的吗？为什么需要每个APP独特的接口
+
+Thought for 1.44 seconds
+问得非常尖锐，HashTAG_00001。这正是 GUI 自动化的核心问题。让我先把 mutate_wechat 的真实代码调出来，用事实回答你，而不是凭印象。
+已读取
+bridge.py
+(L600-739)
+Thought for 0.21 seconds
+好，mutate_wechat 的真实面貌已经清楚了。再看一眼底层 GUI 执行器到底返回什么原生信息——这是你问题的核心。
+已检索文件
+def gui_write_async|async def gui_write_async|def gui_act_async
+已检索文件
+gui_write_async
+Thought for 0.51 seconds
+已检索文件
+GuiExecutorFailure|cua-loop|cua_loop
+已检索文件
+cua_loop|import_module|cua\b
+已执行命令
+$
+grep -rn "gui_write_async\|GuiExecutorFailure" /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui/taskvm/execution/ 2>/dev/null | head -20; echo "---"; ls /mnt/dolphinfs/ssd_pool/dock...
+<
+q---
+已执行命令
+$
+grep -rn "app_mobilegym.sh" /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui/scripts/app_mobilegym.sh | grep -i cua; grep -n "cua" /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/...
+<
+q
+已读取
+app_mobilegym.sh
+(L100-139)
+Thought for 1.32 seconds
+已执行命令
+$
+grep -rln "def gui_act_async\|def gui_write_async" /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui/taskvm /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui/taskvm...
+<
+q===
+/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui/taskvm/substrate/mobilegym/bridge.py
+已执行命令
+$
+grep -rln "gui_act_async\|GuiExecutorFailure" /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui --include="*.py" 2>/dev/null | grep -v ".git" | head; echo "==="; grep -n "class\|def ...
+<
+q/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui/tests/substrate/test_mobilegym_runtime_purity.py
+/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui/taskvm_bench/tests/evaluation/test_mobilegym_antibypass.py
+/mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui/taskvm/substrate/mobilegym/bridge.py
+===
+Thought for 3.06 seconds
+已读取
+session.py
+已读取
+bridge.py
+(L245-319)
+Thought for 66.16 seconds
+你的直觉完全正确，而且它戳中了我上一轮一个不准确的表述。先修正，再给你看代码证据。
+一、先认错：我上一轮说“每个 app 手写的 GUI 手势代码”是错的
+看了 mutate_wechat 的真实代码，事实是：手势本身早就不是手写的了。bridge.py 里明确记录了这次重构：
+bridge.py
+6/9
+Apply
+            # ── forward write: Task3 — real grounding loop (replaces the
+            # hardcoded 7-step _send_message sequence). The model observes the
+            # chat page + decides how to send the message using the page's UI
+            # (tap composer → type → tap send / press enter). NOT a hardcoded
+            # click sequence. ──
+            # (task3 — real grounding loop; the model observes the chat page
+            # and decides how to send using the page's UI.)
+            trace = await gui_write_async(
+                env=self.env, page=self.env.page, sid=sid,
+                chat_id=eid, text=str(value), undo=False,
+                screenshot_dir=self.screenshot_dir)
+gui_write_async 是一个通用 grounding loop：模型看屏幕 → 自己决定点哪、输什么 → 逐动作执行。它对微信、X、任何 app 的“手指操作”都是同一套代码。当年那个硬编码的“7 步点击序列”已经被删了。
+二、回答你的三个问题
+Q1：GUI Agent 的原生信息是什么？
+看 runtime 真正走的 L1 端口（session.py），就两种：
+观察侧（observe）：截图 + 擦洗过的可见文本 + 可见结构指纹——没有内部 ID，没有 DOM，就是“眼睛能看到的东西”。
+动作侧（act）：GuiAction，kind ∈ click/tap/type/key/scroll/wait/open，带坐标。落到 bridge 里就是：
+bridge.py
+7/9
+Apply
+...
+Q2：屏幕坐标通用吗？
+通用。 click(x, y) 对微信按钮和计算器按钮是同一条代码。所以 L1 运行时层今天就是 app 无关的——模型看截图、点坐标，27 个 app 现在就能这么操作。这正是全量接入很轻的根本原因：通用的部分早就通了，白名单是唯一的人为闸门。
+Q3：那 per-app 的到底是什么？
+不是手势，是“事务”的三个组成部分。 mutate_wechat 不是“一次点击”的接口，它是一个带验证、带回退的语义事务：“把这条消息发到这个聊天里，并保证它真的发出去了，且给我一张回执”。per-app 的东西拆开看：
+① 操作 schema 不同。 微信的写是 send_message(chat_id, text)（多步：点开聊天→输入→发送），X 的写是 toggle_like(post_id)（单次点击）。X 的代码注释自己就说清了这个区别：
+bridge.py
+8/9
+Apply
+    # ── write path: X toggle (toggleLike/toggleRetweet/toggleBookmark) ──────
+    # E14 (2026-08-11): the FIRST non-wechat MobileGym write path. X's
+    # ``XPostActionBar`` binds toggleLike / toggleRetweet / toggleBookmark to
+    # single tap targets — these are DISCRETE one-click writes (vs. wechat's
+    # type+send sequence), so they're the natural existence proof that the
+    # TaskVM grounding loop can drive MobileGym when the harness coordinate
+    # pipeline is correct
+② 验证路径不同。 写完必须用可信读路径确认“真落地了”——微信的落地凭证要去 apps.wechat.chats[].messages[] 里找那条新消息，X 的落地凭证是帖子上的 toggle 标志：
+bridge.py
+9/9
+Apply
+            # verify the message landed (the trusted read path)
+            state = await self.env.get_state(required_apps=APPS)
+            self._sid_live[sid] = state
+            chats = state.get("apps", {}).get("wechat", {}).get("chats", []) or []
+            target = next((c for c in chats if c.get("id") == eid), None)
+            ...
+            msgs = target.get("messages") or []
+            new_msg = next((m for m in reversed(msgs)
+                            if m.get("type") == "text" and m.get("content") == str(value)), None)
+这段验证代码只对微信有意义。换成计算器，“按了 = ？”的凭证就得去读计算器的 store，路径和字段完全不同。
+③ 回退语义不同。 微信发消息的撤销 = 让模型去找删除/撤回按钮（找不到就诚实报 409 不可逆）；X 点赞的撤销 = 再点一次同一个按钮（幂等）。两种完全不同的可逆性逻辑。
+三、架构上为什么要有这层 per-app 接口？
+关键在于 session.py 头部这段注释——它点明了两条路是并存、分工的：
+session.py
+2/2
+Apply
+"""mobilegym.session — the MobileGym SubstrateSession (Agent B).
+
+A thin HTTP client over the resident MobileGym bridge
+(``taskvm.substrate.mobilegym.bridge``, one aiohttp process holding a
+``MobileGymEnv``). Implements the unified port:
+
+  * ``observe`` → bridge ``GET /api/observe/<sid>`` (screenshot + scrubbed
+    visible text + visible-structure fingerprint — zero-exposure);
+  * ``act``     → bridge ``POST /api/act/<sid>`` → ``env.step(Action...)``
+    REAL gestures with MobileGym's own coordinate calibration;
+
+The bridge's legacy operator-mutate routes (wechat send_message, X toggle)
+are NOT used by this session — those wrap an injected L2 CUA loop; the
+runtime reaches MobileGym only through this session's observe/act port.
+"""
+展开
+L1（通用）：模型自治操作——看屏幕、点坐标。对应 Repository Contract 原则 4“Agent 在边界内持续自治”。
+L2（per-app）：任务变量级的写回——对应原则 2“双向可执行性”（用户改任务变量 → Agent 写回真实应用）和原则 5“独立验证与诚实可逆性”。投影上一个变量（“这条消息发出去了吗”）需要一个确定性的、可验证、可回退的执行入口。mutate_wechat 返回的 {"status","old","new","message_id","trace"} 是给 governance 层做 checkpoint/rollback 的事务回执，纯 click 流给不出这个。
+四、打个比方
+L1 的 click(x,y) 是“手指”——这只手按电梯按钮、按计算器、按微信发送键，动作完全一样，全宇宙通用。
+L2 的 send_message 是“快递承诺”——“把包裹送到张三家”。送完要核对签收（验证），送错了要能退回（回退）。而“签收凭证长什么样”每个 app 不一样：微信的凭证是聊天记录里多了条消息，X 的凭证是点赞标志翻转。你不能用同一张签收单核对两家快递。
+所以：手指是通用的，回执单是每家自己的。 mutate_* 那 100~200 行里，大部分写的是回执单和退换货规则，不是手指动作。
+五、修正后的结论（比上一轮更准确）
+全量接入轻的真正原因现在更清楚了：L1（开 app + 观察 + 点击）本来就 app 无关，白名单一开 27 个 app 立即可用。
+L2 per-app 成本的正确描述：不是“每 app 100~300 行手势代码”，而是“每类事务化写操作需要设计 schema + 验证读路径 + 回退语义”，且 grounding 循环本身是复用的（gui_write_async 通用）。
+MobileGym 目前只有 2 个 app 有 L2 写路径，不是因为通用性做不到，而是需求侧就这两个场景（微信发消息、X toggle）。将来要给 27 个 app 加 L2，成本远低于我上一轮的估算——循环复用，每个新操作大概只剩验证+回退的几十行。
+你的这个问题实际上把交接文档第 3.2 节的设计正当性验证了一遍：通用路由（app_state/os_state）+ 通用 open 白名单之所以可行，正是因为坐标层通用；而保留 mutate_* 不动之所以正确，是因为那是另一个维度（事务化写回）的东西，不该被这次工单顺手乱改。
+
+
+
+
+
+你等会，为什么本远低于我上一轮的估算——循环复用，每个新操作大概只剩验证+回退的几十行。这个复杂度很高啊，微信并不只有发送事务，还有其他的各种各样的灵活事务啊，现在相当于是锁死的，程序里硬编码了几个事务，任务里就只能涉及这几个事务，出现未见事务就直接taskVM报废了？这有泛化性吗？来一个新任务/新事务/新APP就要全部给它穷举写完，这怎么可能！这不应该也是交给模型侧的吗？只有模型调用，运行时动态生成才有泛化性吗？我们的taskVM的泛化性还是不行啊
+
+为什么总是在各种各样莫名其妙的地方假设用规则硬编码穷举式的写死呢？之前所有的agent都信誓旦旦的保证现在可以泛化了，但是实际上到处都是这样**场景特异**规则写死的假设啊？？？？
+
+Thought for 46.68 seconds
+你这个问题问到架构的根上了，HashTAG_00001。我不跟你争辩，先把“mutate_* 到底被谁调用、模型执行任务走哪条路”这个关键事实查清楚——因为你的指控成不成立，完全取决于这个。
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && grep -rn "api/mutate" --include="*.py" taskvm taskvm_bench tests scripts 2>/dev/null | grep -v ".git" | head -30
+q
+Thought for 1.56 seconds
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && grep -n "add_post\|add_get" taskvm/substrate/mobilegym/bridge.py
+q1089:    app.router.add_get("/health", health)
+1090:    app.router.add_get("/{sid}", view_sid)
+1091:    app.router.add_post("/api/reset/{sid}", api_reset)
+1092:    app.router.add_post("/api/inject_task/{sid}", api_inject_task)
+1093:    app.router.add_get("/api/session_state/{sid}", api_session_state)
+1094:    app.router.add_get("/api/x_state/{sid}", api_x_state)
+1095:    app.router.add_get("/api/{resource}/{sid}", api_resource)
+1096:    app.router.add_get("/api/observe/{sid}", api_observe)
+1097:    app.router.add_post("/api/act/{sid}", api_act)
+1098:    app.router.add_post("/api/wechat/{sid}/{eid}", api_wechat_mutate)
+1099:    app.router.add_post("/api/x/{sid}/{eid}", api_x_mutate)
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && echo "=== 谁调 /api/wechat/ (mutate 路由) ==="; grep -rn "api/wechat/\|api/x/" --include="*.py" --include="*.ts" --include="*.sh" ...
+<
+q=== 谁调 /api/wechat/ (mutate 路由) ===
+taskvm_bench/tests/evaluation/test_mobilegym_antibypass.py:14:* the semantic mutate route strings ``/api/wechat/`` and ``/api/x/``
+taskvm_bench/tests/evaluation/test_mobilegym_antibypass.py:42:#: the semantic MUTATE routes (POST /api/wechat/<sid>/<eid>,
+taskvm_bench/tests/evaluation/test_mobilegym_antibypass.py:43:#: POST /api/x/<sid>/<eid>). The trailing "/" is load-bearing: oracle
+taskvm_bench/tests/evaluation/test_mobilegym_antibypass.py:47:    "/api/wechat/",
+taskvm_bench/tests/evaluation/test_mobilegym_antibypass.py:48:    "/api/x/",
+
+=== runtime 层有没有 import mutate/send_message ===
+taskvm/architect/noleak.py
+Thought for 2.97 seconds
+关键事实浮出来了。让我再确认两件事：noleak.py 在干嘛，以及 runtime 主循环到底怎么驱动模型。
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && grep -n -B2 -A8 "send_message\|toggle_like" taskvm/architect/noleak.py | head -40
+q9-  ``action:00007`` / ``ckpt:C2`` / ``comp:00001`` …
+10-- internal operator jargon: ``move_event`` / ``set_deadline`` /
+11:  ``toggle_like`` / ``send_message`` / ``read_canonical`` / ``set_state`` …
+12-- DOM-internal attributes: ``data-entity-id`` / ``data-field`` …
+13-- kernel-internal namespaces that are not business semantics.
+14-
+15-A hit raises :class:`PromptLeakError` — an HONEST failure. The gate never
+16-silently strips the offending text: a prompt that needed stripping was built
+17-from the wrong inputs and must be fixed at the producer.
+18-"""
+19-from __future__ import annotations
+--
+123-# extra_terms at call sites for task-specific operators)
+124-_OPERATOR_JARGON = (
+125:    "move_event", "set_deadline", "toggle_like", "send_message",
+126-    "read_canonical", "set_state", "get_state", "undo_saga",
+127-    "compile_patch", "interpret_as_workflow", "_gt_binding",
+128-)
+129-
+130-_OPERATOR_RE = re.compile(
+131-    r"\b(?:" + "|".join(re.escape(t) for t in _OPERATOR_JARGON) + r")\b")
+132-
+133-
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && grep -rn "\.act(\|observe(" --include="*.py" taskvm/runtime/ 2>/dev/null | grep -v "def \|#" | head -15
+qtaskvm/runtime/sync.py:77:        obs = self._substrate.observe(sid)
+taskvm/runtime/sync.py:100:            obs = self._substrate.observe(
+taskvm/runtime/autonomy.py:545:                self._substrate.act(surface, gesture,
+taskvm/runtime/compensation.py:179:                self._substrate.act(surface_id, decision.action,
+Thought for 40.87 seconds
+最后一块拼图：bench 侧的 fixtures 是怎么用 gui_write_async 的，以及 runtime 的 autonomy 主循环长什么样。
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && grep -n -B5 -A5 "gui_write_async" taskvm_bench/benchmark/mobilegym_fixtures.py | head -35
+q92-    },
+93-    description="MobileGym demo: read alipay top-3 expenses (30d window) → send "
+94-                "a summary text to the wechat 黄勇 chat via send_message. 2 apps "
+95-                "(alipay read-only → wechat write), 1 write surface. send_message "
+96-                "is irreversible: rollback is a REAL GUI compensation attempt "
+97:                "(bridge gui_write_async undo) whose verdict is honestly 409 "
+98-                "+ partial (the wechat UI has no delete/recall path, append-only "
+99-                "messages) — there is NO hidden set_state fallback; on the legacy "
+100-                "semantic route, a bridge without a CUA loop honestly refuses "
+101-                "(501). A meaningful checkpoint must sit BEFORE the irreversible "
+102-                "send (rolling back past a send is honest 409).",
+已读取
+autonomy.py
+(L528-557)
+Thought for 39.16 seconds
+HashTAG_00001，你的怒气有真实的成分，但这次调查的结果让我可以说一句硬话：你担心的“未见事务 → TaskVM 报废”在代码里方向是反的。我把整条调用链查穿了，三条证据，每条你都可以自己验证：
+一、事实链：模型执行任务根本不走那些事务接口
+证据 1：runtime 主循环只调通用手势。 模型执行任务的唯一路径是 runtime/autonomy.py 的 CUA 闭环：
+autonomy.py
+1/1
+Apply
+            try:
+                self._substrate.act(surface, gesture,
+                                    epoch=str(self._kernel.epoch))
+            except IrreversibleAction:
+                ...
+            acts.append(gesture.description or gesture.kind)
+            actions += 1
+            # PER-GESTURE FOLD (runtime.md §8): act → fresh observe → extract
+            # → fold into the OBSERVED plane → runtime event + visual
+            # artifact. The next CUA prediction sees this folded world.
+gesture 是 GuiAction（click/type/scroll/key/open），由模型看截图现场预测。模型遇到“转账”“建群”“改备注名”任何未见过的事务——就是看屏幕、点、打字，跟人一样。这条链路上没有任何事务枚举。
+证据 2：模型被禁止知道事务接口的存在。 noleak.py 把这些词列为禁词，出现在模型 prompt 里直接抛异常：
+noleak.py
+1/1
+Apply
+_OPERATOR_JARGON = (
+    "move_event", "set_deadline", "toggle_like", "send_message",
+    "read_canonical", "set_state", "get_state", "undo_saga",
+    "compile_patch", "interpret_as_workflow", "_gt_binding",
+)
+这不是“模型只能用这几个事务”——而是“模型连 send_message 这个词都不许看见”。合同 §3 的 GUI-only 判定口令：屏幕上看不到的字符串，禁止进入模型输入。
+证据 3：mutate 路由在生产代码里零调用方。 全仓 grep /api/wechat/、/api/x/，唯一命中是 test_mobilegym_antibypass.py——一个反旁路测试，专门验证 runtime 永远不碰这些语义捷径、必须走真实 GUI 手势。也就是说，“模型不许走 mutate 后门”本身是被测试锁死的架构属性。
+二、那枚举的 mutate_* 到底是给谁的？
+给投影和 governance 的确定性通道，不是给模型的。fixtures 的描述写得很清楚：
+plain text
+Apply
+send_message is irreversible: rollback is a REAL GUI compensation attempt
+(bridge gui_write_async undo) whose verdict is honestly 409 ... A meaningful
+checkpoint must sit BEFORE the irreversible send
+A2UI 投影上那个“一键写回/一键撤销任务变量”按钮，需要事务回执（{"old": "msg:123", "new": ..., "message_id": ...}）才能实现原则 2（双向可执行性）和原则 5（诚实可逆性）。mutate_wechat 枚举的不是“模型能做的事”，而是“投影面板上带撤销按钮的变量种类”。
+三、诚实承认：你批评里成立的部分
+读路径确实一屁股 demo 债。read_resource 只有 3 个 resource、session_state 只算 2 个 app 的摘要、APPS 白名单 3 个——这些是“demo scope: Top3 task”注释里自己承认的。这正是交接文档在还的债，你没看错。
+投影写回的覆盖面确实只有 4 个事务。用户在投影上改一个“日历的 deadline”？目前没有一键写回通道。这是真实的覆盖缺口——但缺的是治理通道的覆盖，不是模型能力。
+之前 agent 的“泛化”汇报不诚实。说“可以泛化”却不讲清“哪一层泛化、哪一层是治理锚点”，这才是让你感到被骗的根源。这次的教训我记下来了：泛化承诺必须指明层级。
+四、为什么验证+回退不能全交给模型动态生成？
+因为运动员不能当裁判（原则 5：独立验证）。模型说“我发成功了”不算数——verifier 要读 fresh observation 拿凭证。同理，投影上的“撤销”按钮不能是“再让模型自由发挥一次看看能不能删掉”——撤销本身必须确定性可审计，否则治理就是空话。这里模型确实参与执行（gui_write_async 内部就是模型 grounding loop），但判定和回执的 schema 必须是治理层定的，这是 Governance over autonomy（原则 4）的代价，也是它的意义。
+五、给你一个判别口令：区分“坏硬编码”和“治理锚点”
+试金石就一条：把它删了，模型受不受影响？
+硬编码
+删掉后模型能否继续干活
+性质
+APPS = ["wechat","alipay","x"]
+❌ 24 个 app 打不开
+能力硬编码（债，交接文档在修）
+read_resource 3 个 resource
+❌ oracle 读不了别的
+同上
+mutate_* 事务 schema
+✅ 完全不受影响（autonomy 根本不调它）
+治理锚点（设计意图）
+noleak 禁词表
+模型反而“多知道”了内部词 → 违反 GUI-only
+治理锚点
+六、比方
+L1 是员工的双手，L2 是公司的报销系统。 员工（模型）的双手可以干任何活——写代码、见客户、修打印机，不需要公司枚举“允许的动作列表”。但报销（投影写回）必须走规定流程：要发票（验证凭证）、可退款（回退）、有账目（回执）。没人会说“报销类别是枚举的几种，所以员工只会干这几种活”。
+一句话总结：TaskVM 的泛化承诺只在 L1（模型手势层）兑现，且兑现得很彻底——主循环零事务枚举、禁词表反向锁死后门。L2 的枚举是治理层的确定性要求，删掉它模型毫无感知。你真正该盯的是交接文档里那些读路径的 demo 债（它们真的挡模型），以及将来投影写回要不要扩大事务覆盖——那才是真缺口。
+
+
+
+
+
+也就是说，把taskVM拆成CUA+ Agentic UI这两块，现在CUA是完全泛化autonomy的，AgenticUI能出现什么则是完全规则程序硬编码锁死的？那这根本就不能叫agentic GenUI啊，这灵活度还没有DeutUI高呢！！！！
+
+参考 @docs/A2UI_开工大纲_v0_心智模型对齐版_老版本.md @docs/oracle/compare/ 下的所有内容，这和我们一开始构思的agentic UI完全不一样
+
+Thought for 16.57 seconds
+这个质疑必须严肃对待——它涉及项目最初的心智模型。让我把三个证据源都调出来：旧版大纲（最初构想）、docs/oracle/compare/（对比研究）、以及投影层的实际代码，然后给你一个诚实的裁决。
+已读取
+A2UI_开工大纲_v0_心智模型对齐版_老版本.md
+(too large to read at once)
+已读取
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && ls -la docs/oracle/compare/ && echo "===" && wc -l docs/oracle/compare/* 2>/dev/null | tail -20
+qtotal 1046
+drwxr-xr-x 2 hadoop-mt-ocr hadoop-mt-ocr      7 Aug 18 23:46 .
+drwxr-xr-x 5 hadoop-mt-ocr hadoop-mt-ocr      3 Aug 18 23:46 ..
+-rw-r--r-- 1 hadoop-mt-ocr hadoop-mt-ocr  33265 Jul 16 12:25 chatgpt-export_[A2UI]CHI工作计划与实施.txt
+-rw-r--r-- 1 hadoop-mt-ocr hadoop-mt-ocr  62941 Jul 16 12:25 chatgpt-export_[A2UI]GenerativeUI调研.txt
+-rw-r--r-- 1 hadoop-mt-ocr hadoop-mt-ocr 304175 Jul 16 12:25 chatgpt-export_[A2UI]HCI-UI.txt
+-rw-r--r-- 1 hadoop-mt-ocr hadoop-mt-ocr  63801 Jul 16 12:25 chatgpt-export_[A2UI]与DuetUI的差异.txt
+-rw-r--r-- 1 hadoop-mt-ocr hadoop-mt-ocr 109586 Jul 30 19:48 chatgpt-export_[A2UI]与SaC和Sidekick的差异.txt
+-rw-r--r-- 1 hadoop-mt-ocr hadoop-mt-ocr  74246 Aug  6 18:54 chatgpt-export_[A2UI]__竞品补充！！__.txt
+-rw-r--r-- 1 hadoop-mt-ocr hadoop-mt-ocr 419753 Aug  6 19:00 TaskVM_GenUI_GUIAgent_Collision_Map.pdf
+===
+   1096 docs/oracle/compare/chatgpt-export_[A2UI]CHI工作计划与实施.txt
+   1760 docs/oracle/compare/chatgpt-export_[A2UI]GenerativeUI调研.txt
+  11355 docs/oracle/compare/chatgpt-export_[A2UI]HCI-UI.txt
+   2740 docs/oracle/compare/chatgpt-export_[A2UI]与DuetUI的差异.txt
+   3432 docs/oracle/compare/chatgpt-export_[A2UI]与SaC和Sidekick的差异.txt
+   1770 docs/oracle/compare/chatgpt-export_[A2UI]__竞品补充！！__.txt
+   1906 docs/oracle/compare/TaskVM_GenUI_GUIAgent_Collision_Map.pdf
+  24059 total
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && grep -n "GenUI\|genUI\|生成式\|Agentic UI\|agentic\|DeutUI\|生成UI\|动态生成" docs/A2UI_开工大纲_v0_心智模型对齐版_老版本.md | head -30
+q3:> **CHI 2027 full paper 开工对齐文档（一次成型版）**。项目代号 **TaskVM**（不再用 A2UI 作代号——`A2UI` 是 Google 2025 年的通用 agentic-UI 声明式协议名 `a2ui.org` v0.8/v0.9/v0.9.1/v1.0（candidate），Macaron-A2UI 是团队自家的该协议训练侧实现，均非本项目私有名）。实现中可选择性复用 A2UI v0.9 作 UI 渲染传输格式，与更名不冲突。**【2026-08-11 升级】** 此前因 `a2ui.org` 网络不可达，只能从 Macaron 论文附录手抄 v0.8 精简版；现已通过代理直连官方仓库 `github.com/a2ui-project/a2ui` 拉取 v0.9 官方源文件（`docs/references/A2UI-protocol-spec/v0_9/`，见该目录 `SOURCE.txt` 的完整出处记录），协议主线切换为 v0.9（v0.8→v0.9 是破坏性变更，非小版本递增，详见 `taskvm/benchmark/a2ui_spec.py` 顶部 docstring 及 `evolution_guide.md`）。
+19:1. **bottom-up live projection（自底向上的实时投影）**：界面是**多个真实 app 实时状态**自底向上编译出来的忠实投影（GUI Agent 作编码器：读 app 状态→编码成 VM state；GenUI 模型作解码器：VM state→人可操纵界面）。**不是**自顶向下从 task/prompt 生成界面。投影会**随世界状态变化动态重投影**，不是用户重新触发。
+31:| **① bottom-up live projection** | 编码器（compiler）必须从**渲染画面本身**（截图 + 清洗后的可见文本）发现 binding，不依赖任何预写的 entity_id/operator 映射表。解码器（GenUI）必须把 VM-state 变量的**可见标签**（不是内部字段名）渲染成控件标题。投影随外部并发修改**自动触发**（SSE polling），不是用户 refresh。 | "binding 发现是 GT 硬喂的"/"可见标题是 f-string 模板生成的"/"需手动刷新才看到外部变化" |
+34:| **④ governance over autonomy** | WorkflowPlan 必须**任务特异地动态生成**（每个任务的 checkpoint 数量、节点间依赖/顺序/并行关系、每个节点的语义标签，全部来自 LLM 对该任务 goal 的理解，而非固定结构）；前端必须把这个**语义结构忠实渲染**（节点标签是可见业务语言，依赖关系用视觉箭头/层级表示）；用户可以在运行中**拖拽任意 checkpoint 为回退目标**，系统自治执行到那个 checkpoint 为止，中途**不需要用户审核每一步**。 | "WorkflowPlan 是固定三种硬编码结构（seq/parallel/loop）之一，不含任务特异语义节点"/"进度条只有通用的 step1/step2，没有任务业务标题"/"需要用户确认每步才继续" |
+39:**工作流动态生成的具体含义**（补充 ④ 的实现要求）：
+69:- **GenUI 模型 = 解码器**：把中间 VM-state 解码成**人可操纵的界面**（只读区 + 可读可写区）。
+70:- **必须双向**：人在 GenUI 操纵 → 解码器逆 → VM-state patch → GUI Agent 写回 → 真实 app 变 → 编码器重读 → GenUI 重解码重投影。用户体验：像在操纵**一个**统一的低认知负载 app，而非 N 个异构 app。
+81:**主闭环**：`User (governance) ↔ GenUI (decoder) ↔ Shared VM-state ↔ GUI Agent (encoder/executor) ↔ 真实 apps`。Shared VM-state 保存目标/计划/已执行动作/真实结果/当前 app 状态/可回退事务日志——**不是聊天历史**。人位于 governance 侧（设 checkpoint + 随时回退），**不**在 autonomous 侧做"审核后继续"。
+160:### 3.3 AgentLens — GenUI 按设计非交互、decoupled，与"双向"正相反【核对】
+163:- **投影什么**：Full/Partial UI 投影 **live app screen**；GenUI 投影 **agent 用 NL spec 生成的 HTML**。`01_Introduction.tex:15`。
+164:- **用户操纵什么**：Full/Partial UI 下用户**通过 overlay 触摸坐标直接操纵 live app**；**GenUI 只看不可交互**。`04_Method.tex:83`；GenUI（`04_Method.tex:93` 注释行）*"our current implementation of GenUI does not support GUI interaction"*。
+169:- **随世界动态重投影**：**部分**（Full/Partial UI 是 live app 镜像，touch 转发���；GenUI 本身 **decoupled、非 live**。
+170:- **关键核实**：AgentLens GenUI **非交互、decoupled from live state**。`04_Method.tex:91` *"We deliberately decoupled the GUI generation process from the main agent because we found that when the GenUI Agent is exposed to the original app screen, it tends to reproduce the existing design"*；`04_Method.tex:93` *"does not support GUI interaction"*。
+171:- **与 TaskVM 本质区别**：AgentLens 最像 TaskVM 的 modality（GenUI）**按设计就不是 live-state 投影、不是控制面**——它与 TaskVM 做了**相反的工程选择**（AgentLens 解耦以避免幻觉；TaskVM 绑定以保证保真）。这是真哲学分叉，不是 framing。① GenUI 非交互 = 与"双向"正相反；② 单 app / 单任务；③ 非持久；④ 无 verify。**核心区别：AgentLens 侧重 autonomous（何时介入监督），TaskVM 侧重 governance（治理世界状态）——方向相反。**
+191:- **投影什么**：**agent 构建的信息架构（agentic application）**，状态 `s_t=(V_t, Φ_t^s, C_t)`。`1.intro.tex:54`。
+235:- **与 TaskVM 本质区别**：Macaron 是**解码器**这一半（GenUI 模型），明确排除**编码器**（既有界面执行）。TaskVM 占据的正是 Macaron 让出的那一半。**可复用资产**（不作竞品）：A2UI-Bench（300 任务）、L1 自动 / L2·L3 LLM-judge(gpt-5.1) / V1-V3 VLM-judge、Flutter Web renderer + 23 组件 catalog + render-check gate、LoRA SFT→GRPO 配方、训练好的 Grande(235B,74.2)/Venti(GLM-5.1,75.6)。但**不部署其训练模型**（主线用前沿通用模型 + A2UI v0.9 spec 注入 prompt；不下载 → 不算复用训练产物 → 不 pin 死具体协议版本）。
+253:**不能 claim**：首次 task-centric computing（Activity-Centric 2006）；首次 agent 生成任务 UI（DuetUI/Jelly）；首次 GUI+MCP hybrid；首次动态 app 作交互媒介（SaC）；首次 GenUI×GUI-agent 组合（Morae/AgentLens）；首次可编辑持久任务面（ALLOY）。
+269:| 5 | **AgentLens** | 3 | 4 | UIST'26 preprint | GenUI 按设计非交互=与"双向"正相反；单 app；post-2026-01 屏蔽不适用 |
+287:**安全楔子完全落在性质 2+3+4+5**——bottom-up projection（性质 1）单独不能扛（Morae/AgentLens/SaC/Jelly 各占一半）。论文**必须**立在 2-5 这个组合上，不能立"首次组合 GenUI+GUI agent"/"首次可编辑任务面"/"首次 live-state 投影"（全死）。
+297:| AgentLens | GenUI 对话/Partial UI 镜像 | 回答/单点触 | 否 | 否 | 否（单 app） |
+302:| Macaron | assistant GenUI | UI 控件 | 否 | LLM/VLM-judge | 否（排除执行） |
+321:> **【2026-08-11 订正】本节以下内容是 2026-08-07 重构时的历史判断，当时仍以为"binding-discovery + round-trip verifier"这一半已经扎实。`.mrules` E10 审计推翻了这个前提——见 §5 诚实现状盘点，读路径部分真实、写路径几乎全是后门、GenUI 完全不存在。以下段落保留作为历史记录，但"已实现"的判断不再成立，最新现状以 §5、§8 为准。**
+332:> **本节是全文最重要的一次改写**。此前版本用"W1 已实现粗体部分"这种周次叙事，掩盖了一个根本问题：**从项目诞生第一天起，架构图里最核心的两个模型角色——GUI Agent 执行器（写/回退）与 GenUI 解码器——从未被真正实现过**，全部是 REST API 后门 + 硬编码字符串模板。详见 `.mrules` E10（全仓库级诚实审计）。**本节不再用"W1/W2/W3/W4 做完了什么"来组织，而是直接按新心智模型的五个阶段，逐段标注"现状=真实还是造假/占位符"，这才是唯一诚实、唯一权威的现状描述。**
+345:        │ 【② 解码器 = 真正的 GenUI 模型调用】
+378:| ② 解码器·GenUI（`workspace_ui/renderer.py` + `server.py`） | **完全不存在，本轮新发现，此前所有交接文档均未点破** | `render()` 是纯 Python f-string 拼接，`_PAGE_TPL` 是写死的 Jinja2 模板，`editable_components.py` 全部是字符串拼接函数。全仓库找不到任何一处调用"GenUI 生成模型"把 VM-state 解码成界面的代码。开工大纲反复强调的"两个模型角色独立（解码器 vs 编码器+写回）"，目前**两个角色都没有被真正实现**——执行器是硬编码 API 调用，解码器是硬编码模板渲染。 |
+380:| kill-test 数字（`eval_results/*.json`） | **需要重新定性，此前全部作废** | `run_w1_killtest.py` 等衡量的实际上只是"模型能否从渲染 HTML 文本正确抽取 `(var_id, app, entity_id, operator)` 四元组，且套进硬编码 REST API 后状态按预期改变"——是一个信息抽取任务的成功率，与"GUI Agent 能否操作真实软件""GenUI 能否生成好界面"这两个本该是核心贡献的问题完全无关。这两个问题至今从未被测过一次，重跑前不得再引用旧数字。 |
+382:**责任归属（不是这一轮 coding agent 编的谎）**：审查 `renderer.py` 与 `compiler.py` 的原始 docstring 可确认，把 GenUI 换成硬编码模板、把执行器换成 REST API，是项目早期为了先把 round-trip/non-interference/rollback 等验证器逻辑跑通而做的、显式声明过的工程简化。但这个简化从项目早期一直存活到现在，跨越多轮迭代，**从未有任何一次交接文档把"这是占位符，不是真实模型"这件事讲清楚过**。任何后续审计如果只回答被问到的那一个点，很容易把"这一处有问题"默认成"其余没被问到的地方大概率没问题"——这正是本项目吃过的亏，见 `.mrules` E10。
+402:### 7.2 ② 解码器·GenUI（真正需要新增的模型调用）
+408:- 由 GenUI 渲染出的可编辑控件产生结构化 patch（不是自由文本），这一步不需要重的模型调用，但如果人以自然语言下达撤销/修改意图，需要一个轻量解析步骤把它转成语义化 patch/撤销意图。
+435:| **P4 GenUI 解码器** | ② | 真正调用一个 GenUI 生成模型，输入 VM-state，输出人可操纵界面描述（A2UI v0.9 消息格式），替换 `renderer.py` 的字符串拼接 | `renderer.py` 里不再有任何硬编码的"界面长什么样"的判断逻辑，界面结构由模型输出决定 |
+Thought for 18.11 seconds
+docs/oracle/compare/ 里有 7 份对比调研，旧版大纲里已经命中了关键段落。现在读新版大纲（当前有效的）和旧版里那段诚实现状盘点——这直接决定裁决。
+已读取
+A2UI_开工大纲_v0_心智模型对齐版.md
+已读取
+A2UI_开工大纲_v0_心智模型对齐版_老版本.md
+(L330-459)
+Thought for 35.47 seconds
+大纲新旧两版都读完了。在给裁决之前，最后验证两件事：① renderer.py 现在到底还是不是硬编码模板（E10 之后有没有人做过 P4）；② DuetUI 对比文档里 DuetUI 到底强在哪。
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && ls taskvm/workspace_ui/ && echo "=== renderer.py 头部与结构 ===" && head -60 taskvm/workspace_ui/renderer.py 2>/dev/null && echo "....
+<
+qapp_open.py
+composition.py
+demo_open.py
+demo.py
+__init__.py
+__pycache__
+static
+=== renderer.py 头部与结构 ===
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && grep -n "本质区别\|核心区别\|DuetUI 的\|DuetUI 是\|差异" "docs/oracle/compare/chatgpt-export_[A2UI]与DuetUI的差异.txt" | head -20
+q1:[A2UI] 与DuetUI的差异
+28:DuetUI 的基本观点是：
+63:基于这些发现，作者提出了 DuetUI 的设计目标和六阶段工作流。turn761898view1
+84:# 3. DuetUI 的核心方法
+173:DuetUI 是一个三层、多 Agent 架构。
+282:| Groq LLaMA3-70B | DuetUI 的 LLM 后端之一 |
+497:- $p=0.5545$，无显著差异。
+518:| NASA-TLX | 2.22 | 2.49 | 无显著差异，$p=.1061$ |
+656:DuetUI 的流程是：
+1036:你这个区分很关键。我会把 DuetUI 的“任务结构单位”与你设想的“跨应用轨迹单位”逐层对齐，然后判断哪些是重合、哪些是真正新的研究空间。
+1261:DuetUI 的核心主张是：
+1285:## 6.1 DuetUI 的基本状态是“任务树”
+1317:## 6.2 DuetUI 的 Action History 不是一等交互对象
+1364:DuetUI 的 ServiceAgent 在原型中大量通过 LLM 模拟外部服务，并没有完整解决真实系统里的写操作、事务、权限、部分失败和状态同步。
+1575:DuetUI 的 task–subtask–data 不足以表达这些内容。
+1664:| 层面 | 与 DuetUI 的关系 |
+1669:| 隐藏多个服务的界面差异 | 部分重合 |
+1680:真正需要警惕的近邻是 **Software as Content**。你们最有机会拉开差异的地方，恰好是它目前明确没有解决的部分：
+2232:DuetUI 的输入并不只是最开始那句话：
+2259:你这个澄清把边界一下子拉清楚了：关键不再是“UI怎么帮人澄清意图”，而是“UI作为 Agent 执行过程的实时投影和控制面”。我先核对 DuetUI 是否真的执行外部应用，再给你一个严格对比。
+Thought for 2.97 seconds
+renderer.py 已经不存在了——workspace_ui 现在是 composition.py/demo.py/app_open.py。需要确认这层现在是模型驱动还是换了形式的模板。
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && wc -l taskvm/workspace_ui/*.py && echo "=== composition.py 结构 ===" && grep -n "^class \|^def \|render\|f\"\|template\|jinja\|J...
+<
+q  415 taskvm/workspace_ui/app_open.py
+  751 taskvm/workspace_ui/composition.py
+  433 taskvm/workspace_ui/demo_open.py
+  218 taskvm/workspace_ui/demo.py
+   25 taskvm/workspace_ui/__init__.py
+ 1842 total
+=== composition.py 结构 ===
+104:class HttpCUAModel:
+145:        retry = (f"\n（第 {attempt} 次重试：上一次操作没有完成任务，请确认修改"
+147:        user = (f"## 操作目标\n{goal}{retry}\n\n## 屏幕可见文本\n{visible}")
+155:        ref = getattr(observation, "screenshot_ref", None)
+189:        return f"cua-{uuid.uuid4().hex[:16]}"
+205:def _decision_from_json(parsed: Mapping[str, Any]) -> CUADecision:
+230:                               reason=f"未知操作类型 {act_kind!r}",
+246:                reason=f"{act_kind} 操作缺少 coordinate",
+252:                reason=f"{act_kind} 操作缺少必需字段 {req}",
+264:                    reason=f"{field} 不是整数",
+272:                    reason=f"非法滚动方向 {direction!r}",
+286:                       reason=f"未知决策类型 {kind!r}", raw=str(parsed)[:200])
+294:class VisibleLabelExtractor:
+322:            pattern = (rf"{re.escape(label)}\s*[:：=]\s*"
+323:                       rf"({_LABEL_VALUE_RE})")
+340:class HandleCacheExtractor:
+345:    apps render tables / definition lists — ``label: value`` tokens the
+394:class GovernanceServicePort:
+461:class EvidenceSurfaceResolver:
+523:def build_runtime_ports(*, model_port: ModelPort | None = None,
+547:def compose_task_runtime(kernel: Any, *, host: str = "localhost",
+596:def bootstrap_real_full(*, goal: str, sid: str,
+670:        shot = getattr(obs, "screenshot_ref", None)
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && grep -rn "requests.post\|openai\|chat.completions\|llm" taskvm/workspace_ui/composition.py taskvm/workspace_ui/demo.py 2>/dev/...
+<
+q=== 是否有任何模块把 VM-state 交给模型生成 UI ===
+taskvm/substrate/mobilegym/bridge.py
+taskvm/workspace_ui/composition.py
+taskvm/workspace_ui/demo_open.py
+taskvm/runtime/autonomy.py
+taskvm/architect/architect.py
+taskvm/apps/mail/app.py
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && grep -n "GenUI\|genui" taskvm/workspace_ui/composition.py taskvm/workspace_ui/demo_open.py taskvm/runtime/autonomy.py taskvm/a...
+<
+qtaskvm/workspace_ui/composition.py:594:# ── B-07: the genuine real-full composition bootstrap ─────────────────────
+taskvm/workspace_ui/demo_open.py:5:through the genuine TaskVM pipeline on either open substrate:
+taskvm/runtime/autonomy.py:619:        the ``after`` is genuinely the visible world the CUA judged (§6)."""
+taskvm/architect/architect.py:6:GenUI structural decoder):
+已读取
+architect.py
+(L1-80)
+Thought for 10.95 seconds
+architect.py 的出现改变了一切——它自称承担了“GenUI structural decoder”角色且是真实模型调用。让我验证它的投影 schema 生成和渲染路径，这是裁决的最后一块证据。
+已读取
+architect.py
+(L80-199)
+Thought for 1.24 seconds
+最后看一眼渲染层：模型生成的语义组件树（ProjectionSchema）是怎么变成 HTML 的——有没有“决定界面长什么样”的硬编码逻辑残留。
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && ls taskvm/projection/ && grep -rn "card|field|list|progress|note\|component.type\|ctype ==\|c.type ==" taskvm/projection/*.py ...
+<
+qapp.py
+events.py
+__init__.py
+__pycache__
+services
+store.py
+view_models.py
+taskvm/projection/view_models.py:119:                "component_type": c.component_type,
+已读取
+view_models.py
+(L90-149)
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && ls taskvm/workspace_ui/static/ 2>/dev/null | head; grep -rn "component_type\|componentType" taskvm/workspace_ui/static/*.js 2>...
+<
+qconfetti.min.js
+css
+index.html
+js
+style.css
+timeline.js
+workflow_anim.js
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && ls taskvm/workspace_ui/static/js/ && grep -rn "component_type\|card\|field\|list\|progress\|note" taskvm/workspace_ui/static/j...
+<
+qtaskvm.js
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && grep -n "component_type\|COMPONENT\|render" taskvm/workspace_ui/static/js/taskvm.js | head -20 && echo "===" && grep -n -A20 "...
+<
+q34:function renderHero() {
+166:  try { snapshot = await api("/snapshot"); renderAll(); }
+174:    if (env.sse_type === "snapshot") { snapshot = env.detail; renderAll(); return; }
+198:function renderAll() {
+200:  renderGovernance();
+201:  renderVariables();
+202:  renderWorkflow();
+203:  renderSurfaces();
+204:  renderCheckpoints();
+205:  renderConflicts();
+208:function renderGovernance() {
+235:function renderVariables() {
+266:function renderWorkflow() {
+293:function renderSurfaces() {
+313:function renderCheckpoints() {
+339:function renderConflicts() {
+375:  renderHero();
+441:    renderHero();
+===
+Thought for 1.12 seconds
+已读取
+taskvm.js
+(L235-314)
+Thought for 65.54 seconds
+已执行命令
+$
+cd /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui && echo "=== taskvm.js 是否消费 projection schema ==="; grep -n "schema" taskvm/workspace_ui/static/js/taskvm.js | head; echo "=== in...
+<
+q=== taskvm.js 是否消费 projection schema ===
+=== index.html 的面板骨架是否固定 ===
+24:    <section id="governance-bar" class="governance-bar hidden">
+40:    <section id="hero" class="hero hidden">
+62:    <!-- ── bootstrapping panel (compiler+architect running) ──────────── -->
+63:    <section id="boot-panel" class="boot-panel hidden">
+78:      <section class="panel workflow-panel">
+80:        <div id="workflow-map" class="workflow-map">
+86:      <section class="panel variables-panel">
+88:        <div id="variables-list" class="variables-list">
+94:      <aside class="panel sidebar">
+95:        <section>
+102:        <section>
+104:          <div id="surface-cards" class="surface-cards">
+108:        <section>
+110:          <div id="checkpoint-timeline" class="checkpoint-timeline">
+114:        <section>
+116:          <div id="conflicts-list" class="conflicts-list">
+=== 拖拽回退是否存在 ===
+281:    if (node.rollback_boundary) html += `<span class="wf-progress">checkpoint</span>`;
+323:    if (ck.rollback_available) {
+324:      html += `<span class="ckpt-rollback" data-cid="${esc(ck.checkpoint_id)}">rollback</span>`;
+329:  container.querySelectorAll(".ckpt-rollback").forEach(el => {
+333:        govCommand("rollback", { target_checkpoint_id: cid, rationale: "UI rollback" });
+Thought for 30.19 seconds
+HashTAG_00001，裁决来了。这轮调查我全程用代码说话，结论比你我说的都复杂：你的指控在 2026-08-11（E10 审计）那天 100% 成立，之后一半被修掉了，但你这次又抓到了一个没人点破的真缺口。
+一、你的指控曾是项目自己的官方结论
+E10 审计后重写的旧版大纲 §5.2，白纸黑字：
+从项目诞生第一天起，架构图里最核心的两个模型角色——GUI Agent 执行器（写/回退）与 GenUI 解码器——从未被真正实现过，全部是 REST API 后门 + 硬编码字符串模板。……② 解码器·GenUI（workspace_ui/renderer.py）完全不存在，本轮新发现，此前所有交接文档均未点破。
+所以你问“为什么之前所有 agent 都信誓旦旦保证可以泛化”——答案就在这句话里：占位符从项目早期活到现在，从未有交接文档讲清“这是占位符”。你的愤怒不是误会，是这个项目吃过的真实的亏。
+二、但 E10 之后架构重建了，现在的状态是“一半真一半假”
+真的那一半（我逐行验证过）：E10 制定的 P4 任务包，后端部分已经完成。老的 renderer.py 已删除，取而代之的是 taskvm/architect/architect.py——一个真实模型调用，一次 compose 同时产出：
+architect.py
+1/1
+Apply
+"""TaskArchitect / Projection Composer — ONE call, ONE coherent architecture.
+
+The SECOND high-level model role (architect contract §1). A single
+``compose`` call jointly produces everything the old role-zoo produced
+inconsistently (Milestone Suggester / rule-based Workflow Classifier /
+GenUI structural decoder):
+它给模型的 system prompt 里，投影 schema 本身就是模型输出的 JSON（这是 GenUI 解码器的核心）：
+architect.py
+2/2
+Apply
+ "projection": {"root": "<component label>", "components": [
+   {"label": "<unique label>", "type": "card|field|list|progress|note",
+    "binds": "<semantic_key or null>", "editable": false,
+    "children": ["<child component labels>"]}]}}
+变量集合、可编辑性、workflow 节点数量/标签/依赖、checkpoint 位置、组件树结构——全部由模型按任务现场决定，且明文“NO fallback to a fixture/GT plan — ever”（L26）。对照旧版 kill-test 判据 ④“WorkflowPlan 必须任务特异地动态生成”——这一条现在是真的。三种拓扑原语（sequence/fan-out/barrier/bounded-loop）是乐高积木，模型自由决定搭什么，不是“固定三种结构选一个”。UI 上点 checkpoint 回退也真实存在（taskvm.js:333 → govCommand("rollback")）。
+假的那一半（你这次抓到的，我 grep 验证过）：模型生成的投影 schema，前端根本没消费。
+plain text
+Apply
+taskvm.js 中 grep "schema" → 0 命中
+index.html 面板骨架 → 固定的 workflow-panel / variables-panel / sidebar 六格
+后端 view_models.py 明明白白输出了模型生成的组件树（projection_schema_view，L109-128），但 taskvm.js 的 renderAll() 只渲染六个写死的面板函数（governance/variables/workflow/surfaces/checkpoints/conflicts），没有任何一行代码渲染模型输出的组件树。也就是说：
+模型决定了“出现什么内容”（哪些变量、哪些节点、哪些 checkpoint）——真的；
+但“以什么视觉结构呈现”——仍然是写死的 dashboard 布局，模型无权决定。
+这恰好卡在 P4 验收标准“renderer.py 里不再有任何硬编码的‘界面长什么样’的判断逻辑，界面结构由模型输出决定”的后半句上。后端达标了，前端渲染层没达标。这是 P4 的未完成部分，而且没有任何交接文档点破——和 E10 揭露的问题同构。
+三、和 DuetUI 的对比，要公平也要诚实
+对比文档（与DuetUI的差异.txt）里你们自己核对过：DuetUI 的 ServiceAgent “大量通过 LLM 模拟外部服务，并没有完整解决真实系统里的写操作、事务、权限、部分失败和状态同步”（L1364）。DuetUI 灵活在 UI 生成，但它的世界是模拟的；TaskVM 的安全楔子按你们自己的定位（老版 L287）立在性质 2-5（round-trip / non-interference / rollback / substrate-invariance），“首次 GenUI×GUI-agent 组合”这种 claim 你们已经判定全死。
+所以准确的现状是：
+维度
+DuetUI
+TaskVM 现状
+UI 结构动态生成
+✅ 任务树→动态 UI
+⚠️ 后端已模型化，前端未消费（你抓到的缺口）
+绑定真实世界状态
+❌ LLM 模拟服务
+✅ observe→fold→重投影闭环
+真实写回+验证+回退
+❌ 不解决
+✅ grounding loop + verifier + 诚实 409
+“灵活度不如 DuetUI”在 UI 生成维度现在仍部分成立——但这不是定位失败，是 P4 没收尾。不收尾，“Agentic UI”这个名字确实名不副实，这一点我完全同意你。
+四、下一步（明确且不大）
+P4 收尾 = 前端加一个薄的 schema-driven 渲染器：消费 /snapshot 里已有的 projection_schema，按模型输出的组件树（含嵌套、绑定、可编辑性）渲染，替换固定面板骨架。这和 MG-FULL-APPS 工单正交（那个修读路径白名单，这个修渲染层），不冲突。同时诚实标注两件事：① 组件词汇表目前限 5 种（card/field/list/progress/note），是受约束解码而非自由 HTML——这是工程上可辩护的中间态；② 完整 A2UI v0.9 协议消息格式注入（老大纲 §7.2 的完整形态）仍未做。
+要不要我把这个 P4 收尾缺口写成和 MG-FULL-APPS 同格式的交接工单？证据坐标我刚才已经全部踩好了。
+
+
+
+
+
+所以相当于这里的后端就是：agentic GenUI真的会生成自适应的灵活控件，至少在足够强大的模型下，任务相关的UI也是足够灵活的？我不要求taskVM的layout是完全可变的，但是至少应该有一个任务相关area里面的渲染出来让人看到的前端的灵活度是完全只受到模型能力制约而非taskVM harness前端掣肘的对吧？？？？现在还是没用到A2UI的规则化渲染器，但是模型的输出已经符合A2UI了是吧？可以采用互联网进行调研。```
+
+【回答内容 轮数2.A】
+我已经把压缩包解开并沿着“文档目标 → 模型调用 → ProjectionSchema → HTTP/SSE → 浏览器渲染 → 用户修改 → CUA 执行”这条链路核对了一遍。
+
+## 核心裁决
+
+你最后几句话里，有一半成立，另一半需要纠正：
+
+1. **后端确实已经有真实模型生成的任务相关结构。**
+   `TaskArchitect` 会根据 goal 和观测到的 VM-state 动态生成任务变量、工作流、ActionContract、checkpoint 和一棵 projection 组件树。
+
+2. **但它目前没有真正生成“可渲染的灵活控件”。**
+   它生成的是 TaskVM 自定义的抽象 `ProjectionSchema`，模型提示里只有 `card | field | list | progress | note` 五类语义节点，而且没有 TextField、DateTimeInput、ChoicePicker、Button action 等完整控件属性。
+
+3. **前端目前完全没有消费这棵模型生成的 projection tree。**
+   浏览器仍然把所有变量统一渲染成文本输入框，并使用固定的 Workflow / Variables / Surfaces / Checkpoints / Conflicts dashboard。
+
+4. **模型当前的生产输出不符合 A2UI v0.9。**
+   它不是 `createSurface / updateComponents / updateDataModel / deleteSurface` 消息，也没有 `version`、`surfaceId`、`catalogId`、`root` 等 A2UI 协议结构。
+
+5. **仓库里确实存在一套 A2UI v0.9 prompt、官方 schema 和 validator，但它在 `taskvm_bench` 中，没有接入生产路径，而且其中还有旧版绑定语法错误。**
+
+所以当前最准确的定义是：
+
+> **TaskVM 已经有“模型生成的语义任务架构”，但还没有真正完成“模型生成 A2UI → A2UI Renderer 渲染 → A2UI action 写回”的 Agentic GenUI 闭环。**
+
+---
+
+# 一、这个压缩包目前是什么状态
+
+压缩包不是单纯的几个文档，而是一份完整同步快照，包含四类内容。
+
+### 1. 当前长期心智模型
+
+`docs/A2UI_...心智模型对齐版.md`
+
+这是现在的抽象目标文档，只规定五个结果性质：
+
+- 自底向上的实时投影
+- 双向可执行性
+- substrate independence
+- governance over autonomy
+- 独立验证和诚实可逆性
+
+它刻意不再规定 A2UI、具体字段、模型角色数量和代码结构。
+
+### 2. 旧版详细设计及 E10 审计记录
+
+`docs/A2UI_...心智模型对齐版_老版本.md`
+
+旧版中明确写过：
+
+- GenUI 解码器应单独调用模型；
+- 输入 VM-state；
+- 输出 A2UI v0.9 消息；
+- Renderer 不应决定“页面长什么样”；
+- P4 的验收标准是模型决定 UI 结构。
+
+也就是说，你现在提出的要求不是临时新增需求，而是原始设计里已经明确存在但没有完整落地的 P4。
+
+### 3. 当前生产代码
+
+主要是：
+
+```text
+taskvm/architect/
+taskvm/domain/
+taskvm/kernel/
+taskvm/governance/
+taskvm/runtime/
+taskvm/projection/
+taskvm/workspace_ui/
+```
+
+这里真实完成了：
+
+```text
+可见世界
+  ↓
+StateCompiler
+  ↓
+TaskVariable / VM-state
+  ↓
+TaskArchitect
+  ↓
+Workflow + ActionContract + ProjectionSchema
+  ↓
+Kernel / Runtime
+  ↓
+CUA 操作真实界面
+```
+
+但是最后的 `ProjectionSchema → 真实任务 UI` 没有完成。
+
+### 4. Benchmark 中的 A2UI 实验代码
+
+主要是：
+
+```text
+taskvm_bench/benchmark/a2ui_spec.py
+taskvm_bench/benchmark/a2ui_schema_manager.py
+docs/A2UI-protocol-spec/v0_9/
+```
+
+这里包含了：
+
+- 官方 A2UI v0.9 schema；
+- Basic Catalog；
+- prompt builder；
+- JSON Schema validator；
+- GenUI decoder directive。
+
+但是 `taskvm/` 生产代码不调用它们。
+
+这符合仓库自己的依赖隔离规则：生产路径不得反向依赖 benchmark。因此不能简单让 `taskvm` import `taskvm_bench`，必须把成熟代码提升到新的生产模块。
+
+---
+
+# 二、后端现在到底生成了什么
+
+当前模型提示在：
+
+```text
+taskvm/architect/architect.py:72-112
+```
+
+要求模型返回：
+
+```json
+{
+  "variables": [],
+  "workflow": {
+    "nodes": []
+  },
+  "projection": {
+    "root": "<component label>",
+    "components": [
+      {
+        "label": "...",
+        "type": "card|field|list|progress|note",
+        "binds": "<semantic_key or null>",
+        "editable": false,
+        "children": []
+      }
+    ]
+  }
+}
+```
+
+所以它确实是任务相关的。
+
+不同任务可以产生不同的：
+
+- 变量数量；
+- 变量标题；
+- 分组；
+- 父子结构；
+- 绑定关系；
+- editable 状态；
+- 工作流拓扑；
+- checkpoint；
+- ActionContract。
+
+这一部分不是固定 fixture，也不是针对微信、日历等应用写死。
+
+但它不是完整的控件描述。
+
+当前 `_assemble_schema()` 在：
+
+```text
+taskvm/architect/architect.py:683-743
+```
+
+最终只保留：
+
+```python
+ProjectionComponent(
+    component_id=...,
+    component_type=...,
+    label=...,
+    binding_key=...,
+    children=...,
+    editable=...
+)
+```
+
+虽然 `ProjectionComponent` 类型里预留了：
+
+```python
+props: dict[str, Any]
+```
+
+但是 TaskArchitect 的解析器根本没有把模型属性填进去。
+
+因此模型无法表达：
+
+```text
+这是日期控件
+这是单选控件
+这是多个选项
+这是数字输入
+这是只读 Markdown
+这个按钮触发什么 action
+这个控件绑定哪个 JSON Pointer
+这个字段有什么验证规则
+```
+
+也就是说，当前所谓 projection tree 更接近：
+
+> **任务相关的信息架构草图**
+
+而不是：
+
+> **可以直接交给 Renderer 的 Agentic UI 描述**
+
+---
+
+# 三、前端确实没有消费模型生成的 ProjectionSchema
+
+后端已经把 schema 放进 snapshot：
+
+```text
+taskvm/projection/view_models.py:109-128
+taskvm/projection/view_models.py:361-376
+```
+
+返回中包括：
+
+```json
+{
+  "projection_schema": {
+    "root_id": "...",
+    "components": [...]
+  },
+  "projection_data": {...}
+}
+```
+
+但是浏览器的：
+
+```text
+taskvm/workspace_ui/static/js/taskvm.js:198-205
+```
+
+只有：
+
+```javascript
+function renderAll() {
+  renderGovernance();
+  renderVariables();
+  renderWorkflow();
+  renderSurfaces();
+  renderCheckpoints();
+  renderConflicts();
+}
+```
+
+没有：
+
+```javascript
+renderProjectionSchema()
+renderA2UISurface()
+messageProcessor.process(...)
+```
+
+甚至整个 JS 文件都没有读取：
+
+```javascript
+snapshot.projection_schema
+```
+
+而 `renderVariables()` 在：
+
+```text
+taskvm/workspace_ui/static/js/taskvm.js:235-264
+```
+
+把所有 editable 变量统一输出成：
+
+```html
+<input type="text">
+<button>Set</button>
+```
+
+所以：
+
+- 日期也是普通文本框；
+- 数字也是普通文本框；
+- 布尔值也是普通文本框；
+- 枚举选项也是普通文本框；
+- 模型生成的 card/list/progress 结构不起作用。
+
+固定页面骨架则直接写在：
+
+```text
+taskvm/workspace_ui/static/index.html:76-121
+```
+
+因此你之前的判断是正确的：
+
+> 模型决定了部分“任务语义内容”，但当前用户真正看到的 task area 仍受 TaskVM 前端模板强烈限制。
+
+---
+
+# 四、当前模型输出并不符合 A2UI
+
+正式 A2UI v0.9/v0.9.1 的服务器输出是四类消息：
+
+```text
+createSurface
+updateComponents
+updateDataModel
+deleteSurface
+```
+
+它把组件结构与 Data Model 分离，客户端逐条处理消息并增量渲染。官方当前把 v0.9.1 列为生产版本，而 v0.9 是上一稳定版本；二者延续相同的四消息模型。
+
+TaskVM 当前生产输出是：
+
+```json
+{
+  "projection": {
+    "root": "...",
+    "components": [
+      {
+        "label": "...",
+        "type": "field",
+        "binds": "release_date"
+      }
+    ]
+  }
+}
+```
+
+A2UI 应当是：
+
+```json
+{
+  "version": "v0.9",
+  "updateComponents": {
+    "surfaceId": "taskvm-task",
+    "components": [
+      {
+        "id": "root",
+        "component": "Column",
+        "children": ["release_date"]
+      },
+      {
+        "id": "release_date",
+        "component": "DateTimeInput",
+        "label": "发布日期",
+        "value": {
+          "path": "/variables/release_date/desired"
+        },
+        "enableDate": true,
+        "enableTime": false
+      }
+    ]
+  }
+}
+```
+
+两者不是同一种 schema。
+
+因此：
+
+> **不能说“模型输出已经符合 A2UI，只是前端没有 Renderer”。**
+
+更准确的是：
+
+> **当前模型输出具备一些与 A2UI 相似的思想，例如平铺组件、稳定 ID、结构/数据分离，但协议格式和控件语义都不是 A2UI。**
+
+---
+
+# 五、仓库里的 A2UI 代码也不能直接接线
+
+`taskvm_bench/benchmark/a2ui_spec.py:321-355` 里已经写了一个真正的 A2UI GenUI decoder directive，要求模型输出 JSONL。
+
+`taskvm_bench/benchmark/a2ui_schema_manager.py` 也加载了正式 schema，并提供：
+
+```python
+validate_a2ui_messages(...)
+```
+
+这部分方向是正确的。官方 A2UI Agent Development 指南也推荐由 Schema Manager 把 catalog、schema 和 examples 放入模型上下文，并在输出后进行运行时验证。
+
+但现有 directive 中还有两个问题：
+
+```text
+taskvm_bench/benchmark/a2ui_spec.py:333-335
+```
+
+要求组件使用：
+
+```json
+{
+  "editable": true,
+  "dataBinding": "release_date"
+}
+```
+
+`a2ui_schema_manager.py:159` 也告诉模型：
+
+```text
+dataBinding is a plain string var_id
+```
+
+这不是 A2UI v0.9 的绑定方式。
+
+v0.9 使用：
+
+```json
+{
+  "value": {
+    "path": "/variables/release_date/desired"
+  }
+}
+```
+
+仓库自己 vendored 的 evolution guide 也明确写着：
+
+```text
+v0.8: dataBinding
+v0.9: path
+```
+
+并且 Basic Catalog 的组件 schema 使用 `unevaluatedProperties: false`，不会允许随意添加 `editable`、`dataBinding`。
+
+我实际使用仓库里的正式 validator 测了一次：
+
+- 使用 `value: {"path": ...}` 的消息：通过；
+- 使用 `editable + dataBinding` 的消息：验证失败。
+
+所以这部分属于：
+
+> **已经搭好约 60% 的协议基础设施，但尚未完成同步和接线。**
+
+---
+
+# 六、你所说的“灵活度只受模型能力制约”需要稍微换一种表述
+
+从产品目标看，你的要求是合理的：
+
+> 任务相关 area 应由模型根据当前任务动态组成，不应该为微信、日历、转账、发消息等场景分别写模板。
+
+但是在 A2UI 架构中，它不可能真的“完全只受模型能力限制”。
+
+A2UI 的安全基础正是：
+
+> 模型只能使用客户端预先批准的 Catalog 组件，而不能生成任意 HTML、CSS 或 JavaScript。
+
+Catalog 可以是 Basic Catalog，也可以是自定义 Catalog；Renderer 将这些抽象组件映射为本地可信控件。
+
+所以更准确的验收目标应该是：
+
+> **UI 的任务语义、控件选择、分组方式和组件树由模型决定；Harness 只施加任务无关、应用无关的协议与 Catalog 约束。**
+
+允许的通用约束：
+
+```text
+只能使用 Text / Card / Column / DateTimeInput / ChoicePicker / Button
+必须绑定合法 task variable
+必须使用允许的 action 名
+必须通过 schema validation
+不能生成 JS/HTML
+```
+
+不允许的场景特异硬编码：
+
+```javascript
+if (app === "wechat") renderMessageEditor();
+if (goal.includes("日历")) renderDatePicker();
+if (semanticKey === "release_date") renderSpecialReleaseForm();
+```
+
+判断是否真正泛化的试金石是：
+
+> 加入一个未见任务时，是否只需要模型输出新的 A2UI component tree，而不需要修改前端代码。
+
+---
+
+# 七、A2UI 在 TaskVM 里最合适的位置
+
+我建议保留固定 TaskVM 外壳，只把中间的任务区域改成 A2UI Surface。
+
+```text
+┌─────────────────────────────────────────────────┐
+│ 固定 TaskVM Shell                               │
+│ Goal / Start / Pause / Stop / Recompose         │
+├───────────────┬─────────────────┬───────────────┤
+│ Workflow      │ Dynamic Task    │ Live Phone    │
+│ 固定治理视图   │ A2UI Surface    │ 固定证据视图   │
+│               │ 模型动态生成     │               │
+├───────────────┴─────────────────┴───────────────┤
+│ Checkpoints / Conflicts / Provenance            │
+└─────────────────────────────────────────────────┘
+```
+
+这正好符合你说的：
+
+> layout 不需要完全可变，但至少要有一个任务相关 area，其结构和控件由模型决定。
+
+固定外壳继续负责：
+
+- Autonomy 状态；
+- Workflow；
+- checkpoint；
+- rollback；
+- live phone；
+- conflicts；
+- verifier evidence。
+
+A2UI 动态区负责：
+
+- 当前任务摘要；
+- 任务变量的可视化组织；
+- 根据 value type 选择控件；
+- 多变量分组；
+- 当前值/目标值/偏差；
+- 用户编辑；
+- 应用修改按钮；
+- 任务相关说明和风险提示。
+
+---
+
+# 八、建议重新分开两个高层模型角色
+
+当前 `docs/contracts/architect.md:9-12` 把原来的 GenUI structural decoder 合并进了 Task Architect，一次调用同时生成 workflow 和 projection schema。
+
+这减少了模型调用，但它与旧版 P4 的设计存在明显张力。
+
+为了实现你真正想要的灵活性，我建议重新分开：
+
+## 1. Task Architect
+
+输入：
+
+```text
+goal
+VM-state
+committed history
+constraints
+```
+
+输出：
+
+```text
+TaskVariables
+WorkflowGraph
+ActionContracts
+Checkpoint placement
+Reversibility
+Verification intent
+```
+
+它负责“任务应该是什么”。
+
+## 2. GenUI Decoder
+
+输入：
+
+```text
+TaskArchitecture
+当前 ProjectionData
+允许的 Catalog
+TaskVM UI rules
+```
+
+输出：
+
+```text
+A2UI JSONL
+```
+
+它负责“这个任务应该如何呈现给人”。
+
+这样更合理，原因是：
+
+- UI 格式错误不应该迫使模型重新生成工作流；
+- A2UI schema repair 不应该改变 ActionContract；
+- 普通数据更新不需要重新调用 GenUI；
+- 可以独立评测 Task Architect 和 UI Decoder；
+- 与原始“解码器和 CUA 独立调用”的心智模型一致。
+
+完整链路应当是：
+
+```text
+真实应用
+   ↓ screenshot / visible text
+StateCompiler
+   ↓
+VM-state
+   ↓
+TaskArchitect
+   ↓
+TaskArchitecture
+   ├──────────────→ Kernel / Runtime / CUA
+   │
+   └──────────────→ GenUI Decoder
+                       ↓
+                  A2UI messages
+                       ↓
+                 schema validator
+                       ↓
+                 A2UI Renderer
+```
+
+---
+
+# 九、用户修改投影以后，缺失的翻译步骤应该怎么补
+
+你之前认为需要：
+
+```text
+用户修改 UI
+↓
+重新翻译成自然语言
+↓
+发给 CUA / GUI Agent
+```
+
+这个判断方向上接近，但 **A2UI 本身不应该负责自然语言翻译**。
+
+A2UI 应只负责产生结构化 action：
+
+```json
+{
+  "name": "taskvm.local_patch",
+  "context": {
+    "semanticKey": "release_date",
+    "newValue": "2026-08-18"
+  }
+}
+```
+
+服务器收到后：
+
+```text
+A2UI action
+  ↓
+Action Router
+  ↓
+LocalPatchRequested
+  ↓
+Kernel.apply_local_patch
+  ↓
+retarget affected ActionContracts
+  ↓
+ActionContractSerializer
+  ↓
+自然语言 CUA goal
+  ↓
+CUA 看屏幕、点坐标、输入、确认
+  ↓
+Verifier
+  ↓
+fresh VM-state
+  ↓
+updateDataModel
+```
+
+而这条链路的后半部分其实已经存在。
+
+## 已存在的自然语言翻译器
+
+`taskvm/architect/serializer.py:42-85`
+
+已经把 ActionContract 确定性序列化成：
+
+```text
+Target: 在屏幕上寻找“产品发布”
+Goal: 把发布日期更新为 2026-08-18
+Set: 发布日期 = 2026-08-18
+Done when: 页面显示发布日期为 2026-08-18
+Operate the visible UI like a user would...
+```
+
+随后：
+
+```text
+taskvm/runtime/autonomy.py:391-443
+```
+
+把它交给 CUA，并进入：
+
+```text
+predict → act → fresh observe → fold → verify
+```
+
+所以真正缺少的是：
+
+```text
+A2UI control/action
+↓
+TaskVM LocalPatch / GoalPatch / Rollback / Checkpoint
+```
+
+而不是再增加一个每次修改都调用的“自然语言翻译模型”。
+
+---
+
+# 十、LocalPatch 和 GoalPatch 应该分别怎么处理
+
+## 局部变量修改
+
+例如用户把发布日期从 8 月 14 日改成 8 月 18 日。
+
+A2UI action：
+
+```json
+{
+  "name": "taskvm.local_patch",
+  "context": {
+    "semanticKey": "release_date",
+    "newValue": {
+      "path": "/variables/release_date/desired"
+    }
+  }
+}
+```
+
+映射到现有：
+
+```text
+POST /api/sessions/<sid>/governance/local_patch
+```
+
+现有代码：
+
+```text
+taskvm/governance/service.py:145-160
+```
+
+会：
+
+- 生成 LocalPatch；
+- retarget 尚未提交的 ActionContract；
+- 不调用 Architect；
+- 后续 Runtime 把更新后的 ActionContract 发给 CUA。
+
+这是正确的。
+
+## 目标重构
+
+例如用户从：
+
+```text
+把发布日改到 8 月 18 日
+```
+
+改成：
+
+```text
+发布日仍是 8 月 18 日，但必须在发布前两天通知所有负责人
+```
+
+A2UI action：
+
+```json
+{
+  "name": "taskvm.goal_patch",
+  "context": {
+    "goal": {
+      "path": "/goalDraft"
+    },
+    "constraints": {
+      "path": "/constraintsDraft"
+    }
+  }
+}
+```
+
+映射到：
+
+```text
+POST /api/sessions/<sid>/governance/goal_patch
+```
+
+现有：
+
+```text
+taskvm/governance/service.py:162-180
+```
+
+会：
+
+- invalidate 未提交未来；
+- 保留 committed history；
+- 调用 `TaskArchitect.recompose_future()`；
+- 生成新的 Workflow 和 ActionContracts；
+- 安装新的 ProjectionSchema。
+
+接入 A2UI 后，还应再调用一次 GenUI Decoder，生成新的 `updateComponents`，必要时重建 Surface。
+
+---
+
+# 十一、正常状态变化不应该重新调用 GPT
+
+这点对 TaskVM 特别重要。
+
+第一次任务创建：
+
+```text
+StateCompiler       1 次
+TaskArchitect       1 次
+GenUI Decoder       1 次
+```
+
+普通 GUI 执行后状态变化：
+
+```text
+StateCompiler fast-path / deterministic extraction
+TaskArchitect       0 次
+GenUI Decoder       0 次
+updateDataModel     直接发送
+```
+
+LocalPatch：
+
+```text
+TaskArchitect       0 次
+GenUI Decoder       通常 0 次
+CUA                 执行修改
+updateDataModel     更新
+```
+
+GoalPatch 或结构性变化：
+
+```text
+TaskArchitect       1 次
+GenUI Decoder       1 次
+updateComponents    更新结构
+updateDataModel     更新数据
+```
+
+这正是 A2UI 把结构和数据分开的价值：普通值变化只发 `updateDataModel`，不需要重新生成整棵 UI。官方协议和 Renderer 都围绕这种增量状态管理设计。
+
+---
+
+# 十二、模型应当返回什么
+
+Task Architect 不返回 A2UI；GenUI Decoder 才返回 A2UI。
+
+下面这段是符合仓库 vendored v0.9 schema 的 TaskVM 示例，我也用当前仓库 validator 验证通过了：
+
+```jsonl
+{"version":"v0.9","createSurface":{"surfaceId":"taskvm-task","catalogId":"https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json","sendDataModel":true}}
+{"version":"v0.9","updateComponents":{"surfaceId":"taskvm-task","components":[{"id":"root","component":"Column","children":["summary_card","edit_card"],"align":"stretch"},{"id":"summary_card","component":"Card","child":"summary_col"},{"id":"summary_col","component":"Column","children":["title","observed"],"align":"stretch"},{"id":"title","component":"Text","text":"发布准备","variant":"h2"},{"id":"observed","component":"Text","text":{"path":"/variables/release_date/observed"},"variant":"body"},{"id":"edit_card","component":"Card","child":"edit_col"},{"id":"edit_col","component":"Column","children":["target_date","apply_label","apply_button"],"align":"stretch"},{"id":"target_date","component":"DateTimeInput","label":"发布日期","value":{"path":"/variables/release_date/desired"},"enableDate":true,"enableTime":false},{"id":"apply_label","component":"Text","text":"应用修改","variant":"body"},{"id":"apply_button","component":"Button","child":"apply_label","variant":"primary","action":{"event":{"name":"taskvm.local_patch","context":{"semanticKey":"release_date","newValue":{"path":"/variables/release_date/desired"}}}}}]}}
+{"version":"v0.9","updateDataModel":{"surfaceId":"taskvm-task","path":"/","value":{"variables":{"release_date":{"observed":"2026-08-14","desired":"2026-08-18"}}}}}
+```
+
+用户在 DateTimeInput 里修改日期，只改变浏览器本地 Data Model。
+
+点击“应用修改”后，Renderer 发回：
+
+```json
+{
+  "name": "taskvm.local_patch",
+  "surfaceId": "taskvm-task",
+  "sourceComponentId": "apply_button",
+  "context": {
+    "semanticKey": "release_date",
+    "newValue": "2026-08-18"
+  }
+}
+```
+
+然后进入现有 LocalPatch → Serializer → CUA 链路。
+
+---
+
+# 十三、本地需要的不是素材库，而是 Catalog
+
+你的场景不需要先建设图片素材库。
+
+TaskVM 动态区主要展示的是：
+
+- 文本；
+- 任务变量；
+- 日期；
+- 状态；
+- 选项；
+- checkpoint；
+- 风险；
+- 当前值与目标值；
+- live screenshot。
+
+这些都不依赖传统素材库。
+
+真正需要的是：
+
+## 必需
+
+```text
+A2UI schema
+Component Catalog
+MessageProcessor
+Renderer
+Action Registry
+Schema Validator
+DataModel Store
+```
+
+## 可选
+
+```text
+图标
+品牌插图
+背景
+产品图片
+Asset Registry
+```
+
+而且 TaskVM 已经有：
+
+```text
+/api/sessions/<sid>/artifacts/<ref>
+```
+
+可以提供 CUA 截图和 verifier 证据。需要在 A2UI 中显示时，可使用一个本地 `LiveArtifact` 组件，输入 `artifactRef`，由 Renderer 自己解析，不需要模型知道真实文件路径。
+
+---
+
+# 十四、推荐的 TaskVM Catalog
+
+第一阶段可以直接用 Basic Catalog：
+
+```text
+Text
+Row
+Column
+Card
+List
+Tabs
+Divider
+Button
+TextField
+DateTimeInput
+ChoicePicker
+CheckBox
+Slider
+Modal
+Image
+Icon
+```
+
+官方 Web Renderer 使用 MessageProcessor 处理消息、surface、组件树和 Data Model，React Renderer 负责把 Catalog 映射为真实组件。
+
+第二阶段再增加少量 TaskVM 领域组件：
+
+```text
+TaskStatusCard
+VariableComparison
+EvidenceBadge
+RiskBadge
+WorkflowMiniMap
+CheckpointTimeline
+ConflictResolutionCard
+LiveArtifact
+```
+
+这些必须是：
+
+- 跨 app 的；
+- 跨任务的；
+- substrate-neutral 的。
+
+不要定义：
+
+```text
+WechatMessageEditor
+AlipayTransferCard
+CalendarReleaseDateControl
+```
+
+否则又回到了场景特异模板。
+
+---
+
+# 十五、具体应该改哪些代码
+
+## 1. 新增生产级 GenUI 模块
+
+建议：
+
+```text
+taskvm/genui/
+├── __init__.py
+├── decoder.py
+├── schema_manager.py
+├── validator.py
+├── action_router.py
+└── catalog/
+    ├── taskvm_catalog.json
+    └── examples/
+```
+
+不要让生产代码 import：
+
+```python
+taskvm_bench.benchmark.a2ui_schema_manager
+```
+
+而是把可复用实现提升到 `taskvm/genui`。
+
+## 2. 修正 A2UI prompt
+
+删除：
+
+```text
+editable
+dataBinding
+```
+
+改用：
+
+```json
+"value": {
+  "path": "/variables/xxx/desired"
+}
+```
+
+editable 权限不应由模型通过任意字段声明，而应由服务器根据 `TaskVariable.mutability` 决定：
+
+- readonly 变量只能生成 Text；
+- editable 变量才能生成输入控件；
+- validator 再检查控件绑定是否合法。
+
+## 3. 新增 Action allowlist
+
+模型只能输出：
+
+```text
+taskvm.local_patch
+taskvm.goal_patch
+taskvm.checkpoint
+taskvm.rollback
+taskvm.pause
+taskvm.resume
+taskvm.start
+```
+
+不能输出：
+
+```text
+send_message
+move_event
+toggle_like
+click_at
+wechat_send
+```
+
+这些都不属于 GenUI 层。
+
+## 4. 新增 A2UI endpoint
+
+例如：
+
+```text
+GET  /api/sessions/<sid>/a2ui/sse
+POST /api/sessions/<sid>/a2ui/action
+```
+
+或继续复用已有 SSE，但增加事件类型：
+
+```json
+{
+  "sse_type": "a2ui.message",
+  "detail": {
+    "version": "v0.9",
+    "updateDataModel": {}
+  }
+}
+```
+
+## 5. 前端增加一个 A2UI island
+
+当前前端是纯 HTML + JavaScript，没有 `package.json`。
+
+最小侵入方案是：
+
+```text
+保留现有 TaskVM shell
++
+在中间增加 <div id="task-surface"></div>
++
+构建一个小型 React A2UI island
+```
+
+目录可以是：
+
+```text
+taskvm/workspace_ui/a2ui_client/
+├── package.json
+├── src/
+│   ├── main.tsx
+│   ├── TaskSurface.tsx
+│   ├── catalog.tsx
+│   └── actionBridge.ts
+└── dist/
+```
+
+React Renderer 和 `web_core` 可以处理 message processing、Data Model、组件树和 action forwarding；不需要自己重新实现整个协议。
+
+## 6. 保留现有固定 dashboard
+
+不要一上来重写：
+
+```text
+Workflow
+Live Phone
+Checkpoints
+Conflicts
+Governance bar
+```
+
+先增加真正动态的 Task Surface，验证 P4。
+
+---
+
+# 十六、必须加的验收测试
+
+这次不能再以“后端出现 projection_schema 字段”作为完成标准。
+
+真正的 Definition of Done 应至少包括：
+
+1. **模型返回正式 A2UI JSONL，并通过官方 server-to-client schema 与 Catalog validator。**
+2. **浏览器真实消费 A2UI 消息，而不是重新从 variables 写模板。**
+3. **未见任务能够产生不同组件树，无需修改前端代码。**
+4. **日期变量自动呈现 DateTimeInput，枚举变量呈现 ChoicePicker，布尔变量呈现 CheckBox。**
+5. **Renderer 和 action router 中没有 `if app == "wechat"`、`if goal contains...`、`if semantic_key ==...`。**
+6. **用户编辑控件后产生结构化 LocalPatch，而不是自由文本。**
+7. **LocalPatch 最终进入现有 Serializer → CUA → fresh observe → verifier。**
+8. **普通 observed/desired 值变化只发送 `updateDataModel`，GenUI 模型调用数为零。**
+9. **GoalPatch 保留已提交历史，重新生成受影响 workflow，并更新 A2UI 结构。**
+10. **非法组件、非法绑定、readonly 变量上的输入控件和未知 action 全部在服务端拒绝。**
+11. **生产 `taskvm/` 仍然零 import `taskvm_bench/`。**
+12. **同一套 TaskVM Catalog 在 builtin_web、MobileGym 和 OSWorld 上不变。**
+
+---
+
+# 十七、最终回答你最后的几个判断
+
+### “后端已经真的会生成任务相关 UI 吗？”
+
+**它会生成任务相关的抽象 ProjectionSchema，但还不会生成完整、可直接渲染的控件 UI。**
+
+### “至少足够强的模型下，UI 灵活度足够吗？”
+
+**当前不够。** 模型被提示限制为五类抽象节点，组件 props 没有进入 domain，前端也不消费它。
+
+接入正式 A2UI 后，可以达到：
+
+> 模型根据任务选择控件、分组和结构；前端只做通用 Catalog 映射。
+
+但仍然会受到通用 Catalog 限制，这是安全设计，而不是错误。
+
+### “现在没有用到 A2UI Renderer，对吗？”
+
+**对。** 当前前端是固定 DOM + 手写 JavaScript，不是 A2UI MessageProcessor/Renderer。
+
+### “模型输出已经符合 A2UI，对吗？”
+
+**不对。** 当前生产模型输出是自定义 `ProjectionSchema`。真正的 A2UI 代码只存在于 benchmark scaffolding，而且 binding 指令中还混有 v0.8 风格的 `dataBinding`，需要修正。
+
+### “用户修改投影后，缺少把意图交给 CUA 的步骤吗？”
+
+**只缺前半段。**
+
+现有后半段已经是：
+
+```text
+LocalPatch / GoalPatch
+→ ActionContract
+→ ActionContractSerializer
+→ 自然语言 CUA goal
+→ GUI gestures
+→ verifier
+```
+
+现在应补的是：
+
+```text
+A2UI control
+→ A2UI action
+→ TaskVM governance event
+```
+
+而不是让 A2UI 再生成一段自由自然语言。
+
+---
+
+我还运行了仓库中的 Architect 和 Domain 定向测试，结果是 **30 项通过**。Projection 测试在当前检查环境里因未安装 Flask 无法完整收集；不过“前端未读取 projection_schema”“生产路径未调用 A2UI validator”“当前输出不是 A2UI”这几个结论已经可以由静态调用链和正式 schema 验证直接确定。
+
+
+【回答内容 轮数2.B】
+我已经把压缩包解开，并沿着以下主链做了交叉审阅：
+
+`历史大纲与对比研究 → 当前 contracts → .mrules 演进记录 → TaskArchitect → Kernel → Projection API → 浏览器前端 → 用户编辑 → CUA → 验证`
+
+这里先给出最重要的裁决。
+
+# 审计结论
+
+你最后那几个判断里，只有一部分成立。
+
+## 结论一：当前后端并没有真正生成可用的自适应 A2UI 控件
+
+当前 `TaskArchitect` 确实会让模型生成一个任务相关的“投影结构”，但它只是项目自定义的内部 DSL：
+
+```json
+{
+  "projection": {
+    "root": "...",
+    "components": [
+      {
+        "label": "...",
+        "type": "card|field|list|progress|note",
+        "binds": "...",
+        "editable": false,
+        "children": []
+      }
+    ]
+  }
+}
+```
+
+证据在：
+
+```text
+taskvm/architect/architect.py:72-112
+```
+
+它只有五种抽象类型：
+
+```text
+card
+field
+list
+progress
+note
+```
+
+这意味着模型目前不能真正选择：
+
+```text
+TextField
+ChoicePicker
+CheckBox
+Slider
+DateTimeInput
+Tabs
+Modal
+Button
+Image
+Row
+Column
+Card
+```
+
+也不能定义 A2UI action、data binding、surface、catalog、增量更新。
+
+所以当前后端的真实状态是：
+
+> 模型生成“任务信息架构草图”，不是生成完整的 Agentic GenUI 控件树。
+
+---
+
+## 结论二：当前模型输出不符合 A2UI v0.9
+
+这是一个明确的 **否**。
+
+A2UI v0.9 服务端消息必须是以下四种之一：
+
+```text
+createSurface
+updateComponents
+updateDataModel
+deleteSurface
+```
+
+并带：
+
+```json
+{
+  "version": "v0.9"
+}
+```
+
+A2UI 把组件结构和 Data Model 分开；用户行为则以独立的客户端 action 消息返回服务器。
+
+当前 `TaskArchitect` 输出没有：
+
+```text
+version
+createSurface
+updateComponents
+updateDataModel
+deleteSurface
+surfaceId
+catalogId
+A2UI component 名称
+action.event
+JSON Pointer binding
+```
+
+所以不能说：
+
+> 虽然还没有 A2UI Renderer，但模型已经在输出 A2UI。
+
+更准确的说法是：
+
+> 当前模型输出的是 TaskVM 自定义 ProjectionSchema，它和 A2UI 在“组件树+绑定”的概念上相似，但协议上完全不是 A2UI。
+
+两者的关系类似：
+
+```text
+当前 ProjectionSchema = 内部 UI 草图 DSL
+A2UI                  = 可验证、可传输、可执行的正式 UI 协议
+```
+
+---
+
+## 结论三：即使这个内部 ProjectionSchema 已经由模型生成，当前前端也没有渲染它
+
+这是仓库里最关键的接线缺口。
+
+后端已经把 schema 暴露到 snapshot：
+
+```text
+taskvm/projection/view_models.py:109-138
+```
+
+包括：
+
+```json
+{
+  "projection_schema": {
+    "root_id": "...",
+    "components": [...]
+  },
+  "projection_data": {
+    "values": {...},
+    "progress": ...
+  }
+}
+```
+
+但是浏览器的：
+
+```text
+taskvm/workspace_ui/static/js/taskvm.js:198-205
+```
+
+只执行：
+
+```js
+renderGovernance();
+renderVariables();
+renderWorkflow();
+renderSurfaces();
+renderCheckpoints();
+renderConflicts();
+```
+
+它没有读取：
+
+```js
+snapshot.projection_schema
+snapshot.projection_data
+```
+
+甚至整个 `taskvm.js` 中没有真正的 schema renderer。
+
+当前变量渲染也始终是固定形式：
+
+```text
+taskvm/workspace_ui/static/js/taskvm.js:235-263
+```
+
+所有 editable variable 都被渲染成：
+
+```html
+<input type="text">
+<button>Set</button>
+```
+
+不管变量是：
+
+```text
+日期
+布尔值
+人员选择
+优先级
+枚举状态
+金额
+多选列表
+```
+
+全都是文本框。
+
+所以你问：
+
+> 任务相关 area 的前端灵活度是否完全只受模型能力制约，而不受 TaskVM harness 前端掣肘？
+
+当前答案仍然是：
+
+> **不是。现在它主要受 harness 前端掣肘，甚至模型生成的内部组件树都没有被消费。**
+
+---
+
+## 结论四：当前启动路径还会把模型生成的 schema 丢掉
+
+`TaskArchitect.compose()` 已经返回：
+
+```text
+arch.variables
+arch.graph
+arch.schema
+```
+
+但当前 workspace 的 real-full bootstrap 是：
+
+```python
+arch = architect.compose(intent, compiler_result)
+kernel = TaskVMKernel(sid, intent)
+kernel.init_task_state(arch.variables)
+
+if arch.graph is not None:
+    kernel.set_plan(arch.graph)
+```
+
+位置：
+
+```text
+taskvm/workspace_ui/composition.py:695-700
+```
+
+这里没有传：
+
+```python
+arch.schema
+```
+
+而 Kernel 明明支持：
+
+```python
+kernel.set_plan(graph, schema)
+```
+
+`GovernanceService.initialize()` 的另一条路径就是正确的：
+
+```python
+self._kernel.set_plan(
+    architecture.graph,
+    architecture.schema,
+)
+```
+
+位置：
+
+```text
+taskvm/governance/service.py:86-95
+```
+
+所以目前还有一个内部接线不一致：
+
+```text
+GovernanceService 初始化路径：保留 schema
+workspace bootstrap_real_full：丢掉 schema
+```
+
+这不是模型能力问题，是纯 harness bug。
+
+---
+
+# 仓库历史为什么会让人以为 A2UI 已经做完
+
+你这次压缩包里的 `.mrules.log` 把历史交代得很清楚。
+
+## E10：发现 GenUI 和 GUI Agent 都是占位符
+
+`.mrules.log` 的 E10 明确承认：
+
+> GUI Agent 执行器和 GenUI 解码器曾经都没有真实实现，分别是 API 后门和硬编码模板。
+
+## E11：后来确实实现过一个真正的 A2UI GenUI Decoder
+
+E11 记录了一个：
+
+```text
+taskvm/workspace_ui/genui_decoder.py
+```
+
+它当时会：
+
+```text
+输入 VM-state
+→ 真实调用模型
+→ 输出 A2UI v0.9 JSONL
+→ render_a2ui_to_html 薄渲染
+```
+
+而且后面一度接进了 live server。
+
+## E52：这个实现后来又被删除了
+
+最关键的是：
+
+```text
+.mrules.log:3428-3434
+```
+
+E52 在清理 legacy cluster 时删除了：
+
+```text
+workspace_ui/server.py
+workspace_ui/renderer.py
+workspace_ui/editable_components.py
+workspace_ui/genui_decoder.py
+workspace_ui/live_sync.py
+```
+
+留下：
+
+```text
+composition.py
+static/
+```
+
+因此当前仓库的真实演进是：
+
+```text
+最初：硬编码 UI
+  ↓
+E10 审计发现不真实
+  ↓
+E11：实现过真模型 A2UI Decoder
+  ↓
+后续：接入 live server
+  ↓
+E52：作为 legacy cluster 整体删除
+  ↓
+当前：TaskArchitect 输出内部 ProjectionSchema
+      固定 SPA 不消费该 schema
+```
+
+所以不是“从来没有实现过 A2UI”。
+
+而是：
+
+> **曾经实现并接通过一个版本，但在后续大重构中被删除，新的 Projection 架构没有把 A2UI 能力重新迁移回来。**
+
+这也解释了为什么文档、历史汇报和当前代码互相矛盾。
+
+---
+
+# 当前能力真值表
+
+| 能力 | 当前状态 | 判断 |
+|---|---|---|
+| CUA 看屏幕、点坐标、输入、滚动 | 已有通用闭环 | 真 |
+| TaskArchitect 动态生成任务 workflow | 已有真实模型调用 | 真 |
+| TaskArchitect 动态生成任务变量 | 已有 | 真 |
+| 模型生成内部 ProjectionSchema | 有，但仅五种抽象类型 | 部分真 |
+| 初始 workspace 正确安装 schema | `bootstrap_real_full` 会丢掉 | 否 |
+| 浏览器渲染内部 ProjectionSchema | 前端完全不消费 | 否 |
+| 模型输出正式 A2UI v0.9 | 当前 production 没有 | 否 |
+| A2UI schema 校验 | 只在 benchmark 工具中 | 未接 production |
+| 官方/正式 A2UI MessageProcessor | 没有 | 否 |
+| A2UI action → TaskVM governance | 尚未接线 | 否 |
+| UI 修改 → CUA 自然语言目标 | 已有 serializer | 真 |
+| 本地素材库 | 非必需 | 不构成阻塞 |
+
+---
+
+# 你担心的“用户意图重新翻译成自然语言再发给 CUA”其实已经有了
+
+这一点需要修正前面审计 agent 的判断。
+
+当前后端已经存在：
+
+```text
+taskvm/architect/serializer.py
+```
+
+核心函数：
+
+```python
+ActionContractSerializer.cua_goal(...)
+```
+
+位置：
+
+```text
+taskvm/architect/serializer.py:42-85
+```
+
+它会把结构化的：
+
+```text
+ActionContract
+semantic_goal
+desired_state
+visible target evidence
+completion condition
+reversibility
+risk note
+```
+
+确定性地序列化成 CUA 目标，例如：
+
+```text
+Target: '截止日期'.
+Goal: 将项目截止日期改为 2026-08-25。
+Set: 截止日期 = '2026-08-25'.
+Done when: 页面上显示新的截止日期。
+Operate the visible UI like a user would...
+```
+
+然后 Runtime 在：
+
+```text
+taskvm/runtime/autonomy.py:419-469
+```
+
+执行：
+
+```python
+goal = self._ser.cua_goal(contract, labels)
+
+decision = self._cua.predict_action(
+    goal=goal,
+    observation=latest_obs,
+    labels=labels,
+)
+```
+
+因此现在已经存在：
+
+```text
+结构化意图
+    ↓
+ActionContractSerializer
+    ↓
+自然语言 CUA goal
+    ↓
+CUA 看屏幕并操作
+```
+
+而且它是确定性的，不需要再额外调用一个 LLM 来“润色一次自然语言”。
+
+这其实是合理的。
+
+因为：
+
+```text
+用户在日期控件里选了 2026-08-25
+```
+
+本身已经是非常明确的结构化信息，没有必要再让另一个模型猜：
+
+> 用户到底想表达什么？
+
+正确链路应该是：
+
+```text
+A2UI DateTimeInput
+    ↓
+结构化 action context
+    ↓
+LocalPatch
+    ↓
+Kernel retarget
+    ↓
+ActionContract
+    ↓
+确定性 serializer
+    ↓
+CUA goal
+    ↓
+GUI 操作
+```
+
+不应该是：
+
+```text
+A2UI 控件
+    ↓
+先转成一段模糊自然语言
+    ↓
+再让另一个模型重新理解
+    ↓
+再产生操作目标
+```
+
+后者会平白增加语义漂移。
+
+---
+
+# A2UI 在 TaskVM 里最合适的位置
+
+A2UI 不应该替代 CUA，也不应该替代 TaskVM Kernel。
+
+它应该替代的是：
+
+> 当前固定的 `Task Variables` 面板，以及没有被消费的内部 ProjectionSchema 渲染层。
+
+推荐架构是：
+
+```text
+┌──────────────────────────────────────────────────────┐
+│ 固定 TaskVM Governance Shell                        │
+│                                                      │
+│ Goal / Start / Pause / Resume                       │
+│ Workflow / Checkpoints / Conflicts                  │
+│ Live Phone / Evidence / Verification                │
+│                                                      │
+│ 这些可以保持固定布局，不需要让模型自由生成            │
+├──────────────────────────────────────────────────────┤
+│ Dynamic Task Surface                                │
+│                                                      │
+│ VM-state + Workflow + Governance capabilities       │
+│                    ↓                                 │
+│              GenUI Decoder                          │
+│                    ↓                                 │
+│             A2UI v0.9 messages                      │
+│                    ↓                                 │
+│          A2UI MessageProcessor                      │
+│                    ↓                                 │
+│          Local trusted component catalog            │
+│                    ↓                                 │
+│       任务相关表单、卡片、列表、选择器、状态面板       │
+└──────────────────────────────────────────────────────┘
+                         │
+                         │ A2UI action
+                         ▼
+┌──────────────────────────────────────────────────────┐
+│ Action Router                                        │
+│                                                      │
+│ set_variable      → LocalPatch                       │
+│ change_goal       → GoalPatch                        │
+│ checkpoint        → CheckpointRequested              │
+│ rollback          → RollbackRequested                │
+│ resolve_conflict  → ConflictResolutionRequested      │
+└────────────────────────┬─────────────────────────────┘
+                         ▼
+                      Kernel
+                         ▼
+                  ActionContract
+                         ▼
+          ActionContractSerializer.cua_goal()
+                         ▼
+                       CUA
+                         ▼
+                  Real App GUI
+                         ▼
+                fresh observe / verify
+                         ▼
+              updateDataModel / UI delta
+```
+
+这才是你最初构想的：
+
+```text
+User
+↕
+Agentic GenUI
+↕
+Shared VM-state
+↕
+GUI Agent
+↕
+Real apps
+```
+
+---
+
+# “灵活度应该完全只受模型能力制约”需要稍微改写
+
+你的核心意图是对的：
+
+> 不应该由 TaskVM 为每个任务硬编码页面结构。
+
+但生产系统中，灵活度也不能真的“只受模型能力制约”。
+
+正确边界应该是：
+
+```text
+模型能力
++
+受信任组件 Catalog
++
+协议 Schema
++
+TaskVM 权限与治理约束
+```
+
+也就是说：
+
+> **模型应自由决定使用哪些允许的组件、如何组合、绑定什么变量、暴露什么语义操作；但不能自由生成 HTML、JavaScript、坐标操作或任意后端接口。**
+
+A2UI 的官方设计正是这种模式：Agent 输出声明式消息，客户端只渲染受信任 Catalog 中的组件。官方 React Renderer 提供 `MessageProcessor`、Surface 渲染组件和 Catalog 扩展机制。
+
+因此可以固定：
+
+```text
+TaskVM 顶栏
+Workflow
+Checkpoint
+Live Phone
+Verifier
+Conflict panel
+```
+
+只把中间的任务 area 交给 A2UI。
+
+这不会降低 Agentic GenUI 的成立性。
+
+论文或系统 claim 可以是：
+
+> 固定治理外壳中的任务相关交互面，由模型根据实时 VM-state 动态编译。
+
+而不是必须声称：
+
+> 整个网页的每个像素都由模型决定。
+
+---
+
+# A2UI 可以解决什么，不能解决什么
+
+## A2UI 能解决
+
+### 1. 任务相关控件动态生成
+
+同一个 `due_date` 变量，模型可以输出：
+
+```text
+DateTimeInput
+```
+
+而不是固定文本框。
+
+同一个 `assignee` 可以输出：
+
+```text
+ChoicePicker
+```
+
+一个多任务批处理可以输出：
+
+```text
+List + CheckBox + Button
+```
+
+一个转账审查任务可以输出：
+
+```text
+Card + List + Text + ChoicePicker + confirmation Button
+```
+
+### 2. 结构和数据分离
+
+第一次：
+
+```text
+createSurface
+updateComponents
+updateDataModel
+```
+
+之后世界状态变化时只发：
+
+```text
+updateDataModel
+```
+
+不需要每次重新让模型生成整个页面。
+
+这是 A2UI 的核心价值之一。
+
+### 3. 用户操作结构化返回
+
+A2UI v0.9 的客户端 action 包含：
+
+```json
+{
+  "version": "v0.9",
+  "action": {
+    "name": "set_variable",
+    "surfaceId": "task_surface",
+    "sourceComponentId": "due_date_editor",
+    "timestamp": "...",
+    "context": {
+      "semantic_key": "due_date",
+      "value": "2026-08-25"
+    }
+  }
+}
+```
+
+这可以直接转成：
+
+```python
+LocalPatchRequested(
+    updates={"due_date": "2026-08-25"}
+)
+```
+
+不需要重新自然语言理解。
+
+### 4. 本地 Design System
+
+同一份 A2UI：
+
+```json
+{
+  "component": "Button",
+  "variant": "primary"
+}
+```
+
+实际可以映射成 TaskVM 自己的按钮样式。
+
+模型不需要知道：
+
+```text
+CSS
+圆角
+颜色
+hover
+暗黑模式
+响应式断点
+```
+
+---
+
+## A2UI 不能解决
+
+### 1. 它不会替代 CUA
+
+A2UI 只描述 TaskVM 投影界面，不会自动点击微信、支付宝、日历。
+
+### 2. 它不会自动解决验证和回退
+
+A2UI Button 被点击，不代表真实世界写入成功。
+
+仍然必须：
+
+```text
+CUA 操作
+→ fresh observe
+→ verifier
+→ commit / repair / fail
+```
+
+### 3. 它不会自动消除 per-app 真实性问题
+
+对于：
+
+```text
+微信消息是否真的发出
+支付宝转账是否真的成功
+日历事件是否真的保存
+```
+
+仍然要有可信证据。
+
+验证器可以逐步做得更通用、更视觉化，但不能简单相信 CUA 自报成功。
+
+### 4. 它不应该携带坐标或 app 内部操作
+
+A2UI action 应该是：
+
+```text
+set_variable
+change_goal
+rollback
+confirm
+resolve_conflict
+```
+
+而不应该是：
+
+```text
+click_wechat_send
+tap_320_840
+call_mutate_wechat
+```
+
+否则又会把 GUI 层的 app 特异性泄漏到投影层。
+
+---
+
+# 不需要本地“素材库”，需要的是本地组件 Catalog
+
+这是两个不同概念。
+
+## 第一版不需要
+
+```text
+产品图片库
+头像库
+插画库
+背景素材库
+大量图标素材
+```
+
+你当前仓库已经带了官方 v0.9 Basic Catalog schema：
+
+```text
+docs/A2UI-protocol-spec/v0_9/catalogs_basic/catalog.json
+```
+
+里面有大约这些基础组件：
+
+```text
+Text
+Image
+Icon
+Video
+AudioPlayer
+Row
+Column
+List
+Card
+Tabs
+Modal
+Divider
+Button
+TextField
+CheckBox
+ChoicePicker
+Slider
+DateTimeInput
+```
+
+输入组件支持数据绑定，Button 可以分发 action；这正适合 TaskVM 的 variable editing 与 governance action。
+
+所以 MVP 本地需要的是：
+
+```text
+A2UI component registry
+```
+
+例如：
+
+```ts
+const catalog = {
+  Text: TaskVMText,
+  Card: TaskVMCard,
+  Button: TaskVMButton,
+  TextField: TaskVMTextField,
+  ChoicePicker: TaskVMChoicePicker,
+  CheckBox: TaskVMCheckBox,
+  DateTimeInput: TaskVMDateTimeInput,
+  List: TaskVMList,
+  Progress: TaskVMProgress
+};
+```
+
+## 后续可以添加领域组件
+
+真正想超过纯 Basic Catalog，建议增加：
+
+```text
+TaskSummaryCard
+VariableEditor
+EvidenceCard
+TransactionPreview
+RiskWarning
+RollbackBoundary
+ConflictResolver
+CrossAppStatus
+VerificationResult
+BatchEditTable
+```
+
+这些才会让 TaskVM 的 Agentic UI 具有产品级表现。
+
+模型可以输出：
+
+```json
+{
+  "id": "transfer_review",
+  "component": "TransactionPreview",
+  "amount": {"path": "/variables/amount"},
+  "recipient": {"path": "/variables/recipient"},
+  "riskLevel": {"path": "/risk/level"}
+}
+```
+
+本地 Renderer 决定它的具体视觉效果。
+
+---
+
+# 推荐不要让现有 TaskArchitect 直接承担完整 A2UI 生成
+
+当前 contract 把：
+
+```text
+Workflow Architect
+GenUI structural decoder
+```
+
+合成了一个模型角色。
+
+这对小型内部 schema 尚可，但一旦接完整 A2UI，会让一次输出同时承担：
+
+```text
+变量发现
+workflow 拓扑
+ActionContract
+checkpoint
+reversibility
+projection component tree
+data binding
+action semantics
+A2UI protocol合法性
+```
+
+输出会非常大，修复也会互相干扰。
+
+更合适的拆法是两个阶段。
+
+## 阶段 A：TaskArchitect
+
+输入：
+
+```text
+Goal
+Compiled VM-state
+Committed history
+```
+
+输出：
+
+```text
+Task variables
+Workflow
+ActionContracts
+Checkpoint semantics
+Governance capabilities
+```
+
+它决定“任务是什么”。
+
+## 阶段 B：GenUIDecoder
+
+输入：
+
+```text
+TaskArchitecture
+Current VM-state
+Current workflow summary
+Editable variables
+Allowed governance actions
+A2UI Catalog
+```
+
+输出：
+
+```text
+A2UI v0.9 messages
+```
+
+它决定“任务应该如何让人操作”。
+
+链路：
+
+```text
+StateCompiler
+    ↓
+TaskArchitect
+    ↓
+TaskArchitecture
+    ↓
+GenUIDecoder
+    ↓
+A2UI Validator
+    ↓
+Renderer
+```
+
+只有以下情况需要重新调用 GenUIDecoder：
+
+```text
+首次任务创建
+GoalPatch
+变量集合或交互能力发生结构性变化
+原 surface 无法容纳新任务结构
+```
+
+普通世界状态变化：
+
+```text
+金额变了
+任务完成了
+验证状态变了
+进度变了
+```
+
+只发：
+
+```text
+updateDataModel
+```
+
+不产生模型调用。
+
+这也符合当前 `projection.md` 里“普通 data delta 不重新生成 schema”的设计原则。
+
+---
+
+# “重新交付”应该分成两种情况
+
+你提到用户“重新交付，想把这个东西转换为投影”，这里必须区分语义。
+
+## 情况一：用户修改现有字段
+
+例如：
+
+> 把会议时间改成下午三点。
+
+如果用户是在生成的时间控件里操作：
+
+```text
+DateTimeInput
+→ A2UI action
+→ LocalPatch
+→ ActionContract
+→ serializer
+→ CUA
+```
+
+不需要重新调用 TaskArchitect，也不需要自然语言 Intent Model。
+
+## 情况二：用户改变任务结构
+
+例如：
+
+> 不只是通知张伟，把所有参会人都通知一下，并且要求每个人回复确认。
+
+这不是局部变量修改，而是：
+
+```text
+GoalPatch
+```
+
+正确链路：
+
+```text
+用户自然语言
+    ↓
+GoalPatchRequested
+    ↓
+TaskArchitect.recompose()
+    ↓
+新 workflow / variables / contracts
+    ↓
+GenUIDecoder
+    ↓
+新的 A2UI component structure
+    ↓
+updateComponents / updateDataModel
+```
+
+这里需要重新生成投影，因为任务本身的结构已经变了。
+
+## 情况三：用户在 UI 里触发治理动作
+
+例如：
+
+```text
+回退到“发送消息之前”
+暂停
+继续
+解决冲突
+创建 checkpoint
+```
+
+应由 A2UI action 直接映射到已有的 GovernanceEvent：
+
+```text
+RollbackRequested
+PauseRequested
+ResumeRequested
+ConflictResolutionRequested
+CheckpointRequested
+```
+
+也不需要让模型重新猜意图。
+
+---
+
+# 建议的真实 A2UI 消息
+
+假设任务是：
+
+> 把项目截止日期改到 8 月 25 日，并通知张伟。
+
+GenUIDecoder 可以输出：
+
+```jsonl
+{"version":"v0.9","createSurface":{"surfaceId":"task_surface","catalogId":"https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json","sendDataModel":true}}
+{"version":"v0.9","updateComponents":{"surfaceId":"task_surface","components":[
+  {"id":"root","component":"Column","children":["summary","deadline_card","notify_card","apply"]},
+  {"id":"summary","component":"Text","text":"# 项目变更"},
+  {"id":"deadline_card","component":"Card","child":"deadline_editor"},
+  {"id":"deadline_editor","component":"DateTimeInput","label":"新截止日期","value":{"path":"/variables/due_date"}},
+  {"id":"notify_card","component":"Card","child":"notify_editor"},
+  {"id":"notify_editor","component":"CheckBox","label":"通知张伟","value":{"path":"/variables/notify_zhangwei"}},
+  {"id":"apply_label","component":"Text","text":"应用到真实应用"},
+  {"id":"apply","component":"Button","child":"apply_label","variant":"primary","action":{"event":{"name":"apply_task_changes","context":{
+    "due_date":{"path":"/variables/due_date"},
+    "notify_zhangwei":{"path":"/variables/notify_zhangwei"}
+  }}}}
+]}}
+{"version":"v0.9","updateDataModel":{"surfaceId":"task_surface","value":{
+  "variables":{
+    "due_date":"2026-08-25T17:00:00-03:00",
+    "notify_zhangwei":true
+  },
+  "workflow":{
+    "status":"ready"
+  }
+}}}
+```
+
+用户点击后客户端返回：
+
+```json
+{
+  "version": "v0.9",
+  "action": {
+    "name": "apply_task_changes",
+    "surfaceId": "task_surface",
+    "sourceComponentId": "apply",
+    "timestamp": "2026-08-19T12:00:00Z",
+    "context": {
+      "due_date": "2026-08-25T17:00:00-03:00",
+      "notify_zhangwei": true
+    }
+  }
+}
+```
+
+Action Router 再转换成：
+
+```python
+LocalPatchRequested(
+    updates={
+        "due_date": "2026-08-25T17:00:00-03:00",
+        "notify_zhangwei": True,
+    },
+    rationale="User applied changes from task surface",
+)
+```
+
+之后完全复用现有：
+
+```text
+Kernel
+→ ActionContract
+→ ActionContractSerializer
+→ CUA
+→ observe
+→ verify
+```
+
+---
+
+# 代码库应如何同步
+
+建议分成五个明确工作包，避免再出现“文档说做完了，production 其实没接”的情况。
+
+## P0：先统一文档真相
+
+需要同步：
+
+```text
+README.md
+docs/contracts/architect.md
+docs/contracts/projection.md
+docs/A2UI_开工大纲_v0_心智模型对齐版.md
+旧版大纲的历史状态标记
+.mrules.log
+```
+
+必须写清楚：
+
+```text
+当前 production 未输出 A2UI
+当前 SPA 未使用 A2UI Renderer
+当前内部 ProjectionSchema 未被前端消费
+E11 的 A2UI decoder 已在 E52 被删除
+taskvm_bench 中的 A2UI 工具不是 production integration
+```
+
+尤其是 `docs/contracts/architect.md` 里仍然残留对：
+
+```text
+workspace_ui/genui_decoder.py
+```
+
+的历史边界描述，但这个文件已经不存在，应修正。
+
+---
+
+## P1：先修复当前内部 schema 的断线
+
+即使马上做 A2UI，也应该先修：
+
+```python
+kernel.set_plan(arch.graph, arch.schema)
+```
+
+替换：
+
+```python
+kernel.set_plan(arch.graph)
+```
+
+并添加测试：
+
+```text
+TaskArchitect 返回 schema
+→ bootstrap_real_full
+→ kernel.projection().schema 非空
+→ snapshot.projection_schema 非空
+```
+
+这能让现有模型输出至少不被静默丢弃。
+
+---
+
+## P2：把 A2UI 能力从 benchmark 迁回 production
+
+目前正式 schema 管理器在：
+
+```text
+taskvm_bench/benchmark/a2ui_schema_manager.py
+taskvm_bench/benchmark/a2ui_spec.py
+```
+
+但 production 没有调用点。
+
+不应该让 `taskvm/` 反向 import `taskvm_bench/`。
+
+应建立类似：
+
+```text
+taskvm/genui/
+├─ decoder.py
+├─ prompt.py
+├─ schema_manager.py
+├─ validator.py
+├─ repair.py
+├─ action_router.py
+└─ surface_store.py
+```
+
+或者：
+
+```text
+taskvm/projection/a2ui/
+```
+
+把以下能力正式迁入：
+
+```text
+正式 v0.9 schema 注入
+Catalog 注入
+JSONL stream parser
+server_to_client schema validation
+client_to_server action validation
+component reference validation
+binding validation
+bounded repair
+surface state
+```
+
+A2UI v0.9 是 prompt-first 设计，但这并不意味着“只写 prompt、不验证”；官方演进说明强调了 prompt/schema 驱动的生成方式，客户端仍需按正式协议处理和校验消息。
+
+---
+
+## P3：增加真正的 Dynamic Task Surface
+
+建议不要立刻重写整个 SPA。
+
+保持当前固定 shell：
+
+```text
+Workflow
+TaskVM governance bar
+Live Phone
+Surfaces
+Checkpoints
+Conflicts
+```
+
+在中间增加：
+
+```html
+<section id="agentic-task-surface"></section>
+```
+
+然后用 React 单独 mount：
+
+```tsx
+<MessageProcessor ...>
+  <A2UISurface surfaceId="task_surface" />
+</MessageProcessor>
+```
+
+官方 React 实现提供 MessageProcessor、Surface 和可扩展 Catalog，适合将 A2UI 嵌进现有页面，而不是强迫你重写整个前端。
+
+依赖大致是：
+
+```bash
+npm install @a2ui/react @a2ui/web_core
+```
+
+若不愿引入 React，也可以写 vanilla renderer，但风险更高：
+
+```text
+data binding
+component graph
+action context resolution
+surface lifecycle
+incremental updates
+validation errors
+```
+
+都要自己实现。
+
+---
+
+## P4：接通 A2UI action 到 Governance
+
+建立明确 allowlist：
+
+```text
+set_variable
+apply_task_changes
+change_goal
+create_checkpoint
+rollback_to_checkpoint
+resolve_conflict
+pause_task
+resume_task
+```
+
+禁止模型生成：
+
+```text
+send_wechat_message
+toggle_x_like
+tap_screen
+call_mutate_api
+set_internal_entity_id
+```
+
+Action Router 只接受业务治理语义：
+
+```python
+A2UI action
+→ validated context
+→ GovernanceEvent
+```
+
+不能让模型通过 action name 绕开 Kernel 直接调 substrate。
+
+---
+
+## P5：补真正的端到端验收
+
+至少需要以下测试。
+
+### 结构生成
+
+```text
+不同任务
+→ 模型生成不同 A2UI 组件树
+→ 不是固定 Task Variables 文本框
+```
+
+### 协议合法性
+
+```text
+每条消息通过正式 v0.9 schema
+所有 child id 存在
+唯一 root
+binding 指向已知 Data Model
+component 只来自 Catalog
+```
+
+### 局部编辑闭环
+
+```text
+DateTimeInput 改值
+→ A2UI action
+→ LocalPatch
+→ ActionContract
+→ serializer
+→ CUA
+→ fresh observation
+→ verifier PASS
+→ updateDataModel
+```
+
+### GoalPatch 重组
+
+```text
+用户改变任务目标
+→ TaskArchitect recompose
+→ GenUIDecoder 新组件树
+→ updateComponents
+→ 旧的 committed history 保留
+```
+
+### 安全
+
+```text
+模型发未知 component
+模型发未知 action
+模型绑定 locked variable
+模型试图携带坐标或内部 operator
+模型引用任意外部 URL
+```
+
+都必须 fail closed 或 bounded repair。
+
+### 诚实回退
+
+```text
+A2UI 显示 rollback 按钮
+≠ 保证可回退
+```
+
+按钮可用性必须来自 Kernel 当前 checkpoint 和 reversibility 状态，而不是模型自行决定。
+
+---
+
+# 最终架构判断
+
+你最初设想的 Agentic UI 并不是：
+
+```text
+固定 dashboard
++
+模型动态填写几行字段名称
+```
+
+而应该是：
+
+```text
+真实世界状态
+    ↓
+StateCompiler
+    ↓
+Task VM-state
+    ↓
+TaskArchitect 生成任务语义
+    ↓
+GenUIDecoder 生成 A2UI
+    ↓
+模型选择任务相关控件和信息架构
+    ↓
+用户结构化修改
+    ↓
+Kernel 形成新的 desired state
+    ↓
+ActionContractSerializer 形成 CUA goal
+    ↓
+CUA 操作真实软件
+    ↓
+独立观察与验证
+    ↓
+A2UI updateDataModel 重投影
+```
+
+因此，对你最后一句话最准确的修正是：
+
+> 当前 TaskVM 的 TaskArchitect 已经具备一定的任务相关结构生成能力，但只输出五种内部抽象组件；该 schema 在 workspace 启动路径中还可能被丢弃，前端也完全没有消费。当前生产模型输出不符合 A2UI v0.9，正式 A2UI prompt/validator 只存在于 benchmark 目录。要实现你最初定义的 Agentic GenUI，应该保留固定治理外壳，新增一个真正由 A2UI 驱动的动态任务区域，并把 A2UI action 接到现有 LocalPatch/GoalPatch → ActionContractSerializer → CUA 链路上。
+
+这不是单纯“换一个 Renderer”就结束。
+
+真正缺失的是三段：
+
+```text
+TaskArchitecture / VM-state
+    → A2UI GenUI Decoder
+
+A2UI messages
+    → 浏览器 MessageProcessor / Renderer
+
+A2UI user action
+    → TaskVM Governance Action Router
+```
+
+而你担心的：
+
+```text
+结构化用户意图
+→ 自然语言 CUA 指令
+```
+
+这一段其实已经由 `ActionContractSerializer` 实现了，不需要再造一层自由文本翻译 Agent。
