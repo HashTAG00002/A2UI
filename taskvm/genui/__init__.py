@@ -8,23 +8,32 @@ plain JSON / value objects, no kernel references):
 - TaskSurfaceContextBuilder: public snapshot → model-facing context;
 - TaskDataModelProjector: context → deterministic A2UI data model;
 - validate_components: the two-layer gate (SDK schema + TaskVM policy);
+- baseline_components: the generic deterministic fallback surface;
+- GenUIDecoder (A4): the real model-backed decode loop — model call →
+  two-layer validation → one bounded repair → honest baseline fallback,
+  every provider request landing exactly one shared-ledger row
+  (role=genui_decoder);
 - SurfaceStore / SurfaceStoreRegistry: per-session ordered message
   stream (bootstrap + SSE tail);
 - schema: vendored-mirror → official a2ui-agent-sdk catalog/validator.
 
-The real model-backed decoder (A4) lives one wave ahead; this package
-deliberately ships without any model-call code so the deterministic half
-(§5 boundary: model generates structure, server owns facts) is fully
-testable first.
+The layer is a plain-JSON port layer (tests/genui/test_imports.py): the
+model port and ledger are INJECTED by the composition root — no taskvm
+layer is imported here, keeping substrate independence by construction.
 """
+from taskvm.genui.baseline import baseline_components
 from taskvm.genui.context import (
     TaskSurfaceContext, TaskSurfaceContextBuilder, SurfaceVariable,
 )
 from taskvm.genui.data_model import TaskDataModelProjector
+from taskvm.genui.decoder import (
+    DecodeAttempt, DecodeResult, GenUIDecoder, SOURCE_FALLBACK,
+    SOURCE_MODEL,
+)
 from taskvm.genui.policy import SurfacePolicy
 from taskvm.genui.protocol import (
     ACTION_LOCAL_PATCH, ALLOWED_SURFACE_ACTIONS, CATALOG_ID,
-    PROTOCOL_VERSION, surface_id_for_session,
+    GENUI_DECODER_MODEL_ROLE, PROTOCOL_VERSION, surface_id_for_session,
 )
 from taskvm.genui.store import SurfaceStore, SurfaceStoreRegistry
 from taskvm.genui.validator import (
@@ -36,7 +45,13 @@ __all__ = [
     "ALLOWED_SURFACE_ACTIONS",
     "CATALOG_ID",
     "ComponentValidationError",
+    "DecodeAttempt",
+    "DecodeResult",
+    "GENUI_DECODER_MODEL_ROLE",
+    "GenUIDecoder",
     "PROTOCOL_VERSION",
+    "SOURCE_FALLBACK",
+    "SOURCE_MODEL",
     "SurfacePolicy",
     "SurfaceStore",
     "SurfaceStoreRegistry",
@@ -44,6 +59,7 @@ __all__ = [
     "TaskDataModelProjector",
     "TaskSurfaceContext",
     "TaskSurfaceContextBuilder",
+    "baseline_components",
     "surface_id_for_session",
     "validate_components",
 ]
