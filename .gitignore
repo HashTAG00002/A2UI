@@ -29,6 +29,10 @@ node_modules/
 dist/
 build/
 
+# A2UI island build output (vite → taskvm/workspace_ui/static/a2ui/;
+# rebuild with `npm run build` in taskvm/workspace_ui/a2ui_client/)
+taskvm/workspace_ui/static/a2ui/
+
 
 # Secrets / local env
 .env

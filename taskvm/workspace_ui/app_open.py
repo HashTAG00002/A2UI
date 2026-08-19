@@ -75,6 +75,10 @@ from taskvm.workspace_ui.call_archive import maybe_recording_port
 from taskvm.workspace_ui.composition import (
     artifact_fingerprint, bootstrap_real_full,
 )
+from taskvm.workspace_ui.a2ui_transport import (
+    A2uiTransport, A2uiTransportError, compiler_stage_payload,
+    kernel_stage_payload, register_a2ui_routes,
+)
 from taskvm.workspace_ui.demo_open import (
     _ensure_mobilegym_bridge,          # closed-whitelist bridge glue
     _probe_observe,                    # one read-only observe() before serving
@@ -144,7 +148,8 @@ class AppState:
     def __init__(self, store: ProjectionSessionStore, *,
                  sid: str, bridge_url: str, sim_url: str,
                  model: str | None, surfaces: tuple[dict[str, str], ...],
-                 initial_app: str, offline: bool) -> None:
+                 initial_app: str, offline: bool,
+                 a2ui: A2uiTransport | None = None) -> None:
         self.store = store
         self.sid = sid
         self.bridge_url = bridge_url
@@ -153,6 +158,7 @@ class AppState:
         self.surfaces = surfaces          # discovered via the substrate port
         self.initial_app = initial_app    # "" ⇒ the provider's own default
         self.offline = offline
+        self.a2ui = a2ui                  # None ⇒ APP runs without island
         self._lock = threading.Lock()
         self._goals: list[dict[str, Any]] = []
         self._seq = 0
@@ -266,6 +272,24 @@ class AppState:
                     g["model_calls"] = model_calls
                     g["finished_at"] = time.time()
 
+    # ── the A2UI island's §20.1 progressive-plane signals ──────────
+    def a2ui_stage(self, stage: str, product: Any) -> None:
+        """composition ``on_stage`` → named SSE progress events (T1
+        variable labels from the compiler product, T2 DAG from the
+        kernel). Maps the two honest stage names onto the transport's
+        payload builders; never fabricates a third stage."""
+        if self.a2ui is None:
+            return
+        try:
+            if stage == "compiler":
+                self.a2ui.push_stage(self.sid, "t1",
+                                     compiler_stage_payload(product))
+            elif stage == "kernel":
+                self.a2ui.push_stage(self.sid, "t2",
+                                     kernel_stage_payload(product))
+        except Exception:
+            pass    # observability only — composition also guards this
+
     # ── the goal runner (one at a time; single world, single sid) ──────
     def run_goal(self, rec: dict[str, Any]) -> None:
         """Background: stop the old driver → drop the old session →
@@ -275,6 +299,10 @@ class AppState:
         ledger = ModelCallLedger()   # visible in the except path too —
         #                            failures still report what they cost
         self.attach_ledger(gid, ledger)
+        if self.a2ui is not None:
+            # T0 signal: the goal text the user actually submitted — the
+            # island morphs to its compile skeleton off THIS, not a guess
+            self.a2ui.push_stage(self.sid, "goal", {"goal": goal})
         try:
             with self._boot_lock:
                 # (a) retire the previous session honestly: stop its
@@ -289,6 +317,8 @@ class AppState:
                         except Exception:
                             pass        # best-effort; bootstrap proceeds
                     self.store.drop(self.sid)
+                    if self.a2ui is not None:
+                        self.a2ui.drop_session(self.sid)   # retire poller
                 # (b) the ONE composition: real substrate session →
                 # bootstrap_real_full (compiler + architect REAL calls).
                 cua_model = None
@@ -317,18 +347,29 @@ class AppState:
                     goal=goal, sid=self.sid, substrate=substrate,
                     ledger=ledger, store=self.store, model=self.model,
                     model_port=port, cua_model=cua_model,
-                    screenshot_sink=_sink)
+                    screenshot_sink=_sink, on_stage=self.a2ui_stage)
                 # (c) governance-bar probe: unified compiler+architect+CUA
                 # call count (read-only closure over the shared ledger).
                 sess = self.store.get(self.sid)
                 if sess is not None:
                     sess.model_call_probe = ledger.total
                     _ScreenshotPoller(self, self.sid, sess).start()
+                    if self.a2ui is not None:
+                        try:
+                            self.a2ui.attach_session(self.sid, sess)
+                        except A2uiTransportError:
+                            # the honest reason already rides an
+                            # a2ui_failed progress event; the goal itself
+                            # (kernel + runtime + fixed shell) is healthy
+                            pass
                 _ = bundle          # (bundle kept for debugging; the
                 #                      projection store is the UI's truth)
                 self.finish(gid, ok=True, model_calls=ledger.total())
         except Exception as e:      # honest failure — surfaced in the UI,
             #                       with the real cost of the failed attempt
+            if self.a2ui is not None:
+                self.a2ui.push_stage(self.sid, "goal_failed",
+                                     {"error": f"{type(e).__name__}: {e}"})
             self.finish(gid, ok=False,
                         error=f"{type(e).__name__}: {e}",
                         model_calls=ledger.total())
@@ -571,14 +612,16 @@ def main(argv: list[str] | None = None) -> None:
             state_shot = None
 
         store = ProjectionSessionStore()          # EMPTY — the hero state
+        a2ui = A2uiTransport(session_lookup=store.get)
         state = AppState(store, sid=args.sid, bridge_url=bridge_url,
                          sim_url=args.sim_url, model=args.model,
                          surfaces=surfaces, initial_app=initial_app,
-                         offline=args.offline)
+                         offline=args.offline, a2ui=a2ui)
         if state_shot is not None:
             state.push_screenshot(args.sid, state_shot[0], state_shot[1])
         app = serve(store)
         register_app_routes(app, store, state)
+        register_a2ui_routes(app, a2ui, store, state)
 
         print("=" * 62)
         print("  TaskVM APP (empty state — no goal yet)")
@@ -594,6 +637,9 @@ def main(argv: list[str] | None = None) -> None:
         print("  AutonomyRuntime) — same bootstrap_real_full as the bench.")
         print("  compiled to Ready; autonomy starts ONLY on the user's")
         print("  explicit Start (frozen POST /governance/start).")
+        print("  A2UI island (real stream): http://"
+              f"{(args.host if args.host != '0.0.0.0' else 'localhost')}"
+              f":{args.port}/a2ui")
         if spawned_bridge is not None:
             print("  bridge: SPAWNED by this APP (killed on exit)")
         print("=" * 62)

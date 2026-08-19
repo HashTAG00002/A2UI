@@ -765,6 +765,18 @@ def resolve_role_models(
     return table
 
 
+def _notify_stage(on_stage: Callable[[str, Any], None] | None,
+                  stage: str, product: Any) -> None:
+    """Best-effort stage notification (§20.1 progressive-plane signals):
+    a watcher failure is observability noise, never a pipeline failure."""
+    if on_stage is None:
+        return
+    try:
+        on_stage(stage, product)
+    except Exception:
+        pass    # see bootstrap_real_full docstring: not a pipeline stage
+
+
 # ── the genuine real-full composition bootstrap ─────────────────────
 
 def bootstrap_real_full(*, goal: str, sid: str,
@@ -781,7 +793,8 @@ def bootstrap_real_full(*, goal: str, sid: str,
                          success_criteria: tuple[str, ...] = (),
                          role_models: Mapping[str, str] | None = None,
                          screenshot_sink: Callable[
-                             [str, str, bytes], None] | None = None
+                             [str, str, bytes], None] | None = None,
+                         on_stage: Callable[[str, Any], None] | None = None
                          ) -> dict:
     """Natural-language goal → fresh observation → StateCompiler →
     TaskArchitect → Kernel → shared ledger → AutonomyRuntime → (optional)
@@ -815,6 +828,14 @@ def bootstrap_real_full(*, goal: str, sid: str,
     ``model_port`` may inject a scripted port for CONTRACT-WIRING tests;
     with the default ``HttpModelPort`` every call is a real provider
     request (provider availability is the caller's environment concern).
+
+    ``on_stage(stage, product)`` is an optional observability callback
+    fired at honest pipeline boundaries — ``"compiler"`` with the
+    CompilerResult and ``"kernel"`` with the initialized TaskVMKernel —
+    so the APP shell can push §20.1 progressive-plane signals (T1
+    variable labels / T2 DAG) as they actually happen. Best-effort: a
+    callback failure NEVER fails the bootstrap (it is not a pipeline
+    stage, it watches one).
     """
     from taskvm.domain.intent import TaskIntent
     from taskvm.kernel import TaskVMKernel
@@ -880,11 +901,13 @@ def bootstrap_real_full(*, goal: str, sid: str,
     compiler = StateCompiler(port, ledger, model=compiler_model)
     architect = TaskArchitect(port, ledger, model=architect_model)
     compiler_result = compiler.compile(view, intent)
+    _notify_stage(on_stage, "compiler", compiler_result)
     arch = architect.compose(intent, compiler_result)
     kernel = TaskVMKernel(sid, intent)
     kernel.init_task_state(arch.variables)
     if arch.graph is not None:
         kernel.set_plan(arch.graph)
+    _notify_stage(on_stage, "kernel", kernel)
     # Observed-plane wiring: the compiler product's handle cache (the
     # deterministic ``value_pattern`` re-reads) IS the production observation
     # path for the runtime — handed to the runtime seam through a
