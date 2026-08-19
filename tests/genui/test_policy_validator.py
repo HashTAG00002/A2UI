@@ -101,6 +101,26 @@ def test_positional_workflow_binding_rejected(context, valid_components):
     assert any("not a whitelisted path" in e for e in errors)
 
 
+def test_input_label_may_bind_label_plane(context, valid_components):
+    """A4 refinement: only the WRITE channel (``value``) of an input is
+    restricted to editable ``/desired`` planes — the label/display
+    channel may bind any whitelisted path (an input's label legitimately
+    shows the variable's label plane, keeping label changes at 0 GenUI
+    calls)."""
+    good = _replace(valid_components, "date_field",
+                    label={"path": "/variables/release_date/label"})
+    assert validate_components(good, context) == []
+
+
+def test_input_value_channel_still_restricted(context, valid_components):
+    """The write-channel restriction itself is unchanged: value bound to
+    the observed plane (or a readonly variable's desired) is rejected."""
+    bad = _replace(valid_components, "date_field",
+                   value={"path": "/variables/release_date/observed"})
+    assert any("may only bind /variables/<key>/desired" in e
+               for e in validate_components(bad, context))
+
+
 def test_display_text_may_bind_observed_plane(context, valid_components):
     """Read-only display is allowed to bind observed (only INPUTS are
     restricted to editable desired planes)."""

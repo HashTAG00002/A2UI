@@ -10,10 +10,11 @@ Checks:
 1. structure: exactly one root; children ids resolve; no orphans, no
    cycles; component count ≤ 80; tree depth ≤ 8; children are plain id
    arrays (template children are out of scope for wave 1);
-2. bindings: every ``{"path": ...}`` must address a whitelisted data-model
-   path; INPUT components (TextField/CheckBox/ChoicePicker/Slider/
-   DateTimeInput) may only bind ``/variables/<key>/desired`` of an
-   EDITABLE variable;
+2. bindings: every ``{"path": ...}"` must address a whitelisted data-model
+   path; the WRITE channel of INPUT components (TextField/CheckBox/
+   ChoicePicker/Slider/DateTimeInput — their ``value`` property) may only
+   bind ``/variables/<key>/desired`` of an EDITABLE variable (display
+   channels like ``label`` may bind any whitelisted path);
 3. actions: name must be in the surface allowlist (``taskvm.local_patch``
    only); governance names are rejected with an explicit
    governance-owned error; the action context's ``semanticKey`` must
@@ -221,7 +222,16 @@ class SurfacePolicy:
                         f"component {cid!r}: binding path {p!r} is not a "
                         "whitelisted path of the current data model")
             if ctype in INPUT_COMPONENT_TYPES:
-                for p in paths:
+                # Only the WRITE channel (the ``value`` property) is
+                # restricted: it may bind /variables/<key>/desired of an
+                # EDITABLE variable only. Display channels (``label`` and
+                # friends) may bind any whitelisted path — an input's
+                # label legitimately shows the variable's label plane.
+                value_binding = comp.get("value")
+                if isinstance(value_binding, dict) and \
+                        set(value_binding.keys()) == {"path"} and \
+                        isinstance(value_binding["path"], str):
+                    p = value_binding["path"]
                     if not (p.startswith("/variables/")
                             and p.endswith("/desired")):
                         errors.append(
