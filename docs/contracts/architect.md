@@ -45,7 +45,7 @@ C **复用** `TaskArchitecture` validating 构造器（A 的单一校验真源�
 
 ## 5. 模型调用预算（`ModelCallLedger`，benchmark 可审计）
 
-角色常量：`MODEL_ROLE_STATE_COMPILER = "state_compiler"`、`MODEL_ROLE_TASK_ARCHITECT = "task_architect"`、`MODEL_ROLE_CUA = "cua"`（CUA 侧由 Agent E 接入记账）。
+角色常量：`MODEL_ROLE_STATE_COMPILER = "state_compiler"`、`MODEL_ROLE_TASK_ARCHITECT = "task_architect"`、`MODEL_ROLE_CUA = "cua"`（CUA 侧由 Agent E 接入记账）、`MODEL_ROLE_MODEL_VERIFIER = "model_verifier"`（PURETY-GEN：模型化验证 `taskvm/verifier/model_verifier.py` 的记账角色——verifier 包以结构兼容的 record 行记账，不 import architect 层）。
 
 | 事件 | state_compiler | task_architect |
 |---|---|---|

@@ -34,8 +34,9 @@ from taskvm.architect.observation import (
     CompilerObservationView, HandleEvidence, VisibleRegion,
 )
 from taskvm.architect.port import (
-    MODEL_ROLE_CUA, MODEL_ROLE_STATE_COMPILER, MODEL_ROLE_TASK_ARCHITECT,
-    MODEL_ROLES, ModelCallLedger, ModelCallRecord, ModelPort, ModelReply,
+    MODEL_ROLE_CUA, MODEL_ROLE_MODEL_VERIFIER, MODEL_ROLE_STATE_COMPILER,
+    MODEL_ROLE_TASK_ARCHITECT, MODEL_ROLES, ModelCallLedger,
+    ModelCallRecord, ModelPort, ModelReply,
 )
 from taskvm.architect.serializer import (
     ActionContractSerializer, patchop_cua_goal,
@@ -54,7 +55,7 @@ __all__ = [
     # model port + accounting
     "ModelPort", "ModelReply", "ModelCallLedger", "ModelCallRecord",
     "MODEL_ROLE_STATE_COMPILER", "MODEL_ROLE_TASK_ARCHITECT",
-    "MODEL_ROLE_CUA", "MODEL_ROLES",
+    "MODEL_ROLE_CUA", "MODEL_ROLE_MODEL_VERIFIER", "MODEL_ROLES",
     "HttpModelPort", "HttpModelPortError",
     # no-leak gate
     "PromptLeakError", "assert_prompt_clean", "scan", "scan_json_values",

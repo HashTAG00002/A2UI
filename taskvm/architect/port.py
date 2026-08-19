@@ -24,9 +24,10 @@ from typing import Any, Protocol, runtime_checkable
 MODEL_ROLE_STATE_COMPILER = "state_compiler"
 MODEL_ROLE_TASK_ARCHITECT = "task_architect"
 MODEL_ROLE_CUA = "cua"
+MODEL_ROLE_MODEL_VERIFIER = "model_verifier"
 
 MODEL_ROLES = (MODEL_ROLE_STATE_COMPILER, MODEL_ROLE_TASK_ARCHITECT,
-               MODEL_ROLE_CUA)
+               MODEL_ROLE_CUA, MODEL_ROLE_MODEL_VERIFIER)
 
 
 @dataclass(frozen=True)
