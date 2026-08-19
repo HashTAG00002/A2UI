@@ -1,0 +1,303 @@
+/**
+ * tokens — TaskVM island visual language ("learn the Duolingo feel,
+ * never copy its assets" — workplan §11): large radii, tactile button
+ * base-edges, springy state changes, big unmissable statuses.
+ */
+
+:root {
+  /* palette */
+  --tv-bg: #f6f7fb;
+  --tv-card: #ffffff;
+  --tv-ink: #1c2333;
+  --tv-ink-soft: #5a6377;
+  --tv-line: #e3e7f0;
+  --tv-primary: #4f46e5;
+  --tv-primary-deep: #4338ca;
+  --tv-primary-soft: #eef0ff;
+  --tv-success: #16a34a;
+  --tv-success-soft: #e8f8ee;
+  --tv-warn: #d97706;
+  --tv-warn-soft: #fdf3e3;
+  --tv-danger: #dc2626;
+  --tv-danger-soft: #fdeaea;
+  --tv-muted: #9aa3b5;
+
+  /* shape — the big-radius card language */
+  --tv-radius-lg: 20px;
+  --tv-radius-md: 14px;
+  --tv-radius-pill: 999px;
+
+  /* tactile buttons: 3–4px "base edge", pressed sinks 2px */
+  --tv-btn-lift: 3px;
+  --tv-press: 2px;
+
+  /* motion */
+  --tv-spring: 420 30;
+}
+
+/* ── the fixed governance shell ─────────────────────────────────────── */
+
+.shell {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 20px 16px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.shell__bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.shell__brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.shell__logo {
+  color: var(--tv-primary);
+  font-size: 18px;
+}
+
+.shell__name {
+  font-size: 16px;
+  color: var(--tv-ink);
+}
+
+.shell__goal {
+  background: var(--tv-card);
+  border: 1px solid var(--tv-line);
+  border-radius: var(--tv-radius-lg);
+  padding: 18px 20px;
+  box-shadow: 0 6px 24px rgba(28, 35, 51, 0.06);
+}
+
+.shell__goal-label {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tv-ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.shell__goal-text {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 650;
+  line-height: 1.45;
+  color: var(--tv-ink);
+}
+
+.shell__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.gov-btn {
+  appearance: none;
+  border: 1px solid var(--tv-line);
+  border-radius: var(--tv-radius-md);
+  background: var(--tv-card);
+  color: var(--tv-ink);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 16px;
+  cursor: pointer;
+  box-shadow: 0 var(--tv-btn-lift) 0 rgba(28, 35, 51, 0.08);
+  transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+}
+
+.gov-btn:hover:not(:disabled) { transform: translateY(-1px); }
+
+.gov-btn:active:not(:disabled) {
+  transform: translateY(var(--tv-press));
+  box-shadow: 0 calc(var(--tv-btn-lift) - var(--tv-press)) 0 rgba(28, 35, 51, 0.08);
+}
+
+.gov-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.gov-btn--primary {
+  background: var(--tv-primary);
+  border-color: var(--tv-primary-deep);
+  color: #fff;
+  box-shadow: 0 var(--tv-btn-lift) 0 var(--tv-primary-deep);
+}
+
+.gov-btn--primary:active:not(:disabled) {
+  box-shadow: 0 calc(var(--tv-btn-lift) - var(--tv-press)) 0 var(--tv-primary-deep);
+}
+
+.gov-btn--danger {
+  color: var(--tv-danger);
+  border-color: #f3c1c1;
+  background: var(--tv-danger-soft);
+}
+
+.gov-btn--ghost {
+  border-style: dashed;
+  color: var(--tv-ink-soft);
+  box-shadow: none;
+}
+
+/* status pill */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  padding: 6px 14px;
+  border-radius: var(--tv-radius-pill);
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.pill__dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+
+.pill--compiling { background: var(--tv-primary-soft); color: var(--tv-primary); }
+.pill--ready { background: var(--tv-warn-soft); color: var(--tv-warn); }
+.pill--running { background: var(--tv-primary-soft); color: var(--tv-primary); }
+.pill--running .pill__dot { animation: tv-breathe 1.6s ease-in-out infinite; }
+.pill--paused { background: var(--tv-warn-soft); color: var(--tv-warn); }
+.pill--completed { background: var(--tv-success-soft); color: var(--tv-success); }
+.pill--failed { background: var(--tv-danger-soft); color: var(--tv-danger); }
+
+@keyframes tv-breathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.35); opacity: 0.6; }
+}
+
+/* checkpoint strip */
+.shell__checkpoints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.checkpoint-chip {
+  padding: 4px 12px;
+  border-radius: var(--tv-radius-pill);
+  background: var(--tv-success-soft);
+  color: var(--tv-success);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ── dynamic task region ────────────────────────────────────────────── */
+
+.shell__dynamic {
+  background: var(--tv-card);
+  border: 1px solid var(--tv-line);
+  border-radius: var(--tv-radius-lg);
+  padding: 20px;
+  min-height: 240px;
+}
+
+/* progressive plane */
+.plane { display: flex; flex-direction: column; gap: 18px; }
+
+.plane__compile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 34px 0 26px;
+}
+
+.pulse-node {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--tv-primary);
+  animation: tv-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes tv-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.35); }
+  50% { transform: scale(1.25); box-shadow: 0 0 0 12px rgba(79, 70, 229, 0); }
+}
+
+.plane__caption { margin: 0; font-size: 15px; font-weight: 650; color: var(--tv-ink); }
+.plane__hint { margin: 0; font-size: 12.5px; color: var(--tv-muted); }
+
+.plane__section-title {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--tv-ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* variable skeletons — labels only, values pending */
+.var-skeleton-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+
+.var-skeleton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border: 1px dashed var(--tv-line);
+  border-radius: var(--tv-radius-md);
+  background: #fafbff;
+}
+
+.var-skeleton__label { font-size: 14px; font-weight: 600; color: var(--tv-ink); }
+.var-skeleton__pending { color: var(--tv-muted); letter-spacing: 2px; }
+
+/* DAG */
+.dag-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+
+.wf-node {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--tv-radius-md);
+  border: 1px solid var(--tv-line);
+  background: var(--tv-card);
+}
+
+.wf-node__dot { font-size: 13px; line-height: 1; }
+.wf-node__label { font-size: 14px; font-weight: 600; color: var(--tv-ink); }
+.wf-node__kind { margin-left: auto; font-size: 11px; color: var(--tv-muted); }
+
+.wf-node--verification { border-left: 4px solid var(--tv-primary); }
+.wf-node--checkpoint { border-left: 4px solid var(--tv-success); background: var(--tv-success-soft); }
+.wf-node--step { border-left: 4px solid var(--tv-muted); }
+.wf-node--goal { border-left: 4px solid var(--tv-warn); }
+
+/* live surface + action echo */
+.plane--live { display: flex; flex-direction: column; gap: 12px; }
+
+.last-action {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border-radius: var(--tv-radius-md);
+  background: var(--tv-primary-soft);
+  color: var(--tv-primary-deep);
+  font-size: 12.5px;
+  font-family: ui-monospace, monospace;
+}
+
+/* A2UI renderer base styling inside the island */
+.plane--live :where(button) { font: inherit; }
+
+/* ── reduced motion: honor the OS preference everywhere ─────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .gov-btn, .gov-btn:hover:not(:disabled), .gov-btn:active:not(:disabled) {
+    transition: none;
+    transform: none;
+  }
+  .pulse-node, .pill--running .pill__dot { animation: none; }
+}
