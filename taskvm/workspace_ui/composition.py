@@ -60,6 +60,7 @@ from taskvm.runtime.ports import (
 from taskvm.substrate import (
     GUI_ACTION_KINDS, GuiAction, Observation, substrate_registry,
 )
+from taskvm.skills.loader import inject_skill
 from taskvm.verifier.visible import VisibleVerifier
 
 from taskvm.domain.state import ObservedValue, SurfaceEvidence, TaskVariable
@@ -156,8 +157,11 @@ class HttpCUAModel:
         if isinstance(ref, str) and ref.startswith("data:image/"):
             image = ref
         try:
-            assert_prompt_clean(_CUA_SYSTEM_PROMPT + "\n" + user,
-                                what="cua prompt")
+            # the skill injection (R2.5) happens BEFORE the gate, so a
+            # distilled skill is scanned like any other prompt text
+            assert_prompt_clean(
+                inject_skill("cua", _CUA_SYSTEM_PROMPT) + "\n" + user,
+                what="cua prompt")
         except Exception as e:  # a leak is a harness bug — fail honestly
             # No provider request was issued, so NO ledger row (rows
             # count real provider requests only).
@@ -165,9 +169,10 @@ class HttpCUAModel:
                                reason="指令生成内部错误，已安全终止")
         request_id = self._mint_request_id()
         try:
-            reply = self._port.complete_json(system=_CUA_SYSTEM_PROMPT,
-                                             user=user, model=model,
-                                             image_data_url=image)
+            reply = self._port.complete_json(
+                system=inject_skill("cua", _CUA_SYSTEM_PROMPT),
+                user=user, model=model,
+                image_data_url=image)
         except Exception as e:
             self._record(request_id, ok=False, error=str(e), model=model)
             raise

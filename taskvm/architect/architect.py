@@ -75,6 +75,7 @@ from taskvm.domain.workflow import (
     NodeKind, NodeStatus, WorkflowGraph, WorkflowNode,
 )
 from taskvm.kernel import WorkflowSnapshot
+from taskvm.skills.loader import inject_skill
 
 _REVERSIBILITY = {r.value: r for r in Reversibility}
 _NODE_KINDS = {k.value: k for k in NodeKind}
@@ -297,8 +298,11 @@ class TaskArchitect:
             # exact text about to go out. The leak repair note is token-free
             # (LEAK_REPAIR_GUIDANCE); any other note that unexpectedly
             # carries internal vocabulary fails honestly at this line.
-            assert_prompt_clean(_SYSTEM_PROMPT + "\n" + exact_user,
-                                what="task-architect prompt")
+            # The skill injection (R2.5) happens BEFORE the gate, so a
+            # distilled skill is scanned like any other prompt text.
+            assert_prompt_clean(
+                inject_skill("architect", _SYSTEM_PROMPT) + "\n" + exact_user,
+                what="task-architect prompt")
             reply = self._call_model(exact_user, purpose=purpose,
                                      is_repair=is_repair)
             parsed = reply.parsed
@@ -327,15 +331,16 @@ class TaskArchitect:
             f"last error: {last_err}")
 
     def _call_model(self, user: str, *, purpose: str, is_repair: bool):
+        system = inject_skill("architect", _SYSTEM_PROMPT)
         if self._ledger is None:
             return self._port.complete_json(
-                system=_SYSTEM_PROMPT, user=user, model=self._model)
+                system=system, user=user, model=self._model)
         from taskvm.architect.port import ModelCallRecord
         t0 = time.monotonic()
         reply = None
         try:
             reply = self._port.complete_json(
-                system=_SYSTEM_PROMPT, user=user, model=self._model)
+                system=system, user=user, model=self._model)
             return reply
         finally:
             self._ledger.record(ModelCallRecord(

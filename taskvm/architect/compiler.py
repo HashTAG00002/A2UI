@@ -47,6 +47,7 @@ from taskvm.domain.state import (
     MUTABILITY_EDITABLE, MUTABILITY_LOCKED, MUTABILITY_READONLY, ObservedValue,
     SurfaceEvidence, SurfaceHandle, TaskState, TaskVariable,
 )
+from taskvm.skills.loader import inject_skill
 
 _VALID_MUTABILITY = (MUTABILITY_EDITABLE, MUTABILITY_READONLY, MUTABILITY_LOCKED)
 _KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -147,8 +148,11 @@ class StateCompiler:
             # token-free (LEAK_REPAIR_GUIDANCE) so it can never trip here;
             # any other repair note that unexpectedly carries internal
             # vocabulary fails honestly at this line instead of shipping.
-            assert_prompt_clean(_SYSTEM_PROMPT + "\n" + exact_user,
-                                what="state-compiler prompt")
+            # The skill injection (R2.5) happens BEFORE the gate, so a
+            # distilled skill is scanned like any other prompt text.
+            assert_prompt_clean(
+                inject_skill("compiler", _SYSTEM_PROMPT) + "\n" + exact_user,
+                what="state-compiler prompt")
             reply = self._call_model(exact_user,
                                      purpose=purpose,
                                      is_repair=is_repair,
@@ -326,16 +330,17 @@ class StateCompiler:
 
     def _call_model(self, user: str, *, purpose: str, is_repair: bool,
                     revision: int, image_data_url: str | None):
+        system = inject_skill("compiler", _SYSTEM_PROMPT)
         if self._ledger is None:
             return self._port.complete_json(
-                system=_SYSTEM_PROMPT, user=user, model=self._model,
+                system=system, user=user, model=self._model,
                 image_data_url=image_data_url)
         from taskvm.architect.port import ModelCallRecord
         t0 = time.monotonic()
         reply = None
         try:
             reply = self._port.complete_json(
-                system=_SYSTEM_PROMPT, user=user, model=self._model,
+                system=system, user=user, model=self._model,
                 image_data_url=image_data_url)
             return reply
         finally:

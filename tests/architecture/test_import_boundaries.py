@@ -54,7 +54,15 @@ _RULES: dict[str, PkgRule] = {
         banned_taskvm_prefixes=_CONCRETE_SUBSTRATES),
     "taskvm/architect": PkgRule(stdlib_only=True,
                                 allowed_taskvm=("taskvm.domain",
-                                                "taskvm.kernel")),
+                                                "taskvm.kernel",
+                                                # R2.5 Skill-Ladder (bench_
+                                                # design §17.2 / master
+                                                # handover §4 R2.5 card):
+                                                # the frozen-layer prompt
+                                                # assembly points route
+                                                # system prompts through
+                                                # the skill loader.
+                                                "taskvm.skills")),
     "taskvm/projection": PkgRule(
         stdlib_only=False,   # the Flask layer
         allowed_taskvm=("taskvm.domain", "taskvm.kernel", "taskvm.architect",
@@ -67,8 +75,15 @@ _RULES: dict[str, PkgRule] = {
     # 仅 taskvm.domain + 标准库 — the runtime-visible verifier consumes
     # fresh observations + ActionContract handed in by the runtime; it
     # needs no kernel, no substrate, no architect.
+    # R2.5 amendment (bench_design §17.2, the R2.5 card as RFC): the
+    # verifier's prompt assembly may read the skill loader too.
     "taskvm/verifier": PkgRule(stdlib_only=True,
-                               allowed_taskvm=("taskvm.domain",)),
+                               allowed_taskvm=("taskvm.domain",
+                                               "taskvm.skills")),
+    # R2.5 Skill-Ladder: the knowledge-asset package — a stdlib-only
+    # LEAF every prompt-assembling layer may read; it imports nothing
+    # above stdlib, so no reverse dependency can grow here.
+    "taskvm/skills": PkgRule(stdlib_only=True),
 }
 
 # legacy cross-layer concepts banned as identifiers in the new core

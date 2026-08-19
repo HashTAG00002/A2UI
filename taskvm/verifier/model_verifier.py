@@ -21,7 +21,9 @@ did NOT change (``not_yet``); it may NEVER produce the final verdict for
 Accounting: every REAL provider request lands exactly one ledger row with
 ``role="model_verifier"`` (registered in ``taskvm.architect.port.MODEL_ROLES``
 — a protocol-constant append, not a scenario enumeration). This package is
-pinned by the architecture gate to stdlib + ``taskvm.domain`` ONLY, so it
+pinned by the architecture gate to stdlib + ``taskvm.domain`` + the R2.5
+skill loader (``taskvm.skills`` — a stdlib-only leaf; bench_design §17.2,
+the R2.5 card as RFC), so it
 talks to the port and the ledger STRUCTURALLY (duck-typed Protocols, same
 call shapes as ``taskvm.architect.ModelPort`` / ``ModelCallLedger``) and
 never imports the architect layer — mirroring how ``visible.VisibleVerifier``
@@ -43,6 +45,8 @@ import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol, runtime_checkable
+
+from taskvm.skills.loader import inject_skill
 
 # ── the three-state verdict protocol (frozen: PURETY-GEN §4.2) ──────────────
 
@@ -204,11 +208,14 @@ class ModelVerifier:
         ref = getattr(observation, "screenshot_ref", None)
         if isinstance(ref, str) and ref.startswith("data:image/"):
             image = ref
-        # 3. no-leak gate (injected; runs BEFORE any provider request)
+        # 3. no-leak gate (injected; runs BEFORE any provider request) —
+        #    the skill injection (R2.5) happened above, so a distilled
+        #    skill is scanned like any other prompt text
         if self._prompt_gate is not None:
             try:
-                self._prompt_gate(_SYSTEM_PROMPT + "\n" + user,
-                                  what="verifier prompt")
+                self._prompt_gate(
+                    inject_skill("verifier", _SYSTEM_PROMPT) + "\n" + user,
+                    what="verifier prompt")
             except Exception:
                 return {"verdict": VERDICT_CANNOT_VERIFY,
                         "evidence": "指令生成内部错误，验证已安全终止"
@@ -218,7 +225,8 @@ class ModelVerifier:
         t0 = time.monotonic()
         try:
             reply = await asyncio.to_thread(
-                self._port.complete_json, system=_SYSTEM_PROMPT, user=user,
+                self._port.complete_json,
+                system=inject_skill("verifier", _SYSTEM_PROMPT), user=user,
                 model=self._model, image_data_url=image)
         except Exception as e:
             # infrastructure error — NOT a model capability bound; the row
