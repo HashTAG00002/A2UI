@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/dev.sh — TaskVM portable dev launcher (handoff 08 §可移植启动).
+# scripts/dev.sh — TaskVM portable dev launcher (portability rules below).
 #
 # Starts the builtin web apps (the demo substrate), then the TaskVM
 # projection server (python -m taskvm.workspace_ui.demo). Every service
