@@ -1,5 +1,10 @@
 # A2UI Agent implementation
 
+> **[TaskVM vendoring note — 2026-08-19]** This directory is **SDK reference
+> documentation, NOT a normative protocol specification**. The normative v0.9
+> protocol sources are `../docs/a2ui_protocol.md` + `../json/*.json`. See
+> `../SOURCE.txt` for the pinned upstream commit and file hashes.
+
 The `agent_sdks/python/a2ui_agent/src/a2ui` directory contains the Python implementation of
 the A2UI agent SDK.
 

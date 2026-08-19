@@ -1,9 +1,34 @@
 A2UI protocol v0.9 — official source files, fetched verbatim (no paraphrase) for
-cross-verification. Fetched via https://raw.githubusercontent.com (proxy: see
-~/.bashrc `proxy` alias) on 2026-08-11.
+cross-verification.
 
-Repo:   https://github.com/a2ui-project/a2ui  (branch: main)
-Site:   https://a2ui.org/specification/v0.9-a2ui/  (renders the same source via
+Pinned upstream (2026-08-19 refresh, A1 / workplan §7-P0):
+  Repo:         https://github.com/a2ui-project/a2ui  (branch: main)
+  Commit SHA:   1133490aac1ad45d12050a8b1f5499a0ac46e7ac
+                ("fix(swift): resolve only top-level path and call objects as
+                 bindings (#2326)", 2026-08-19T02:10:46Z)
+  Fetch date:   2026-08-19
+  Fetch method: local clone of upstream main at
+                /mnt/dolphinfs/ssd_pool/docker/user/hadoop-mt-ocr/yangwenkui03/a2ui_code/a2ui-main
+                (no .git dir; identity with the pinned commit verified by fetching
+                every vendored file from
+                https://raw.githubusercontent.com/a2ui-project/a2ui/<SHA>/<path>
+                through proxy http://10.70.16.106:3128 and diffing byte-for-byte:
+                11/11 json + 5/5 docs + catalog.json + rules.txt + README.md all
+                MATCH on 2026-08-19)
+  Original 2026-08-11 fetch: same repo via raw.githubusercontent.com (historical
+                commit unknown — superseded by the pinned 2026-08-19 refresh).
+
+What the 2026-08-19 refresh changed (vs the 2026-08-11 fetch):
+  ADDED   v0_9/json/client_to_server_list.json
+  ADDED   v0_9/json/client_to_server_list_wrapper.json
+  ADDED   v0_9/json/server_to_client_list.json
+  ADDED   v0_9/json/server_to_client_list_wrapper.json
+  UPDATED v0_9/docs/a2ui_protocol.md        (+1 clarification: catalog JSON
+          Schema $id and A2UI catalogId must both exist and be the same URI)
+  UPDATED v0_9/docs/a2ui_custom_functions.md (+1 line in the example custom
+          catalog: "catalogId": "https://example.com/schemas/custom_catalog.json")
+
+Site: https://a2ui.org/specification/v0.9-a2ui/  (renders the same source via
         mkdocs snippet include from specification/v0_9/docs/a2ui_protocol.md)
 
 Version status on a2ui.org (as of fetch date):
@@ -11,6 +36,10 @@ Version status on a2ui.org (as of fetch date):
   v0.9       — Stable
   v0.9.1     — Current (production-recommended; diffed against v0.9 below)
   v1.0       — Candidate (not yet stable; not fetched)
+
+RUNTIME POLICY: TaskVM runtime is frozen to strict v0.9 for this wave. Do not
+mix "version":"v0.9.1" payloads into it; a dedicated v0.9 -> v0.9.1
+compatibility commit comes later (workplan §1.3).
 
 File mapping (repo path -> local path):
   specification/v0_9/docs/a2ui_protocol.md                    -> v0_9/docs/a2ui_protocol.md
@@ -22,6 +51,44 @@ File mapping (repo path -> local path):
   specification/v0_9/json/*.json                                -> v0_9/json/*.json   (formal JSON Schema, draft 2020-12)
   specification/v0_9/catalogs/basic/catalog.json                -> v0_9/catalogs_basic/catalog.json  (component + function catalog)
   specification/v0_9/catalogs/basic/rules.txt                    -> v0_9/catalogs_basic/rules.txt     (plain-text LLM prompt rules)
+
+agent_sdk_reference/ (README.md + agent_development.md): vendored from the same
+upstream commit's agent_sdks docs. These describe the a2ui-agent-sdk PYTHON SDK
+(agent_sdks/python), NOT the normative protocol specification. Treat them as SDK
+reference documentation only — the normative source of truth for the protocol is
+v0_9/docs/a2ui_protocol.md + v0_9/json/*.json. The installed runtime SDK is
+a2ui-agent-sdk==0.4.0 (PyPI; import name `a2ui`); its bundled assets
+(a2ui/assets/0.9/) contain only catalog.json + common_types.json +
+server_to_client.json and are NOT the source of the vendored mirror.
+
+  NOTE: agent_sdk_reference/README.md carries a small TaskVM-added vendoring
+  note at the top marking it non-normative (upstream content below the note is
+  byte-identical to the pinned commit; its pristine upstream SHA-256 is
+  0fd2a3f0a32eca82230e821f5c3b01a569ddabb753218d4ffbdb2a46e7492ef7 — the
+  manifest below records the digest of the file AS VENDORED, note included).
+
+SHA-256 manifest (sha256  path), computed 2026-08-19 on the vendored files:
+  c46cae86e32b41ebc873e26ff8bd62f5f6ff92a590b71105703e828f1a31b70c  v0_9/agent_sdk_reference/README.md
+  9095e90c0b4e756f45ff984942771d7dcc21499f2b8e02ad7399d3fb86f8e9e5  v0_9/agent_sdk_reference/agent_development.md
+  8cc94d0a482e67048f9fc989964ca5da56fe42f531d919315a508989fb22e13e  v0_9/catalogs_basic/catalog.json
+  ccd5b8158b7d459c26bb92dbe63fcb5d01a78311d39200951c5b062499b854df  v0_9/catalogs_basic/rules.txt
+  1cd85b46c68bc609472df9eaa2a31d7ee84387b7d3c01c4b681c1abe78a41680  v0_9/docs/a2ui_custom_functions.md
+  fbe49c1329f3f45a2c84b64585749e6cd962a0b1230c05899f7bcdcb3194c975  v0_9/docs/a2ui_extension_specification.md
+  f658ad7ab12612be8dcdd8a53af5e7a4fb69696577b58ecf017ae976c7188f54  v0_9/docs/a2ui_protocol.md
+  d5e74fb5fd4ed098ad9533c5ea3d139f6da4d34924c82a43cb511daec6daa655  v0_9/docs/basic_catalog_implementation_guide.md
+  9e57a5f1737c3cc866f0243aecc9b599ff5a8a02cc6abda4736370763185be49  v0_9/docs/evolution_guide.md
+  917ff302b883c8c50475f0fafa836c17620078e7e2089392b322dc5df01de78f  v0_9/json/client_capabilities.json
+  a2d9301eda70f71be089a6fae09428ed9fab9fcc23775e2cd227e220419ef6cd  v0_9/json/client_data_model.json
+  76c9a6f54e40bbcc1ed7b36b0d56563b82122ea7f9d8379787c4afcf29cc95e0  v0_9/json/client_to_server.json
+  08d9555b79e0c23cd87ce56cd249483d2041a78c72ee605b436a4192451168c7  v0_9/json/client_to_server_list.json
+  aac8653c446638a14af8e8845967813051b89e57a2e668fc1186aeb5b20d0bed  v0_9/json/client_to_server_list_wrapper.json
+  ac79788e95e5bdf0a39808953593a53c1bc9fcdcdb55480f4610613c6591e94c  v0_9/json/common_types.json
+  11515498484011e89b2f57084b516d591f89c595fe001ab7fdb632924ed7a3b5  v0_9/json/sample.json
+  bdaf275dd2abf279e62637ead1b840744e031d94735ec4f63d0c7c2fe5347dd4  v0_9/json/server_capabilities.json
+  da75d25378b0d02069cc3de54db76f6f71cffdf2a3fd95a8fabbb1f516c07cbe  v0_9/json/server_to_client.json
+  114ee3dff68c2a838f3d6ba426bd9f0d75d85251bf986ec4a601b64e7a05376a  v0_9/json/server_to_client_list.json
+  b33ff49453dd8d2b91a5a842db2bbf9b4ab3995e6b1c34b3dc7e9ebca331aa70  v0_9/json/server_to_client_list_wrapper.json
+  a09a1b3ba8e4794f02454fbc43bb3dfe93d28f51526ba3c3903421a9533f3931  v0_9/README.md
 
 Verified: diffed v0_9/docs/a2ui_protocol.md against v0_9_1/docs/a2ui_protocol.md
 (same repo) — v0.9 -> v0.9.1 changes are wording clarifications + version-string
