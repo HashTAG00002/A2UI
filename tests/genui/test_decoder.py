@@ -80,6 +80,58 @@ def test_first_pass_success(context, valid_components):
     assert rec.model == "fake-model" and rec.request_id
 
 
+def test_default_temperature_is_none_not_sent(context, valid_components):
+    """Regression lock (2026-08-20 real-run evidence): FRIDAY-gateway models
+    like gpt-5.6-sol reject any non-default temperature with HTTP 400
+    "Unsupported value" — the decoder must NOT send one by default. None is
+    the safe default; HttpModelPort omits the field entirely when it sees
+    None, so the provider's own default applies."""
+    port = _FakePort([_Reply(valid_components)])
+    GenUIDecoder(port).decode(context)
+    assert port.calls[0]["temperature"] is None
+
+    # an explicit temperature still reaches the port (caller's own choice)
+    port2 = _FakePort([_Reply(valid_components)])
+    GenUIDecoder(port2, temperature=0.2).decode(context)
+    assert port2.calls[0]["temperature"] == 0.2
+
+
+def test_bare_array_recovered_from_raw_text(context, valid_components):
+    """Regression lock (2026-08-20 real-run evidence, gpt-5.6-sol): the
+    shared port's dict-first extractor hands the decoder the FIRST
+    COMPONENT OBJECT (a dict) when the reply is a bare JSON array — which
+    _coerce_components rightly refuses. The decoder's array-first fallback
+    must recover the FULL array from the raw text instead of declaring a
+    parse failure and wasting the repair round."""
+    class _DictFirstReply:
+        def __init__(self):
+            self.parsed = valid_components[0]      # the generic extractor
+            self.raw = json.dumps(valid_components, ensure_ascii=False)
+            self.model = "gpt-5.6-sol"
+            self.prompt_tokens = 100
+            self.completion_tokens = 50
+
+    port = _FakePort([_DictFirstReply()])
+    result = GenUIDecoder(port).decode(context)
+    assert result.source == SOURCE_MODEL
+    assert result.components == valid_components
+    assert len(port.calls) == 1                     # no wasted repair round
+
+
+def test_repair_prompt_carries_context_payload(context, valid_components):
+    """Regression lock (2026-08-20 real-run evidence): the repair round's
+    user prompt must repeat the FULL TaskSurfaceContext — repair prompts
+    that carried only the rejection reasons made the model regenerate
+    blind (generic 4-component shells that bound nothing)."""
+    port = _FakePort([_Reply(_bad_components(valid_components)),
+                      _Reply(valid_components)])
+    GenUIDecoder(port).decode(context)
+    repair_user = port.calls[1]["user"]
+    assert "TaskSurfaceContext" in repair_user      # the payload rides along
+    assert "release_date" in repair_user
+    assert "REJECTED" in repair_user                # ...plus the reasons
+
+
 def test_dict_components_wrapper_accepted(context, valid_components):
     port = _FakePort([_Reply({"components": valid_components})])
     result = GenUIDecoder(port).decode(context)

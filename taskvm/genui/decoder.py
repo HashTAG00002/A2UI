@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -161,6 +162,13 @@ class GenUIDecoder:
     model — priority: constructor ``model`` arg > ``TASKVM_GENUI_DECODER_MODEL``
     env var > the port's own default. Whichever wins lands in every
     ledger row's ``model`` field (honest accounting).
+
+    ``temperature`` defaults to ``None`` = NOT SENT (provider default).
+    FRIDAY-gateway models like ``gpt-5.6-sol`` reject any non-default
+    temperature with HTTP 400 "Unsupported value" (2026-08-20 real-run
+    evidence: eval_results/a4_decoder_20260820/ledger.json), so the safe
+    default is to omit the parameter; callers who know their model
+    supports it may still pass one.
     """
 
     def __init__(self, port: DecoderModelPort,
@@ -169,7 +177,7 @@ class GenUIDecoder:
                  max_repairs: int = 1,
                  system_prompt: str | None = None,
                  max_tokens: int = 8192,
-                 temperature: float | None = 0.2) -> None:
+                 temperature: float | None = None) -> None:
         if max_repairs < 0:
             raise ValueError("max_repairs must be >= 0")
         self._port = port
@@ -230,6 +238,15 @@ class GenUIDecoder:
                 components = _coerce_components(
                     getattr(reply, "parsed", None))
                 if components is None:
+                    # The shared port's generic extractor prefers the first
+                    # balanced {…} — on a bare-array reply that is the FIRST
+                    # COMPONENT OBJECT (a dict), not the array. The decoder's
+                    # output contract is array-shaped, so try the raw text
+                    # with an array-first extractor before giving up
+                    # (real-run evidence 2026-08-20, gpt-5.6-sol).
+                    components = _extract_array(
+                        getattr(reply, "raw", "") or "")
+                if components is None:
                     errors = ["reply did not parse as a JSON array of "
                               "component objects (or {\"components\": [...]})"]
                 else:
@@ -248,7 +265,7 @@ class GenUIDecoder:
                     return DecodeResult(components=components,
                                         source=SOURCE_MODEL,
                                         attempts=tuple(attempts))
-            user_prompt = self._repair_prompt(errors)
+            user_prompt = self._repair_prompt(user_prompt, errors)
 
         # bounded repair exhausted → honest deterministic fallback
         components = baseline_components(context)
@@ -275,10 +292,19 @@ class GenUIDecoder:
             "markdown fences."
         )
 
-    def _repair_prompt(self, errors: list[str]) -> str:
+    def _repair_prompt(self, base_prompt: str,
+                       errors: list[str]) -> str:
+        """The FULL original task prompt + the verbatim rejection reasons.
+
+        The context payload MUST ride along on the repair round too:
+        without it the model cannot see the variables it is supposed to
+        bind — it would regenerate from the error text alone (real-run
+        evidence 2026-08-20: repair prompts without the payload produced
+        generic 4-component shells)."""
         lines = "\n".join(f"- {e}" for e in errors)
         return (
-            "Your previous component list was REJECTED by validation:\n"
+            f"{base_prompt}\n\n"
+            "## Your previous attempt was REJECTED by validation\n"
             f"{lines}\n\n"
             "Regenerate the FULL corrected component list. Fix every "
             "rejection reason. Output ONLY the JSON array — no prose, no "
@@ -325,4 +351,53 @@ def _coerce_components(parsed: Any) -> list[dict[str, Any]] | None:
     if isinstance(parsed, dict) and isinstance(parsed.get("components"),
                                                 list):
         return parsed["components"]
+    return None
+
+
+_FENCE_RE = re.compile(r"```(?:json)?\s*|\s*```")
+
+
+def _extract_array(raw: str) -> list[dict[str, Any]] | None:
+    """Array-first extraction from the raw reply text.
+
+    Mirrors the port's balanced-bracket walk but starts from the first
+    ``[`` instead of the first ``{`` (the generic extractor's dict-first
+    rule misreads a bare component array: it returns the first component
+    object). Also accepts a fenced array and a components-wrapper text
+    form. Returns None when nothing array-shaped parses — the repair /
+    fallback loop owns that outcome."""
+    if not raw:
+        return None
+    text = _FENCE_RE.sub("", raw).strip()
+    for start_ch, end_ch in (("[", "]"), ("{", "}")):
+        start = text.find(start_ch)
+        if start < 0:
+            continue
+        depth, in_str, esc = 0, False, False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == start_ch:
+                depth += 1
+            elif ch == end_ch:
+                depth -= 1
+                if depth == 0:
+                    try:
+                        parsed = json.loads(text[start:i + 1])
+                    except json.JSONDecodeError:
+                        break
+                    coerced = _coerce_components(parsed)
+                    if coerced is not None and all(
+                            isinstance(c, dict) for c in coerced):
+                        return coerced
+                    break
     return None
