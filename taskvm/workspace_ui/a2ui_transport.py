@@ -8,8 +8,9 @@ stream:
     GET  /api/app/a2ui/bootstrap    → createSurface + latest components
                                       + latest data model (ordered replay)
     GET  /api/app/a2ui/sse?after=N  → ordered A2UI tail + progress events
-    POST /api/app/a2ui/action       → renderer action → policy check →
-                                      the PUBLIC governance local_patch
+    POST /api/app/a2ui/action       → renderer action → ActionRouter
+                                      validation → the PUBLIC
+                                      governance local_patch
 
 Design invariants (workplan §3/§5 + A9.0 latency audit):
 
@@ -39,13 +40,15 @@ Design invariants (workplan §3/§5 + A9.0 latency audit):
   is the ordered A2UI tail (``after=N``) + goal-status polling, which
   are authoritative.
 - **Actions come back through the ONLY write path.** The renderer's
-  ``A2uiClientAction`` is posted here, re-validated against the same
-  ground truth the policy layer uses (allowlist / mutability / value
-  type) and then lands as one kernel ``local_patch`` via the session's
-  public governance port — the identical command the fixed shell's
-  governance routes run. No state is mutated outside the governance
-  port; nothing bypasses the real GUI gesture (the button the user
-  pressed IS the rendered A2UI Button component).
+  ``A2uiClientAction`` is posted here and routed through the genui
+  ``ActionRouter`` — the C2S validation half, running the SAME ground
+  truth the S2C policy layer uses (allowlist / mutability / value
+  type / bindings-arrive-resolved) — into one structured
+  ``LocalPatchIntent`` that lands as a kernel ``local_patch`` via the
+  session's public governance port, the identical command the fixed
+  shell's governance routes run. No state is mutated outside the
+  governance port; nothing bypasses the real GUI gesture (the button
+  the user pressed IS the rendered A2UI Button component).
 
 Layering: this module imports the genui public API + projection public
 view models only — both read-only for this layer. It never imports
@@ -61,11 +64,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from taskvm.genui import (
-    ACTION_LOCAL_PATCH, SurfaceStore, SurfaceStoreRegistry,
+    ActionRouteError, ActionRouter, SurfaceStore, SurfaceStoreRegistry,
     TaskDataModelProjector, TaskSurfaceContextBuilder,
     baseline_components, validate_components,
 )
-from taskvm.genui.protocol import GOVERNANCE_ACTION_NAMES
 from taskvm.projection.view_models import snapshot_view, workflow_view
 
 #: How often the data-model poller re-projects the public snapshot.
@@ -245,64 +247,32 @@ class A2uiTransport:
     # ── the action path (the ONLY write path through this transport) ───
     def apply_action(self, sid: str, sess, *, name: str,
                      context: dict[str, Any]) -> dict[str, Any]:
-        """Renderer action → policy re-validation → ONE kernel
+        """Renderer action → ActionRouter validation → ONE kernel
         local_patch via the session's public governance port.
+
+        The genui ``ActionRouter`` owns the C2S validation half (the
+        SAME ground truth the S2C policy layer uses: allowlist /
+        mutability / value type / bindings-arrive-resolved) and mints a
+        structured ``LocalPatchIntent``; this method is only the
+        execution half — the intent's updates go to the session's
+        governance port verbatim, no middle-model translation
+        (workplan §20.2).
 
         Raises ``A2uiTransportError`` with an ``http_status`` attribute
         for every honest rejection (unknown action 400, governance-owned
-        403, readonly 403, bad/missing value 400). No best-effort
-        guessing."""
-        if name != ACTION_LOCAL_PATCH:
-            if name in GOVERNANCE_ACTION_NAMES:
-                raise A2uiTransportError(
-                    f"action {name!r} is governance-owned — the dynamic "
-                    "surface may never emit it (fixed shell territory)"
-                )._status(403)
-            raise A2uiTransportError(
-                f"unknown action {name!r} (allowlist: "
-                f"[{ACTION_LOCAL_PATCH}])")._status(400)
-        key = context.get("semanticKey")
-        if not isinstance(key, str) or not key:
-            raise A2uiTransportError(
-                f"{ACTION_LOCAL_PATCH} requires a non-empty "
-                "context.semanticKey")._status(400)
-        if "value" not in context or context.get("value") is None:
-            raise A2uiTransportError(
-                f"{ACTION_LOCAL_PATCH} needs context.value (the edited "
-                "desired value)")._status(400)
-        value = context["value"]
-        context_obj = self._build_context(sess)
-        var = context_obj.variable(key)
-        if var is None:
-            raise A2uiTransportError(
-                f"unknown semantic key {key!r}")._status(400)
-        if not var.editable:
-            raise A2uiTransportError(
-                f"variable {key!r} is {var.mutability} — local_patch only "
-                "targets editable variables")._status(403)
-        self._check_value_type(var, value)
+        403, readonly 403, bad/missing value 400, unresolved binding
+        400). No best-effort guessing."""
+        try:
+            intent = ActionRouter(self._build_context(sess)).route(
+                name, context)
+        except ActionRouteError as e:
+            raise A2uiTransportError(str(e))._status(
+                e.http_status) from e
         result = sess.governance_port().local_patch(
-            {key: value}, rationale="a2ui surface action")
+            intent.updates, rationale=intent.rationale)
         # The value path: the poller will observe the new desired value
         # and append the updateDataModel frame — zero model calls.
         return result
-
-    @staticmethod
-    def _check_value_type(var, value: Any) -> None:
-        vt = var.value_type
-        bad = False
-        if vt == "boolean":
-            bad = not isinstance(value, bool)
-        elif vt in ("number",):
-            bad = not isinstance(value, (int, float)) or isinstance(value, bool)
-        elif vt in ("integer",):
-            bad = not isinstance(value, int) or isinstance(value, bool)
-        elif vt in ("string", "date", "text", "status"):
-            bad = not isinstance(value, str)
-        if bad:
-            raise A2uiTransportError(
-                f"variable {var.semantic_key!r} ({vt}) rejects value "
-                f"{value!r}")._status(400)
 
 
 # ── the value-update poller ─────────────────────────────────────────────────

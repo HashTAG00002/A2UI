@@ -15,7 +15,8 @@ zero network. The locks:
     the poller-style refresh mirrors it into the data model);
   - honest rejections carry the right statuses: governance-owned 403,
     unknown action 400, readonly 403, missing value 400, bad type 400,
-    unknown semantic key 400;
+    unknown semantic key 400, unresolved data binding 400 (the A6
+    ActionRouter's fail-closed rule, now the transport's too);
   - the SSE first frame replays every a2ui message + progress event in
     order (the reconnect contract);
   - the poller retires itself when its session is replaced;
@@ -212,6 +213,48 @@ def test_action_honest_rejections(stack, payload, status, fragment):
     body = resp.get_json()
     assert body["ok"] is False
     assert fragment in body["error"]
+
+
+def test_action_rejects_unresolved_data_binding(stack):
+    """A6 ActionRouter delegation: a non-conforming client posting an
+    UNRESOLVED binding as context.value is rejected fail-closed (the
+    old inline transport check lacked this rule) and NOTHING is
+    written — the server must never resolve the binding itself."""
+    sess = stack.store.get("s1")
+    stack.transport.attach_session("s1", sess)
+    resp = stack.client.post("/api/app/a2ui/action", json={
+        "name": "taskvm.local_patch",
+        "context": {"semanticKey": "release_note",
+                    "value": {"path": "/variables/release_note/desired"}},
+    })
+    assert resp.status_code == 400
+    assert "unresolved data binding" in resp.get_json()["error"]
+    # nothing was written — the desired value never moved
+    assert _desired_of(sess, "release_note") == "v1"
+
+
+def test_action_rationale_rides_the_governance_patch(stack, monkeypatch):
+    """The client-provided rationale rides the intent verbatim into the
+    governance port (the A6 delegation's passthrough contract)."""
+    sess = stack.store.get("s1")
+    stack.transport.attach_session("s1", sess)
+    seen = {}
+    port = sess.governance_port()
+    real = port.local_patch
+
+    def _spy(updates, rationale=""):
+        seen["updates"], seen["rationale"] = updates, rationale
+        return real(updates, rationale=rationale)
+
+    monkeypatch.setattr(port, "local_patch", _spy)
+    resp = stack.client.post("/api/app/a2ui/action", json={
+        "name": "taskvm.local_patch",
+        "context": {"semanticKey": "release_note", "value": "v9",
+                    "rationale": "用户在 A2UI 面板里改的"},
+    })
+    assert resp.status_code == 200
+    assert seen["updates"] == {"release_note": "v9"}
+    assert seen["rationale"] == "用户在 A2UI 面板里改的"
 
 
 def test_action_requires_live_session_and_surface(stack):

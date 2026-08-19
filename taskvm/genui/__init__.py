@@ -15,12 +15,19 @@ plain JSON / value objects, no kernel references):
   (role=genui_decoder);
 - SurfaceStore / SurfaceStoreRegistry: per-session ordered message
   stream (bootstrap + SSE tail);
+- ActionRouter (A6): renderer action → structured LocalPatchIntent
+  (C2S write-path validation half; execution belongs to the
+  composition root, which hands the intent to the session's
+  GovernanceService-backed governance port);
 - schema: vendored-mirror → official a2ui-agent-sdk catalog/validator.
 
 The layer is a plain-JSON port layer (tests/genui/test_imports.py): the
 model port and ledger are INJECTED by the composition root — no taskvm
 layer is imported here, keeping substrate independence by construction.
 """
+from taskvm.genui.action_router import (
+    ActionRouteError, ActionRouter, LocalPatchIntent,
+)
 from taskvm.genui.baseline import baseline_components
 from taskvm.genui.context import (
     TaskSurfaceContext, TaskSurfaceContextBuilder, SurfaceVariable,
@@ -43,12 +50,15 @@ from taskvm.genui.validator import (
 __all__ = [
     "ACTION_LOCAL_PATCH",
     "ALLOWED_SURFACE_ACTIONS",
+    "ActionRouteError",
+    "ActionRouter",
     "CATALOG_ID",
     "ComponentValidationError",
     "DecodeAttempt",
     "DecodeResult",
     "GENUI_DECODER_MODEL_ROLE",
     "GenUIDecoder",
+    "LocalPatchIntent",
     "PROTOCOL_VERSION",
     "SOURCE_FALLBACK",
     "SOURCE_MODEL",
