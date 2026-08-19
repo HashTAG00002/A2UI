@@ -50,6 +50,9 @@ from taskvm.substrate.mobilegym.evaluation import (
     MobileGymEvaluationEnvironment,
 )
 from taskvm.substrate.mobilegym.session import MobileGymSubstrateSession
+from taskvm_bench.benchmark.schema import TaskSpec
+from taskvm_bench.evaluation.evidence import EvidenceRecorder
+from taskvm_bench.evaluation.grader import grade_task
 from taskvm_bench.evaluation.results import (
     FAILURE_CLASSES,
     STAGES,
@@ -570,9 +573,10 @@ class MobileGymFactory:
                   model_port: Any = None,
                   bootstrap_fn: Callable[..., dict] | None = None,
                   driver: Any = None,
-                  user_ops: Sequence[UserOp] | None = None,
+                  user_ops: Sequence[Any] | None = None,
                   ledger: Any = None,
                   store: Any = None,
+                  evidence_recorder: Any = None,
                   ) -> UserOpTrialRecord:
         """The full B-08 stage chain for ONE trial, honestly recorded.
 
@@ -580,7 +584,19 @@ class MobileGymFactory:
         production path builds one over a ``ProjectionClient`` pointed at
         the projection server that serves ``store`` (the caller owns that
         server process — the factory never hosts HTTP itself except via
-        the injected ``driver``'s base URL)."""
+        the injected ``driver``'s base URL).
+
+        R1 grader loop: ``evidence_recorder`` (an
+        :class:`~taskvm_bench.evaluation.evidence.EvidenceRecorder`)
+        brackets every user op with oracle snapshots; after the integrity
+        stage the trial is GRADED deterministically
+        (:func:`~taskvm_bench.evaluation.grader.grade_task`) and the
+        five-field verdict lands in ``record.contract_verdict`` — "all
+        ops applied" alone can never pass a graded trial. ``user_ops``
+        entries may be plain :class:`UserOp` objects OR callables
+        ``(previous_outcomes) -> UserOp`` (deferred ops whose payload
+        depends on a prior op's public response, e.g. a rollback that
+        targets the checkpoint id the checkpoint op returned)."""
         bridge = self.ensure_bridge()
         # ── B-10: serial execution gate ──────────────────────────────
         # ONE active trial per factory/bridge — a second concurrent
@@ -605,7 +621,8 @@ class MobileGymFactory:
             return self._run_trial_locked(spec, model_port=model_port,
                                           bootstrap_fn=bootstrap_fn,
                                           driver=driver, user_ops=user_ops,
-                                          ledger=ledger, store=store)
+                                          ledger=ledger, store=store,
+                                          evidence_recorder=evidence_recorder)
         finally:
             self._active_trial_key = None
             self._trial_lock.release()
@@ -614,9 +631,10 @@ class MobileGymFactory:
                           model_port: Any = None,
                           bootstrap_fn: Callable[..., dict] | None = None,
                           driver: Any = None,
-                          user_ops: Sequence[UserOp] | None = None,
+                          user_ops: Sequence[Any] | None = None,
                           ledger: Any = None,
                           store: Any = None,
+                          evidence_recorder: Any = None,
                           ) -> UserOpTrialRecord:
         """The B-08 stage chain, already holding the trial gate — B-07
         trial-integrity discipline:
@@ -645,6 +663,7 @@ class MobileGymFactory:
         self.last_session = None
         self.last_oracles = None
         self.last_record = None
+        self.last_evidence = None
 
         # ── A2: the record exists from the moment the trial is requested
         record = UserOpTrialRecord(
@@ -703,6 +722,30 @@ class MobileGymFactory:
             self.last_record = record
             return record
 
+        # ── R1: the evidence recorder. A fixture that speaks TaskSpec
+        # (the thin-adapter protocol: ``.spec`` + ``.oracle_read``)
+        # gets its recorder built HERE — the factory is the eval plane
+        # that already holds the oracle powers (B-04 iron rule), and the
+        # adapter owns the app-specific oracle flattening. An injected
+        # recorder (tests) always wins. ──────────────────────────────
+        task_spec = getattr(spec.fixture, "spec", None)
+        oracle_read = getattr(spec.fixture, "oracle_read", None)
+        if (evidence_recorder is None and isinstance(task_spec, TaskSpec)
+                and callable(oracle_read)):
+            evidence_recorder = EvidenceRecorder(
+                lambda: oracle_read(oracles, sid), task_spec)
+
+        # the recorder's seed baseline + the eval plane's own seed
+        # writes, honestly accounted (after_op=setup — the
+        # no-hidden-restore predicate proves the eval plane wrote
+        # NOTHING once the trial started) ────────────────────────────
+        if evidence_recorder is not None:
+            evidence_recorder.begin()
+            for app, directive in (spec.fixture.seed_state or {}).items():
+                evidence_recorder.note_environment_write(
+                    surface=str(app), key="<seed_directive>",
+                    value=directive, reason="seed")
+
         # ── stage: L1 session + first observe (still the setup plane —
         # the SUT has not been composed yet) ────────────────────────────
         try:
@@ -735,8 +778,20 @@ class MobileGymFactory:
             try:
                 ops = list(user_ops) if user_ops is not None else \
                     self.make_driver_ops()
-                for op in ops:
+                outcomes: list = []
+                for entry in ops:
+                    # deferred op: a callable resolves its payload from
+                    # the PRIOR PUBLIC op responses (e.g. the rollback
+                    # targeting the checkpoint id the checkpoint op
+                    # returned — no hidden id source exists)
+                    op = entry(outcomes) if callable(entry) else entry
+                    before = (evidence_recorder.before_op()
+                              if evidence_recorder is not None else None)
                     outcome = driver.execute(op)
+                    if evidence_recorder is not None:
+                        evidence_recorder.bracket_user_op(
+                            outcome, oracle_before=before)
+                    outcomes.append(outcome)
                     record.add_op(UserOpRecord(**outcome.to_record()))
             except Exception as exc:
                 self._mark_cua_entry(record, ledger)
@@ -755,6 +810,26 @@ class MobileGymFactory:
                 f"post-trial integrity: {integrity['status']}"
                 f" ({integrity.get('detail', '')})")
             record.failure_class = "evaluation_error"
+
+        # ── stage: the R1 grading plane (the deterministic five-field
+        # verdict). Only a world whose integrity check held is graded
+        # (B-10: a world that cannot be trusted must not be graded) — a
+        # trial without a TaskSpec-speaking fixture or a recorder stays
+        # honestly ungraded ("pending"; op-level verdicts never pass
+        # it). The grade lands in ``record.contract_verdict`` and is
+        # the ONLY path to a trial "pass". ────────────────────────
+        if (evidence_recorder is not None
+                and record.evaluation_error is None):
+            try:
+                bundle = evidence_recorder.finish(
+                    model_ledger_counts=ledger_role_counts(ledger))
+                record.contract_verdict = grade_task(
+                    evidence_recorder.task_spec, bundle).to_json()
+                self.last_evidence = bundle
+            except Exception as exc:
+                record.evaluation_error = (
+                    f"grading stage: {type(exc).__name__}: {exc}")
+                record.failure_class = "evaluation_error"
 
         record.finalize()
         # B-10: an evaluation_error is NEVER a success — force the

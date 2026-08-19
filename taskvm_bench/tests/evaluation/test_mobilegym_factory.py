@@ -52,6 +52,9 @@ class FakeBridge:
         self.state: dict = {"wechat_chats": [
             {"id": "wxid_huangyong_demo", "peer_name": "黄勇",
              "n_messages": 0, "last_message": "", "messages": ""}]}
+        # the X store slice (toggle id lists — what /api/x_state serves)
+        self.x_state: dict = {"likedPostIds": [], "retweetedPostIds": [],
+                              "bookmarkedPostIds": []}
         # per-test hooks: oracle_mutator(state_dict) -> state_dict
         self.oracle_mutator = None
         self.observe_fingerprint = "fake-fp-0001"
@@ -106,6 +109,50 @@ class FakeBridge:
                         "site": "mobilegym",
                         "sid": self.path.rsplit("/", 1)[-1],
                         "wechat_chats": rows["wechat_chats"]})
+                elif self.path.startswith("/api/x_state/"):
+                    payload = {"site": "mobilegym",
+                               "sid": self.path.rsplit("/", 1)[-1]}
+                    payload.update(outer.x_state)
+                    self._json(200, payload)
+                elif self.path.startswith("/api/x_posts/"):
+                    # the semantic oracle route (oracle_state →
+                    # /api/x_posts/<sid>): return the tracked posts
+                    # with their toggle states derived from x_state.
+                    # The tracked post ids are the ones that appear in
+                    # any toggle list OR were seeded via inject_task.
+                    tracked = set(outer.x_state.get("likedPostIds", []))
+                    tracked |= set(outer.x_state.get("bookmarkedPostIds", []))
+                    tracked |= set(outer.x_state.get("retweetedPostIds", []))
+                    # also include seeded posts (from the seed_state
+                    # that inject_task received)
+                    if outer.last_seed:
+                        x_user = ((outer.last_seed.get("seed_state")
+                                   or {}).get("x") or {}).get("user") or {}
+                        for key in ("likedPostIds", "bookmarkedPostIds",
+                                    "retweetedPostIds"):
+                            tracked |= set(x_user.get(key, []))
+                    # also always include the RM-C04-01 anchor's
+                    # tracked posts (so oracle_state sees them even
+                    # before any toggle fires)
+                    from taskvm_bench.benchmark.rm_anchor_tasks import (
+                        CPI_POST_ID, PROTECTED_POST_ID)
+                    tracked.add(CPI_POST_ID)
+                    tracked.add(PROTECTED_POST_ID)
+                    posts = []
+                    liked = set(outer.x_state.get("likedPostIds") or [])
+                    bmd = set(outer.x_state.get("bookmarkedPostIds") or [])
+                    rtd = set(outer.x_state.get("retweetedPostIds") or [])
+                    for pid in sorted(tracked):
+                        posts.append({
+                            "id": pid,
+                            "liked": pid in liked,
+                            "bookmarked": pid in bmd,
+                            "retweeted": pid in rtd,
+                        })
+                    self._json(200, {
+                        "site": "mobilegym",
+                        "sid": self.path.rsplit("/", 1)[-1],
+                        "x_posts": posts})
                 elif self.path.startswith("/api/session_state/"):
                     self._json(200, {
                         "site": "mobilegym", "sid":
@@ -128,10 +175,21 @@ class FakeBridge:
                     self._json(503, {"status": "down"})
                     return
                 if self.path.startswith("/api/reset/"):
+                    outer.x_state = {"likedPostIds": [],
+                                     "retweetedPostIds": [],
+                                     "bookmarkedPostIds": []}
                     self._json(200, {"status": "ok", "reset": True,
                                      "sid": self.path.rsplit("/", 1)[-1]})
                 elif self.path.startswith("/api/inject_task/"):
                     outer.last_seed = body
+                    # the real bridge deep-merges the store slice; the
+                    # x.user toggle slices are the ones RM anchors seed
+                    x_user = ((body.get("seed_state") or {}).get("x")
+                              or {}).get("user") or {}
+                    for key in ("likedPostIds", "bookmarkedPostIds",
+                                "retweetedPostIds"):
+                        if key in x_user:
+                            outer.x_state[key] = list(x_user[key])
                     self._json(200, {"status": "ok",
                                      "sid": self.path.rsplit("/", 1)[-1],
                                      "task_id": body.get("task_id")})
@@ -659,3 +717,399 @@ def test_cli_mobilegym_rejects_unknown_suite():
     with pytest.raises(SystemExit):
         main(["run", "--suite", "final", "--substrate", "mobilegym",
               "--bridge-port", "1"])
+
+
+# ── RM-C04-01 anchor: end-to-end integration over FakeBridge ───────────────
+#
+# The anchor task (bench_design §九, "social_mark_and_true_rollback"):
+# on the X app, find the post mentioning 核心CPI下降, like AND bookmark
+# it, then roll the whole thing back through a real checkpoint.
+#
+# This test exercises the FULL R1 grader loop through the MobileGymFactory:
+#   1. MobileGymFixtureView adapter → TaskSpec-speaking fixture
+#   2. EvidenceRecorder auto-built from .spec + .oracle_read
+#   3. Deferred rollback op (_rollback_to_first_checkpoint) resolving
+#      checkpoint_id from the prior op's public HTTP response
+#   4. Five-field ContractVerdict landing on the TrialRecord
+#   5. Witness predicate: the forward work (like+bookmark) MUST appear
+#      on the oracle timeline even though the final state == seed
+#   6. Protected predicate: the pre-bookmarked sibling post survives
+#      untouched across the whole arc
+
+
+from taskvm_bench.benchmark.rm_anchor_tasks import (
+    RM_C04_01,
+    mobilegym_fixture_view,
+    rm_c04_01_user_ops,
+    CPI_POST_ID,
+    PROTECTED_POST_ID,
+)
+
+
+class ScriptedXDriver:
+    """A scripted driver that simulates the CUA doing real GUI work
+    (like + bookmark on the CPI post) between checkpoint and rollback.
+
+    The FakeBridge holds the X store slice (toggle id lists). This driver
+    mutates that store to simulate GUI actions landing, then restores it
+    on rollback (simulating reverse GUI gestures — toggle-like /
+    toggle-bookmark are reversible store toggles).
+
+    The checkpoint op returns a real ``checkpoint_id`` in its public HTTP
+    response — the deferred rollback entry resolves it from
+    ``previous_outcomes`` (no hidden id source).
+    """
+
+    def __init__(self, bridge: FakeBridge) -> None:
+        self.bridge = bridge
+        self.executed: list[UserOp] = []
+        self._checkpoint_counter = 0
+        #: the X store snapshot at checkpoint time (for honest rollback)
+        self._ckpt_store: dict | None = None
+
+    def execute(self, op: UserOp) -> OpOutcome:
+        self.executed.append(op)
+        if op.kind == "checkpoint":
+            self._checkpoint_counter += 1
+            cid = f"ckpt-{self._checkpoint_counter}"
+            # snapshot the X store at checkpoint time
+            self._ckpt_store = {
+                "likedPostIds": list(self.bridge.x_state["likedPostIds"]),
+                "retweetedPostIds": list(self.bridge.x_state["retweetedPostIds"]),
+                "bookmarkedPostIds": list(self.bridge.x_state["bookmarkedPostIds"]),
+            }
+            return OpOutcome(
+                op=op, verdict="applied", http_status=200,
+                response={"checkpoint_id": cid, "label": op.payload.get("label", "")},
+                sse_window=[{"sse_type": "governance.applied", "event_id": "e1"}],
+                projection_before={"revision": 1, "variables": {}},
+                projection_after={"revision": 2, "variables": {}},
+            )
+        if op.kind == "start":
+            # simulate the CUA doing the forward work: like + bookmark
+            # the CPI post (the witness values)
+            if CPI_POST_ID not in self.bridge.x_state["likedPostIds"]:
+                self.bridge.x_state["likedPostIds"].append(CPI_POST_ID)
+            if CPI_POST_ID not in self.bridge.x_state["bookmarkedPostIds"]:
+                self.bridge.x_state["bookmarkedPostIds"].append(CPI_POST_ID)
+            return OpOutcome(
+                op=op, verdict="applied", http_status=200,
+                response={"ok": True},
+                sse_window=[
+                    {"sse_type": "action.observed", "event_id": "e2"},
+                    {"sse_type": "action.landed", "event_id": "e3"},
+                    {"sse_type": "governance.applied", "event_id": "e4"},
+                ],
+                projection_before={"revision": 2, "variables": {}},
+                projection_after={"revision": 3, "variables": {}},
+            )
+        if op.kind == "rollback":
+            # simulate reverse GUI gestures: remove the like + bookmark
+            # (toggle-like / toggle-bookmark are reversible store toggles)
+            cid = op.payload.get("target_checkpoint_id", "")
+            if self._ckpt_store is not None:
+                self.bridge.x_state["likedPostIds"] = \
+                    list(self._ckpt_store["likedPostIds"])
+                self.bridge.x_state["bookmarkedPostIds"] = \
+                    list(self._ckpt_store["bookmarkedPostIds"])
+                self.bridge.x_state["retweetedPostIds"] = \
+                    list(self._ckpt_store["retweetedPostIds"])
+            return OpOutcome(
+                op=op, verdict="applied", http_status=200,
+                response={"ok": True, "disposition": "complete",
+                          "checkpoint_id": cid},
+                sse_window=[
+                    {"sse_type": "action.observed", "event_id": "e5"},
+                    {"sse_type": "action.landed", "event_id": "e6"},
+                    {"sse_type": "governance.applied", "event_id": "e7"},
+                ],
+                projection_before={"revision": 3, "variables": {}},
+                projection_after={"revision": 4, "variables": {}},
+            )
+        if op.kind == "stop":
+            return OpOutcome(
+                op=op, verdict="applied", http_status=200,
+                response={"ok": True},
+                sse_window=[{"sse_type": "governance.applied", "event_id": "e8"}],
+                projection_before={"revision": 4, "variables": {}},
+                projection_after={"revision": 5, "variables": {}},
+            )
+        # default: applied
+        return OpOutcome(op=op, verdict="applied", http_status=200,
+                         response={"ok": True})
+
+
+def _cua_ledger(model: str = "test-model"):
+    """A ledger double with one landed CUA row. In a real trial the CUA
+    model calls inside the execution stage land these rows themselves;
+    the scripted driver REPLACES the model, so the test injects the row
+    — the grader's ledger-integrity check then sees real telemetry
+    backing the GUI actions (record()'s real signature takes a
+    ModelCallRecord, taskvm/architect/port.py)."""
+    from taskvm.architect import (
+        MODEL_ROLE_CUA, ModelCallLedger, ModelCallRecord)
+    ledger = ModelCallLedger()
+    ledger.record(ModelCallRecord(
+        role=MODEL_ROLE_CUA, purpose="trial_gesture",
+        model=model, ok=True))
+    return ledger
+
+
+def test_rm_c04_01_deferred_rollback_resolves_checkpoint_id(fake_bridge):
+    """The deferred rollback entry resolves ``checkpoint_id`` from the
+    FIRST checkpoint op's public HTTP response — no hidden id source.
+
+    Verifies the callable ``_rollback_to_first_checkpoint`` correctly
+    scans ``previous_outcomes`` for a checkpoint kind op and extracts
+    the ``checkpoint_id`` field from its response."""
+    from taskvm_bench.benchmark.rm_anchor_tasks import \
+        _rollback_to_first_checkpoint
+
+    ckpt_op = UserOp.checkpoint("C0")
+    ckpt_outcome = OpOutcome(
+        op=ckpt_op, verdict="applied", http_status=200,
+        response={"checkpoint_id": "ckpt-1", "label": "C0"})
+    # the deferred op resolves from prior outcomes
+    resolved = _rollback_to_first_checkpoint([ckpt_outcome])
+    assert resolved.kind == "rollback"
+    assert resolved.payload["target_checkpoint_id"] == "ckpt-1"
+
+    # no checkpoint in prior outcomes → honest ValueError
+    start_outcome = OpOutcome(op=UserOp.start(), verdict="applied")
+    with pytest.raises(ValueError, match="checkpoint"):
+        _rollback_to_first_checkpoint([start_outcome])
+
+
+def test_rm_c04_01_full_chain_e2e(fake_bridge):
+    """RM-C04-01 end-to-end: checkpoint → start (forward work) →
+    rollback (reverse GUI) → stop, graded by the R1 deterministic grader.
+
+    The trial MUST pass: the final state equals the seed (rollback
+    restored both effects), the witness values appeared (like+bookmark
+    held on the CPI post at the start op's after-state), the protected
+    post survived untouched, and GUI compensation happened inside the
+    rollback bracket.
+    """
+    fixture = mobilegym_fixture_view(RM_C04_01)
+    spec = MobileGymTrialSpec(
+        fixture=fixture, sid="rm-c04-01-e0-s0", model="test-model",
+        condition="taskvm-real-full")
+    driver = ScriptedXDriver(fake_bridge)
+    factory = _factory(fake_bridge)
+    factory.ensure_bridge()
+
+    # seed the protected post as pre-bookmarked (the fixture's seed_state
+    # expresses this as the x.user.bookmarkedPostIds store slice)
+    # — the FakeBridge's /api/inject_task/ handler already deep-merges
+    # this from the seed_state the factory sends during setup_trial
+
+    # inject a ledger with a landed CUA row — the ScriptedXDriver
+    # simulates GUI actions (action.observed/action.landed SSE); the
+    # grader's ledger-integrity check requires telemetry to back them
+    # (in a real trial the CUA model calls land these rows themselves)
+    ledger = _cua_ledger()
+
+    record = factory.run_trial(
+        spec,
+        bootstrap_fn=lambda **kw: {"sid": kw["sid"]},
+        driver=driver,
+        user_ops=rm_c04_01_user_ops(),
+        ledger=ledger,
+    )
+
+    # ── 1. the op program ran in the correct order ──────────────────
+    assert [op.kind for op in driver.executed] == \
+        ["checkpoint", "start", "rollback", "stop"]
+
+    # ── 2. the deferred rollback resolved the checkpoint_id ──────────
+    rollback_op = driver.executed[2]
+    assert rollback_op.kind == "rollback"
+    assert rollback_op.payload["target_checkpoint_id"] == "ckpt-1"
+
+    # ── 3. per-op records landed on the TrialRecord ──────────────────
+    assert [op["kind"] for op in record.user_ops] == \
+        ["checkpoint", "start", "rollback", "stop"]
+    assert all(op["verdict"] == "applied" for op in record.user_ops)
+
+    # ── 4. the R1 grader produced a five-field verdict ───────────────
+    assert record.contract_verdict is not None
+    cv = record.contract_verdict
+    assert set(cv) >= {
+        "world_contract", "governance_contract",
+        "projection_consistency", "progress", "failure_codes",
+        "passed"}
+
+    # ── 5. the trial PASSED ───────────────────────────────────────────
+    # The final state == seed (rollback restored both effects), the
+    # witness values appeared (like+bookmark on CPI post at start's
+    # after-state), the protected post survived, GUI compensation
+    # happened in the rollback bracket.
+    assert record.trial_verdict == "pass", (
+        f"expected pass, got {record.trial_verdict}; "
+        f"failure_codes={cv.get('failure_codes')}; "
+        f"world={cv.get('world_contract', {}).get('failed_codes')}; "
+        f"gov={cv.get('governance_contract', {}).get('failed_codes')}; "
+        f"proj={cv.get('projection_consistency', {}).get('failed_codes')}; "
+        f"progress={cv.get('progress', {}).get('failed_codes')}")
+    assert cv["passed"] is True
+    assert cv["failure_codes"] == []
+
+    # ── 6. evidence bundle landed on the factory ──────────────────────
+    bundle = factory.last_evidence
+    assert bundle is not None
+    assert bundle.task_id == RM_C04_01.task_id
+
+    # ── 7. witness: the forward work appeared on the oracle timeline ─
+    timeline = bundle.oracle_timeline()
+    # find the start op's after-state — the CPI post should be
+    # liked AND bookmarked at that point
+    start_after = None
+    for label, state in timeline:
+        if "start" in label and "after" in label:
+            start_after = state
+            break
+    assert start_after is not None, "start op after-state not found"
+    x_rows = start_after.get("x", {})
+    assert x_rows.get(f"{CPI_POST_ID}.liked") == "true"
+    assert x_rows.get(f"{CPI_POST_ID}.bookmarked") == "true"
+
+    # ── 8. protected: the sibling post survived untouched ─────────────
+    final_state = bundle.oracle_final
+    x_final = final_state.get("x", {})
+    assert x_final.get(f"{PROTECTED_POST_ID}.bookmarked") == "true"
+    assert x_final.get(f"{PROTECTED_POST_ID}.liked") == "false"
+
+    # ── 9. the final state == the seed (rollback truly restored) ──────
+    seed_state = bundle.oracle_seed
+    x_seed = seed_state.get("x", {})
+    for key, expected in x_seed.items():
+        assert x_final.get(key) == expected, \
+            f"final state mismatch on {key}: " \
+            f"seed={expected}, final={x_final.get(key)}"
+
+    # ── 10. GUI compensation in the rollback bracket ──────────────────
+    rollback_brackets = bundle.rollback_brackets()
+    assert len(rollback_brackets) == 1
+    rb = rollback_brackets[0]
+    assert rb.gui_actions >= 2  # action.observed + action.landed
+
+    # ── 11. checkpoint bracket exists and has the right response ─────
+    ckpt_brackets = bundle.checkpoint_brackets()
+    assert len(ckpt_brackets) == 1
+    assert ckpt_brackets[0].response.get("checkpoint_id") == "ckpt-1"
+
+
+def test_rm_c04_01_no_rollback_fails_witness(fake_bridge):
+    """Without the rollback (forward work stays), the final state does
+    NOT match the frozen success state → world_contract fails.
+
+    This verifies the witness predicate: a system that does the forward
+    work but never rolls back cannot pass — the success state requires
+    the effects to be restored."""
+    fixture = mobilegym_fixture_view(RM_C04_01)
+    spec = MobileGymTrialSpec(
+        fixture=fixture, sid="rm-c04-01-no-rb", model="test-model")
+    driver = ScriptedXDriver(fake_bridge)
+    factory = _factory(fake_bridge)
+    factory.ensure_bridge()
+
+    # run WITHOUT the rollback op — just checkpoint, start, stop
+    record = factory.run_trial(
+        spec,
+        bootstrap_fn=lambda **kw: {"sid": kw["sid"]},
+        driver=driver,
+        user_ops=[
+            UserOp.checkpoint("C0"),
+            UserOp.start(),
+            UserOp.stop(),
+        ],
+    )
+    # the forward work landed (like+bookmark) but the rollback never
+    # ran → the final state has CPI post liked+bookmarked, NOT the
+    # frozen success state (which requires them false) → FAIL
+    assert record.trial_verdict == "fail"
+    assert record.contract_verdict is not None
+    assert not record.contract_verdict["passed"]
+    # the world contract must have caught the mismatch
+    assert "WORLD_REQUIRED_WRITE_MISSING" in \
+        record.contract_verdict["failure_codes"]
+
+
+def test_rm_c04_01_noop_fails_witness(fake_bridge):
+    """A pure no-op trial (checkpoint + stop, no forward work) must
+    FAIL the witness predicate: the like+bookmark values never appeared
+    on the oracle timeline → the no-op loophole stays closed."""
+    fixture = mobilegym_fixture_view(RM_C04_01)
+    spec = MobileGymTrialSpec(
+        fixture=fixture, sid="rm-c04-01-noop", model="test-model")
+    driver = ScriptedXDriver(fake_bridge)
+    factory = _factory(fake_bridge)
+    factory.ensure_bridge()
+
+    record = factory.run_trial(
+        spec,
+        bootstrap_fn=lambda **kw: {"sid": kw["sid"]},
+        driver=driver,
+        user_ops=[
+            UserOp.checkpoint("C0"),
+            UserOp.stop(),
+        ],
+    )
+    assert record.trial_verdict == "fail"
+    assert "WORLD_WITNESS_MISSING" in \
+        record.contract_verdict["failure_codes"]
+
+
+def test_rm_c04_01_protected_violation_detected(fake_bridge):
+    """A sloppy CUA whose tamper on the protected post SURVIVES to the
+    post-trial snapshot → the non-interference predicate catches it.
+
+    The frozen semantics (schema.py): a protected field must be
+    byte-identical between the PRE-trial and POST-trial snapshots. A
+    transient tamper that a CORRECT rollback restores (final == seed)
+    does not fire the code — the checkpoint restore legitimately brings
+    the field back. So the tamper here lands AFTER the rollback, during
+    the CUA's post-rollback verification sweep: the sibling post's
+    bookmark toggle gets sloppily hit and the violation is still in
+    place at trial end → FAIL."""
+    fixture = mobilegym_fixture_view(RM_C04_01)
+    spec = MobileGymTrialSpec(
+        fixture=fixture, sid="rm-c04-01-prot", model="test-model")
+
+    class DirtyDriver(ScriptedXDriver):
+        # tamper during the STOP op (after the rollback): a tamper in
+        # the forward window would be restored by the checkpoint
+        # rollback — final would equal seed and the frozen snapshot
+        # comparison would rightly NOT fire
+        def execute(self, op):
+            outcome = super().execute(op)
+            if op.kind == "stop":
+                # the sloppy verification sweep hits the sibling post's
+                # bookmark toggle — the tamper survives to trial end
+                if PROTECTED_POST_ID in \
+                        self.bridge.x_state["bookmarkedPostIds"]:
+                    self.bridge.x_state["bookmarkedPostIds"].remove(
+                        PROTECTED_POST_ID)
+            return outcome
+
+    driver = DirtyDriver(fake_bridge)
+    factory = _factory(fake_bridge)
+    factory.ensure_bridge()
+
+    record = factory.run_trial(
+        spec,
+        bootstrap_fn=lambda **kw: {"sid": kw["sid"]},
+        driver=driver,
+        user_ops=rm_c04_01_user_ops(),
+        ledger=_cua_ledger(),
+    )
+    assert record.trial_verdict == "fail"
+    # the protected field changed between the pre-trial and post-trial
+    # snapshots (bookmarked: true → false)
+    assert "WORLD_PROTECTED_CHANGED" in \
+        record.contract_verdict["failure_codes"]
+    # the ledger double backs the GUI actions — integrity is NOT
+    # broken: the failure is attributed to the world contract, not to
+    # missing telemetry
+    assert "LEDGER_INTEGRITY_BROKEN" not in \
+        record.contract_verdict["failure_codes"]
