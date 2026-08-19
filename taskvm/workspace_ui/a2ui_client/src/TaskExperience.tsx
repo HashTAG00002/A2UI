@@ -1,93 +1,159 @@
 /**
- * TaskExperience — the island's composition root (wave A5: mock-driven).
+ * TaskExperience — the island's composition root (A5: REAL stream).
  *
- * Owns the compile-chain progression (T0 → T1 → T2 → live) fed by MOCK
- * data this wave; the SSE transport (next wave) replaces the timers with
- * real bootstrap/stream events — the component tree does not change,
- * only where `advance*` / `processMessages` get called from.
+ * Everything the user sees is driven by server truth:
+ *  - §20.1 progress events (goal / t1 / t2 / ready / …) drive the morph
+ *    chain through the pure reducer (`a2ui/morph.ts`) — no local timers,
+ *    no faked skeletons;
+ *  - ordered A2UI messages feed the official MessageProcessor;
+ *  - renderer actions cross the actionBridge: the edited value is read
+ *    from the CLIENT-side data model (the GenericBinder's generated
+ *    setValue → dataContext.set wrote it there on every keystroke) and
+ *    POSTed to the ONLY write path (/api/app/a2ui/action → policy
+ *    re-check → ONE governance local_patch). The zero-model-call
+ *    updateDataModel frame from the server poller is how the new value
+ *    lands back on screen — the A5 acceptance loop.
  *
- * Governance intents (start/pause/…) stay in the shell; the dynamic
- * surface's actions cross the actionBridge as structured events.
+ * Governance intents (start/pause/…) stay local-shell behavior this
+ * wave (wiring them to the public governance routes is a separate
+ * card); the shell chrome itself is untouched.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { GovernanceShell, type TaskStatus } from './governance/GovernanceShell';
+import { GovernanceShell } from './governance/GovernanceShell';
 import {
   ProgressiveTaskPlane,
-  type CompilePhase,
   type WorkflowNodeChip,
 } from './progressive/ProgressiveTaskPlane';
 import { A2uiSurface } from '@a2ui/react/v0_9';
+import type { A2uiClientAction } from '@a2ui/web_core/v0_9';
 import { useA2uiStream } from './a2ui/useA2uiStream';
 import { translateAction } from './a2ui/actionBridge';
-import { mockA2uiMessages } from './a2ui/mockMessages';
+import {
+  connectA2ui,
+  fetchAppStatus,
+  postSurfaceAction,
+  type A2uiConnectionState,
+} from './a2ui/transport';
+import {
+  INITIAL_ISLAND_STATE,
+  reduceProgress,
+  withSurfacesLive,
+  type IslandState,
+} from './a2ui/morph';
 
-const MOCK_GOAL = '把发布会日期改到 8 月底并通知所有参会人';
-
-/** Mock compile-chain returns (T1/T2 payloads — labels only, honest). */
-const MOCK_VARIABLE_SKELETONS = [
-  { label: '发布日期' },
-  { label: '通知名单' },
-  { label: '预算' },
-];
-
-const MOCK_WORKFLOW_NODES: WorkflowNodeChip[] = [
-  { label: '修改发布日期', kind: 'step', status: 'waiting' },
-  { label: '日期确认点', kind: 'checkpoint', status: 'waiting' },
-  { label: '校验通知名单', kind: 'verification', status: 'waiting' },
-];
-
-const SUBSTRATE_LABEL = 'MobileGym';
+const WAITING_GOAL_TEXT = '等待第一条任务指令…';
 
 export function TaskExperience() {
-  const [phase, setPhase] = useState<CompilePhase>('t0');
-  const [status, setStatus] = useState<TaskStatus>('compiling');
+  const [state, setState] = useState<IslandState>(INITIAL_ISLAND_STATE);
+  const [lastAction, setLastAction] = useState<string | null>(null);
+  const [connState, setConnState] =
+    useState<A2uiConnectionState>('connecting');
   const [checkpoints, setCheckpoints] = useState<{ label: string }[]>([]);
   const [evidenceCount] = useState(2);
-  const [lastAction, setLastAction] = useState<string | null>(null);
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  const onSurfaceAction = useCallback((action: Parameters<typeof translateAction>[0]) => {
+  // The processor is created inside useA2uiStream; the action handler
+  // needs it (to read the client-side data model) BEFORE the hook's
+  // return value exists — a ref bridges the declaration order. The hook
+  // stores the handler in a ref too, so it always fires with the latest.
+  const processorRef = useRef<ReturnType<
+    typeof useA2uiStream
+  >['processor'] | null>(null);
+
+  const onSurfaceAction = useCallback((action: A2uiClientAction) => {
     const event = translateAction(action);
-    if (event.kind === 'taskvm.local_patch') {
-      setLastAction(`local_patch(${event.semanticKey})`);
-    } else {
+    if (event.kind === 'rejected') {
       setLastAction(`rejected(${event.actionName}): ${event.reason}`);
+      return;
     }
+    // The edited value lives in the CLIENT-side data model: the
+    // GenericBinder auto-generated setValue (dataContext.set) wrote it
+    // there on every keystroke (generic-binder.js "setters"). The
+    // protocol-native alternative — binding {"path": …} inside
+    // action.event.context — is rejected by the current genui policy
+    // layer (ticket A5-IFACE-01: docs/04_RM&APP时代/
+    // ticket_A5_IFACE_01_policy_databinding.md); this read is the
+    // interim, equally-honest path.
+    const surface = processorRef.current?.model.surfacesMap.get(
+      action.surfaceId,
+    );
+    const value = surface?.dataModel.get(
+      `/variables/${event.semanticKey}/desired`,
+    );
+    if (value === undefined) {
+      setLastAction(
+        `rejected(${event.kind}): 读不到 ${event.semanticKey} 的编辑值`,
+      );
+      return;
+    }
+    postSurfaceAction(event.kind, {
+      semanticKey: event.semanticKey,
+      value,
+    }).then((res) => {
+      setLastAction(
+        res.ok
+          ? `local_patch(${event.semanticKey}) 已提交`
+          : `local_patch(${event.semanticKey}) ✗ ${res.error ?? '失败'}`,
+      );
+    });
   }, []);
 
   const stream = useA2uiStream(onSurfaceAction);
 
-  // Mock compile chain: T0 → T1 → T2 → live, then the A2UI stream
-  // replaces the skeleton. Timers stand in for compiler/architect/
-  // decoder returns; the real transport swaps them out next wave.
   useEffect(() => {
-    const t1 = setTimeout(() => setPhase('t1'), 350);
-    const t2 = setTimeout(() => setPhase('t2'), 800);
-    const t3 = setTimeout(() => {
-      stream.processMessages(mockA2uiMessages);
-      setPhase('live');
-      setStatus('ready');
-    }, 1400);
-    timers.current.push(t1, t2, t3);
-    return () => {
-      timers.current.forEach(clearTimeout);
-      timers.current = [];
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    processorRef.current = stream.processor;
+  }, [stream.processor]);
 
-  const canStart = phase === 'live' && status === 'ready';
+  // ── the REAL transport: one SSE connection for both streams ────────
+  const processMessages = stream.processMessages;
+  useEffect(() => {
+    const conn = connectA2ui({
+      onMessages: (messages) => processMessages(messages),
+      onProgress: (ev) => setState((s) => reduceProgress(s, ev)),
+      onConnectionChange: setConnState,
+    });
+    // Refresh recovery: the fixed APP shell's public status route is the
+    // authority for the goal text while no progress event has arrived
+    // yet (e.g. the island was opened directly after a goal started).
+    fetchAppStatus().then((st) => {
+      const goals = st?.goals ?? [];
+      const last = goals[goals.length - 1];
+      if (!last) return;
+      setState((s) => (s.goal ? s : { ...s, goal: last.goal }));
+    });
+    return () => conn.close();
+  }, [processMessages]);
+
+  // The A2UI messages themselves are the authoritative surface-exists
+  // evidence (reconnect/replay path — the progress ring may overflow).
+  const hasSurfaces = stream.surfaces.length > 0;
+  useEffect(() => {
+    if (hasSurfaces) setState((s) => withSurfacesLive(s));
+  }, [hasSurfaces]);
+
+  // ── governance shell intents (local this wave — separate card) ─────
+  const canStart = state.phase === 'live' && state.status === 'ready';
 
   const onStart = useCallback(() => {
     if (!canStart) return;
-    setStatus('running');
+    setState((s) => ({ ...s, status: 'running' }));
     setLastAction('start');
   }, [canStart]);
 
-  const onPause = useCallback(() => setStatus((s) => (s === 'running' ? 'paused' : s)), []);
-  const onResume = useCallback(() => setStatus((s) => (s === 'paused' ? 'running' : s)), []);
+  const onPause = useCallback(
+    () =>
+      setState((s) => ({ ...s, status: s.status === 'running' ? 'paused' : s.status })),
+    [],
+  );
+  const onResume = useCallback(
+    () =>
+      setState((s) => ({ ...s, status: s.status === 'paused' ? 'running' : s.status })),
+    [],
+  );
   const onStop = useCallback(() => {
-    setStatus((s) => (s === 'running' || s === 'paused' ? 'failed' : s));
+    setState((s) => ({
+      ...s,
+      status: s.status === 'running' || s.status === 'paused' ? 'failed' : s.status,
+    }));
     setLastAction('stop');
   }, []);
 
@@ -105,8 +171,8 @@ export function TaskExperience() {
 
   return (
     <GovernanceShell
-      goal={MOCK_GOAL}
-      status={status}
+      goal={state.goal || WAITING_GOAL_TEXT}
+      status={state.status}
       canStart={canStart}
       onStart={onStart}
       onPause={onPause}
@@ -117,20 +183,32 @@ export function TaskExperience() {
       checkpoints={checkpoints}
       evidenceCount={evidenceCount}
       onOpenEvidence={onOpenEvidence}
-      substrateLabel={SUBSTRATE_LABEL}
+      substrateLabel="MobileGym"
       onOpenSubstrate={onOpenSubstrate}
     >
       <ProgressiveTaskPlane
-        phase={phase}
-        variableSkeletons={MOCK_VARIABLE_SKELETONS}
-        workflowNodes={MOCK_WORKFLOW_NODES}
+        phase={state.phase}
+        variableSkeletons={state.skeletons}
+        workflowNodes={state.nodes as WorkflowNodeChip[]}
         live={
           <>
             {stream.surfaces.map((surface) => (
               <A2uiSurface key={surface.id} surface={surface} />
             ))}
+            {connState !== 'open' && (
+              <p className="conn-state" data-testid="conn-state">
+                {connState === 'reconnecting' ? '连接中断，正在重连…' : '连接中…'}
+              </p>
+            )}
+            {state.streamError && (
+              <p className="stream-error" data-testid="stream-error">
+                {state.streamError}
+              </p>
+            )}
             {lastAction && (
-              <p className="last-action" data-testid="last-action">{lastAction}</p>
+              <p className="last-action" data-testid="last-action">
+                {lastAction}
+              </p>
             )}
           </>
         }
