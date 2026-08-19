@@ -55,9 +55,14 @@ _REPAIR_GUIDANCE: tuple[tuple[re.Pattern, str], ...] = (
     (re.compile(r"depends on sibling", re.I),
      "in a fan-out, lanes must be independent — remove any lane-to-lane "
      "'after' ordering; lanes re-join only at the barrier"),
-    (re.compile(r"single ordered chain|found a fork", re.I),
-     "inside a sequence, steps run in the listed order — exactly one step "
-     "may be next at any point (no forking inside a sequence)"),
+    (re.compile(
+        r"single ordered chain|found a fork|listed order|listed step",
+        re.I),
+     "inside a sequence, steps run in the LISTED order: list them in "
+     "execution order and give each step 'after' the previous step of "
+     "the same sequence (it may also wait on nodes outside the sequence); "
+     "for steps that should run in parallel, use fan-out lanes that "
+     "re-join at one barrier — never put parallel steps in a sequence"),
     (re.compile(r"fan[- ]?in|barrier", re.I),
      "a barrier must re-join exactly one fan-out: give it 'after' the "
      "fan-out container (or all of its lanes)"),
@@ -81,10 +86,17 @@ _REPAIR_GUIDANCE: tuple[tuple[re.Pattern, str], ...] = (
     (re.compile(r"cycle|circular", re.I),
      "remove circular 'after' dependencies — the workflow must be "
      "acyclic"),
-    (re.compile(r"non-empty 'sets'|needs a 'condition'|needs a contract|"
+    (re.compile(r"task-level governance handle", re.I),
+     "no action in the task writes a variable: at least one action must "
+     "have a non-empty 'sets' mapping (navigation / observation / trigger "
+     "steps may keep 'sets' empty, but the plan needs at least one "
+     "writing action)"),
+    (re.compile(r"non-empty 'sets'|'sets' must be an object|"
+                r"needs a 'condition'|needs a contract|"
                 r"non-empty label|needs a label|not a container", re.I),
      "fill in every required field of that node kind (label, action "
-     "'sets', verify 'condition', a valid container reference)"),
+     "'sets' — an object that may be empty {} for navigation/observation/"
+     "trigger steps, verify 'condition', a valid container reference)"),
 )
 
 GENERIC_REPAIR_GUIDANCE = (

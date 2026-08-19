@@ -19,11 +19,24 @@ GenUI structural decoder):
 
 Production vs validation (layered ownership): assembly maps the model JSON
 into ``taskvm.domain`` constructors; STATIC coherence (shape / key ⊆
-variables / binding ⊆ variables / split-brain / orphan) is proven by Agent
-A's ``TaskArchitecture`` validating constructor — ONE owner. A failed
-construction triggers a bounded repair (the ValidationError is fed back to
-the model); after ``max_repairs`` the failure is honest and final. There is
-NO fallback to a fixture/GT plan — ever.
+variables / binding ⊆ variables / split-brain / orphan / task-level
+governance handle) is proven by the domain's ``TaskArchitecture``
+validating constructor — ONE owner. A failed construction triggers a
+bounded repair (the ValidationError is fed back to the model); after
+``max_repairs`` (default 3 — RFC-A01) the failure is honest and final.
+There is NO fallback to a fixture/GT plan — ever.
+
+Sequence semantics (RFC-A01 / W0.2): the system prompt promises "a
+sequence's steps run in your listed order" — the LISTED order is the
+model's ordering intent, so the assembler completes each sequence's
+intra-container chain in listed order whenever the model's explicit
+intra-sequence 'after' edges are CONSISTENT with that order (including
+when there are none, or when an edge points at a node outside the
+container — the phantom-fork shape). An explicit edge that CONTRADICTS
+the listed order is an honest assembly rejection with a specific repair
+guidance. Genuinely parallel steps belong in fan-out lanes + a barrier;
+the domain's single-chain rule for sequences is untouched (kernel
+scheduling primitive, frozen).
 
 ``recompose_future`` is the GoalPatch path: the kernel has already applied
 ``apply_goal_patch`` (history preserved, uncommitted future invalidated,
@@ -85,7 +98,8 @@ termination predicate in words>", "max_iterations": 3},
    {"kind": "action", "label": "...", "container": "<container label or null>",
     "after": ["<labels this node waits for>"],
     "semantic_goal": "<what must become true, in business words>",
-    "sets": {"<semantic_key>": "<target value>"},
+    "sets": {"<semantic_key>": "<target value>"} (or {} for a navigation/
+     observation/trigger step that writes no variable),
     "completion": "<how a user recognises completion on the visible screen>",
     "reversibility": "reversible|partially_reversible|irreversible",
     "risk": "<one short risk note, or empty>",
@@ -100,14 +114,19 @@ fan-out container>"]},
    {"label": "<unique label>", "type": "card|field|list|progress|note",
     "binds": "<semantic_key or null>", "editable": false,
     "children": ["<child component labels>"]}]}}
-Topology rules: use ONLY sequence / fan-out+barrier / bounded-loop shapes; a \
-sequence's steps run in your listed order; fan-out lanes are independent and \
-re-join at exactly one barrier; a bounded loop has BOTH a termination \
+Topology rules: use ONLY sequence / fan-out+barrier / bounded-loop shapes; \
+a sequence's steps run in your listed order — list them in execution order \
+and give each step 'after' the previous step of the same sequence (a step \
+may also wait on nodes outside the sequence); steps that should run in \
+parallel belong in fan-out lanes, which are independent and re-join at \
+exactly one barrier; a bounded loop has BOTH a termination \
 predicate and max_iterations and its body is only action/verify nodes; there \
 is EXACTLY ONE terminal and it is the final sink; place checkpoint nodes at \
 boundaries worth pausing or rolling back to; every variable whose desired \
 value differs from observed must be finally written by some action to that \
-exact value; address targets ONLY by visible labels and business keys, \
+exact value; at least one action in the whole task must write a variable \
+(navigation/observation/trigger steps may keep 'sets' empty); \
+address targets ONLY by visible labels and business keys, \
 never by internal ids or operator names.
 Output ONLY the JSON object."""
 
@@ -198,7 +217,7 @@ class TaskArchitect:
     """Goal + observed state → one validated TaskArchitecture."""
 
     def __init__(self, port: ModelPort, ledger: ModelCallLedger | None = None,
-                 *, model: str | None = None, max_repairs: int = 1) -> None:
+                 *, model: str | None = None, max_repairs: int = 3) -> None:
         self._port = port
         self._ledger = ledger
         self._model = model
@@ -540,11 +559,21 @@ class TaskArchitect:
             max_iters = None
             verification = None
             if kind is NodeKind.ACTION:
+                # RFC-A01 / W0.2: an action may be a navigation /
+                # observation / trigger step — ``sets: {}`` is legal at
+                # NODE level. The governance guarantee moved to TASK level
+                # (TaskArchitecture: at least one action writes a
+                # variable), so the contract keeps its handle without
+                # misclassifying semantically-correct model output.
                 sets = rn.get("sets")
-                if not isinstance(sets, dict) or not sets:
+                if sets is None:
+                    sets = {}
+                if not isinstance(sets, dict):
                     raise ArchitectOutputError(
-                        f"action {rn['label']!r} needs a non-empty 'sets' "
-                        f"mapping")
+                        f"action {rn['label']!r} 'sets' must be an object "
+                        f"mapping semantic keys to target values (it may "
+                        f"be empty for a navigation/observation/trigger "
+                        f"step)")
                 rev = str(rn.get("reversibility") or "reversible")
                 if rev not in _REVERSIBILITY:
                     raise ArchitectOutputError(
@@ -607,11 +636,19 @@ class TaskArchitect:
                     carried: tuple[WorkflowNode, ...]) -> list[WorkflowNode]:
         """Deterministic order-fill + history stitching.
 
-        1. When the model listed NO explicit ordering edges inside a scope,
-           wire that scope's nodes in the listed order (the listed order IS
-           the model's ordering intent). Scopes: each SEQUENCE container's
-           children, and the top level.
-        2. Stitch the carried frontier: the terminal also depends on every
+        1. SEQUENCE containers: the listed order IS the model's ordering
+           intent (the system prompt promises "steps run in your listed
+           order"), so complete each sequence's intra-container chain in
+           listed order — adding the missing consecutive edges — whenever
+           the model's explicit intra-sequence edges are CONSISTENT with
+           that order. This covers both the no-explicit-edges case and the
+           partial-edges case (including edges that point at nodes OUTSIDE
+           the container — the phantom-fork shape where a step's only
+           dependency is an external checkpoint). An explicit edge that
+           CONTRADICTS the listed order is rejected honestly with a
+           specific message (business labels only, no internal ids).
+        2. Top level with no intra-top edges → listed order (unchanged).
+        3. Stitch the carried frontier: the terminal also depends on every
            carried TOP-LEVEL node it cannot already reach — committed
            history must remain on the path to the end. This can never
            create a cycle: carried nodes never depend on new nodes.
@@ -619,25 +656,37 @@ class TaskArchitect:
         by_id = {n.node_id: n for n in nodes}
         top_new_ids = {n.node_id for n in new_nodes if n.parent_id is None}
 
+        # 1. sequence containers: complete the chain in listed order
+        #    (consistency-checked — see docstring)
+        for cont in [n for n in new_nodes
+                     if n.kind is NodeKind.SEQUENCE]:
+            child_ids = [c.node_id for c in nodes
+                         if c.parent_id == cont.node_id]
+            if len(child_ids) <= 1:
+                continue
+            child_set = set(child_ids)
+            pos = {cid: i for i, cid in enumerate(child_ids)}
+            for cid in child_ids:
+                for dep in by_id[cid].depends_on:
+                    if dep in child_set and pos[dep] > pos[cid]:
+                        raise ArchitectOutputError(
+                            f"sequence {cont.label!r}: the listed order "
+                            f"puts step {by_id[cid].label!r} before step "
+                            f"{by_id[dep].label!r}, but the former waits "
+                            f"'after' the latter — list the steps in "
+                            f"execution order or drop that 'after' edge")
+            for prev_nid, next_nid in zip(child_ids, child_ids[1:]):
+                node = by_id[next_nid]
+                if prev_nid not in node.depends_on:
+                    by_id[next_nid] = replace(
+                        node,
+                        depends_on=node.depends_on + (prev_nid,))
+        # 2. top level with no intra-top edges → listed order
         def has_explicit_edges(scope_ids: set[str]) -> bool:
             return any(set(by_id[nid].depends_on)
                        & (scope_ids - {nid})
                        for nid in scope_ids if nid in by_id)
 
-        # 1a. sequence containers with no intra-child edges → listed order
-        for cont in [n for n in new_nodes
-                     if n.kind is NodeKind.SEQUENCE]:
-            child_ids = [c.node_id for c in nodes
-                         if c.parent_id == cont.node_id]
-            if (len(child_ids) > 1
-                    and not has_explicit_edges(set(child_ids))):
-                for prev_nid, next_nid in zip(child_ids, child_ids[1:]):
-                    node = by_id[next_nid]
-                    if prev_nid not in node.depends_on:
-                        by_id[next_nid] = replace(
-                            node,
-                            depends_on=node.depends_on + (prev_nid,))
-        # 1b. top level with no intra-top edges → listed order
         if len(top_new_ids) > 1 and not has_explicit_edges(top_new_ids):
             chain = [n.node_id for n in nodes if n.node_id in top_new_ids]
             for prev_nid, next_nid in zip(chain, chain[1:]):

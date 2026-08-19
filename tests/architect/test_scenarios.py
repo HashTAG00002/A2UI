@@ -17,6 +17,13 @@ Scenarios:
 
 Plus the ActionContractSerializer determinism suite (replaces the deleted
 LLM SubgoalGenerator) and the ModelCallLedger accounting contract.
+
+Plus the W0.2 / RFC-A01 schema-liberation anchors: observation/trigger
+actions with empty 'sets' are legal at NODE level (task-level handle),
+the sequence chain is completed in listed order (phantom-fork shape
+from the 2026-08-19 demo baseline replays verbatim), a contradictory
+'after' edge is rejected with specific guidance, and the default
+bounded-repair budget is four attempts.
 """
 import json
 
@@ -603,3 +610,222 @@ def test_ledger_rejects_unknown_role_and_counts():
     assert (p, c) == (100, 50)
     snap = ledger.snapshot()
     assert snap[1]["is_repair"] is True
+
+
+# ── W0.2 / RFC-A01: schema liberation anchors ─────────────────────
+#
+# Baseline (eval_results/taskvm_demo_run_20260819): 6/6 real goals died
+# at the architect stage, 0 CUA calls. The three rigid rules below are
+# the fixed rejection points, locked here as regression anchors.
+
+DEMO_GOAL3_VARS = (
+    TaskVariable(semantic_key="message_recipient", label="消息接收人",
+                 observed=None, value_type="string"),
+    TaskVariable(semantic_key="message_content", label="消息内容",
+                 observed=None, value_type="string"),
+)
+
+# The VERBATIM workflow shape of the demo goal-3 failure
+# (call_012_task_architect.txt — the model's repair round): a sequence
+# container, a checkpoint OUTSIDE the container (phantom fork), partial
+# intra-sequence 'after' edges, and a trailing TRIGGER action whose
+# 'sets' is empty because earlier steps already wrote the variables.
+DEMO_GOAL3_JSON = {
+    "variables": [
+        {"semantic_key": "message_recipient", "label": "消息接收人",
+         "value_type": "string", "mutability": "editable",
+         "desired": "黄勇"},
+        {"semantic_key": "message_content", "label": "消息内容",
+         "value_type": "string", "mutability": "editable",
+         "desired": "明天上午十点开会"},
+    ],
+    "workflow": {"nodes": [
+        {"kind": "sequence", "label": "发送微信消息流程"},
+        {"kind": "action", "label": "打开黄勇聊天",
+         "container": "发送微信消息流程", "after": [],
+         "semantic_goal": "当前打开的微信聊天对象是黄勇",
+         "sets": {"message_recipient": "黄勇"},
+         "completion": "聊天页面顶部可见联系人名称“黄勇”",
+         "reversibility": "reversible", "risk": "",
+         "target_evidence": ["黄勇"]},
+        {"kind": "action", "label": "填写消息内容",
+         "container": "发送微信消息流程", "after": ["打开黄勇聊天"],
+         "semantic_goal": "消息输入框中的完整内容为“明天上午十点开会”",
+         "sets": {"message_content": "明天上午十点开会"},
+         "completion": "消息输入框中可见完整文字“明天上午十点开会”",
+         "reversibility": "reversible", "risk": "",
+         "target_evidence": ["明天上午十点开会"]},
+        {"kind": "checkpoint", "label": "发送前确认",
+         "after": ["填写消息内容"]},
+        {"kind": "action", "label": "发送消息",
+         "container": "发送微信消息流程", "after": ["发送前确认"],
+         "semantic_goal": "将“明天上午十点开会”发送给黄勇",
+         "sets": {},
+         "completion": "黄勇聊天页面中出现内容为“明天上午十点开会”的已发送消息气泡",
+         "reversibility": "partially_reversible", "risk": ""},
+        {"kind": "verify", "label": "核验消息已发送",
+         "container": "发送微信消息流程", "after": ["发送消息"],
+         "condition": "聊天页面顶部显示“黄勇”，且对话中可见已发送消息气泡"},
+        {"kind": "terminal", "label": "消息发送完成"},
+    ]},
+    "projection": {"root": "微信消息任务卡", "components": [
+        {"label": "微信消息任务卡", "type": "card", "binds": None,
+         "children": ["接收人字段", "消息内容字段"]},
+        {"label": "接收人字段", "type": "field", "binds": "message_recipient",
+         "editable": False, "children": []},
+        {"label": "消息内容字段", "type": "field", "binds": "message_content",
+         "editable": False, "children": []},
+    ]},
+}
+
+
+def test_w02_demo_goal3_replay_assembles():
+    """The demo baseline's goal-3 model output (semantically correct,
+    twice rejected: phantom fork + trigger action with empty 'sets')
+    assembles VERBATIM after W0.2 — this is the regression anchor for
+    GATE-ARCH (baseline 0/6 → gate ≥5/6)."""
+    port = FakePort(DEMO_GOAL3_JSON)
+    arch = TaskArchitect(port).compose(
+        TaskIntent(goal="给微信里的黄勇发一条消息，内容是：明天上午十点开会"),
+        DEMO_GOAL3_VARS)
+
+    assert len(port.calls) == 1, "no repair round needed anymore"
+    by_label = {n.label: n for n in arch.graph.nodes}
+    # the trigger action keeps its empty desired_state — the governance
+    # handle is task-level, not node-level
+    assert by_label["发送消息"].contract.desired_state == {}
+    # the sequence chain completed in LISTED order …
+    seq = next(n for n in arch.graph.nodes
+               if n.kind is NodeKind.SEQUENCE)
+    children = [n for n in arch.graph.nodes if n.parent_id == seq.node_id]
+    assert [c.label for c in children] == ["打开黄勇聊天", "填写消息内容",
+                                           "发送消息", "核验消息已发送"]
+    for earlier, later in zip(children, children[1:]):
+        assert earlier.node_id in later.depends_on
+    # … while the EXTERNAL checkpoint dependency is preserved verbatim
+    assert by_label["发送前确认"].node_id in \
+        by_label["发送消息"].depends_on
+    # the validating constructor accepted the whole architecture
+    assert len(arch.graph.terminal_nodes()) == 1
+
+
+def test_w02_navigation_and_observation_actions_need_no_sets():
+    """Navigation ('open the bill page') and observation ('read the
+    largest expense') steps write no variable: empty 'sets' is legal at
+    node level. The plan stays valid because one action DOES write."""
+    plan = {
+        "variables": [
+            {"semantic_key": "largest_expense_amount", "label": "最大支出",
+             "value_type": "number", "mutability": "readonly",
+             "desired": "最近账单中的最大支出金额"},
+        ],
+        "workflow": {"nodes": [
+            {"kind": "sequence", "label": "查账"},
+            {"kind": "action", "label": "打开支付宝账单",
+             "container": "查账", "after": [],
+             "semantic_goal": "支付宝账单页可见",
+             "sets": {}, "completion": "账单页可见",
+             "reversibility": "reversible", "risk": ""},
+            {"kind": "action", "label": "记录最大支出",
+             "container": "查账", "after": ["打开支付宝账单"],
+             "semantic_goal": "最大支出金额已知",
+             "sets": {"largest_expense_amount": "最近账单中的最大支出金额"},
+             "completion": "金额字段已填",
+             "reversibility": "reversible", "risk": ""},
+            {"kind": "action", "label": "发送汇报",
+             "container": "查账", "after": ["记录最大支出"],
+             "semantic_goal": "汇报已发出",
+             "sets": {}, "completion": "消息已发出",
+             "reversibility": "partially_reversible", "risk": ""},
+            {"kind": "terminal", "label": "完成", "after": ["查账"]},
+        ]},
+    }
+    port = FakePort(plan)
+    arch = TaskArchitect(port).compose(
+        TaskIntent(goal="查最大支出并发汇报"),
+        (TaskVariable(semantic_key="largest_expense_amount",
+                      label="最大支出", observed=None,
+                      value_type="number"),))
+    by_label = {n.label: n for n in arch.graph.nodes}
+    assert by_label["打开支付宝账单"].contract.desired_state == {}
+    assert by_label["发送汇报"].contract.desired_state == {}
+    assert by_label["记录最大支出"].contract.desired_state == {
+        "largest_expense_amount": "最近账单中的最大支出金额"}
+
+
+def test_w02_all_observation_plan_lacks_governance_handle():
+    """A plan where NO action ever writes a variable has no governance
+    handle — rejected at TASK level with guidance specific enough to
+    repair (and the repair note stays leak-clean)."""
+    all_empty = {
+        "variables": [
+            {"semantic_key": "message_recipient", "label": "接收人",
+             "value_type": "string", "mutability": "editable",
+             "desired": "黄勇"},
+        ],
+        "workflow": {"nodes": [
+            {"kind": "action", "label": "打开聊天",
+             "semantic_goal": "聊天页可见",
+             "sets": {}, "completion": "聊天页可见",
+             "reversibility": "reversible", "risk": ""},
+            {"kind": "terminal", "label": "完成", "after": ["打开聊天"]},
+        ]},
+    }
+    fixed = DEMO_GOAL3_JSON
+    port = FakePort(all_empty, fixed)
+    arch = TaskArchitect(port, max_repairs=1).compose(
+        TaskIntent(goal="给黄勇发消息"), DEMO_GOAL3_VARS)
+    assert len(port.calls) == 2, "one bounded repair round"
+    second = port.calls[1]["system"] + "\n" + port.calls[1]["user"]
+    assert "non-empty 'sets'" in second, (
+        "the repair note must tell the model exactly what is missing "
+        "(at least one writing action)")
+    assert_prompt_clean(second, what="repair message as sent")
+    assert len(arch.graph.terminal_nodes()) == 1
+
+
+def test_w02_contradictory_after_edge_rejected_with_specific_guidance():
+    """An explicit intra-sequence 'after' edge that CONTRADICTS the
+    listed order is an honest rejection — but the repair note now
+    names the actual repair action (execution order / drop the edge /
+    fan-out for parallel steps), unlike the old guidance that merely
+    restated the rule the model had already followed."""
+    contradictory = {
+        "variables": [
+            {"semantic_key": "release_date", "label": "发布日期",
+             "value_type": "date", "mutability": "editable",
+             "desired": "2026-08-18"},
+        ],
+        "workflow": {"nodes": [
+            {"kind": "sequence", "label": "排期"},
+            {"kind": "action", "label": "改发布日期",
+             "container": "排期", "after": ["核对新日期"],
+             "semantic_goal": "推迟发布会议",
+             "sets": {"release_date": "2026-08-18"},
+             "completion": "日历卡片显示 2026-08-18",
+             "reversibility": "reversible", "risk": ""},
+            {"kind": "verify", "label": "核对新日期",
+             "container": "排期", "condition": "日历卡片显示 2026-08-18"},
+            {"kind": "terminal", "label": "完成", "after": ["排期"]},
+        ]},
+    }
+    port = FakePort(contradictory, SEQUENCE_JSON)
+    arch = TaskArchitect(port, max_repairs=1).compose(
+        INTENT, (OBSERVED_VARS[0], OBSERVED_VARS[1]))
+    assert len(port.calls) == 2
+    second = port.calls[1]["system"] + "\n" + port.calls[1]["user"]
+    assert "listed order" in second and "fan-out" in second, (
+        "guidance must state the repair action, not just the rule")
+    assert_prompt_clean(second, what="repair message as sent")
+    assert arch.graph.terminal_nodes()
+
+
+def test_w02_default_repair_budget_is_four_attempts():
+    """RFC-A01: the default bounded-repair budget is now 3 repairs (4
+    attempts total) — two attempts starved semantically-correct output
+    that merely needed one more round."""
+    port = FakePort({"nonsense": True}, {"also": "nonsense"},
+                    {"still": "no"}, {"nope": True})
+    with pytest.raises(ArchitectOutputError, match="4 attempt"):
+        TaskArchitect(port).compose(INTENT, OBSERVED_VARS)
+    assert len(port.calls) == 4, "default budget consumed exactly 4 calls"

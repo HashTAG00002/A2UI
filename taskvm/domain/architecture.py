@@ -12,6 +12,12 @@ exactly once at construction:
   unordered final writers may never disagree;
 - no orphan work: every NON-EXEMPT node must be able to reach the
   TERMINAL (exempt frozen history may legitimately be a dead-end record);
+- task-level governance handle: when the graph has ACTION nodes, at
+  least one of them must write a task variable (non-empty
+  ``desired_state``) — an observation / navigation / trigger action
+  with an empty ``desired_state`` is legal, but a plan with actions
+  where NONE ever writes leaves governance with nothing to manage,
+  verify, or roll back (an action-free pure-verify probe stays legal);
 - variables are unique within the composition.
 
 The workflow's own static shape (three primitives, single sink TERMINAL)
@@ -71,6 +77,7 @@ class TaskArchitecture:
                     f"{missing}")
         if self.graph is None:
             return
+        self._check_task_level_governance_handle()
         self._check_no_orphan_work()
         writers: dict[str, list[tuple[str, Any]]] = {}
         bad: dict[str, list[str]] = {}
@@ -104,6 +111,30 @@ class TaskArchitecture:
                     f"composition incoherent (split-brain guard): variable "
                     f"{key!r} desired={desired[key]!r} but the plan's "
                     f"final writer targets {targets[0]!r}")
+
+    def _check_task_level_governance_handle(self) -> None:
+        """The WHOLE task needs at least one writing action (RFC-A01 /
+        W0.2): a plan may freely mix observation / navigation / trigger
+        actions whose ``desired_state`` is empty, but if the plan HAS
+        actions and none ever writes a variable there is no governance
+        handle — nothing the kernel could verify, patch, or compensate.
+        Frozen history counts: a committed writer is still a writer (its
+        contract is a record of verified work, exempt from coherence
+        but not from existence). An ACTION-FREE plan (a pure verify /
+        checkpoint probe) stays legal — it was legal before the rule and
+        has no actions whose handles could go missing."""
+        assert self.graph is not None  # called only from validate()'s graph branch
+        actions = [n for n in self.graph.nodes
+                   if n.kind is NodeKind.ACTION]
+        if not actions:
+            return
+        if not any(n.contract is not None and n.contract.desired_state
+                   for n in actions):
+            raise ValidationError(
+                "task-level governance handle missing: at least one action "
+                "must write a task variable (non-empty 'sets'); observation "
+                "or trigger actions with empty 'sets' are legal but cannot "
+                "be the whole plan")
 
     def _check_no_orphan_work(self) -> None:
         """Every NON-EXEMPT node must be able to REACH the TERMINAL — a

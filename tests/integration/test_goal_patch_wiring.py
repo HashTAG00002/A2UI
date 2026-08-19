@@ -183,9 +183,10 @@ def test_goal_patch_closes_recompose_over_public_route():
 
 def test_goal_patch_failure_honest_then_retry_closes():
     substrate = FakeSubstrate({"app": {"event_date": "2026-08-17"}})
-    # BAD reply + its bounded repair both fail; the GOOD reply serves retry
+    # BAD reply + all its bounded repairs fail (the default budget is
+    # now 1 initial + 3 repairs — RFC-A01); the GOOD reply serves retry
     port = ScriptedPort([COMPILER_REPLY, ARCHITECT_REPLY,
-                         BAD_REPLY, BAD_REPLY,
+                         BAD_REPLY, BAD_REPLY, BAD_REPLY, BAD_REPLY,
                          RECOMPOSE_REPLY, CUA_ACT_19, CUA_DONE])
     ledger = ModelCallLedger()
     store = ProjectionSessionStore()

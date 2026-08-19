@@ -135,6 +135,68 @@ def test_graph_without_variables_still_checks_contract_keys():
         TaskArchitecture(graph=graph)
 
 
+# ── task-level governance handle (RFC-A01 / W0.2) ───────────────────
+def test_plan_with_no_writing_action_is_rejected():
+    """A plan where NO action writes a variable has no governance
+    handle — nothing the kernel could verify, patch, or compensate.
+    Rejected at TASK level (the node-level rule was relaxed: an action
+    MAY have an empty desired_state)."""
+    observe = WorkflowNode(
+        node_id="a1", kind=NodeKind.ACTION, label="打开页面",
+        contract=ActionContract(contract_id="c1",
+                                semantic_goal="页面可见",
+                                desired_state={}))
+    graph = WorkflowGraph(nodes=(observe, _terminal("t", "a1")))
+    with pytest.raises(ValidationError,
+                       match="task-level governance handle"):
+        TaskArchitecture(variables=(_var("x", 1),), graph=graph)
+
+
+def test_action_free_verify_probe_stays_legal():
+    """A plan with ZERO actions (a pure verify/checkpoint probe) was
+    legal before the task-level rule and stays legal — the rule guards
+    actions' handles, and there are none."""
+    probe = WorkflowNode(node_id="v1", kind=NodeKind.VERIFY, label="确认",
+                         verification="done_flag == true")
+    graph = WorkflowGraph(nodes=(probe, _terminal("t", "v1")))
+    arch = TaskArchitecture(variables=(_var("done_flag", True),),
+                            graph=graph)
+    assert arch is not None
+
+
+def test_mixed_plan_with_one_writer_is_legal():
+    """Observation / trigger actions with empty desired_state are
+    legal as long as at least one action writes."""
+    observe = WorkflowNode(
+        node_id="a1", kind=NodeKind.ACTION, label="打开页面",
+        contract=ActionContract(contract_id="c1",
+                                semantic_goal="页面可见",
+                                desired_state={}))
+    graph = WorkflowGraph(nodes=(observe, _action("a2", "x", 1,
+                                                  depends_on=("a1",)),
+                                 _terminal("t", "a2")))
+    arch = TaskArchitecture(variables=(_var("x", 1),), graph=graph)
+    assert arch is not None
+
+
+def test_frozen_history_writer_satisfies_the_task_level_handle():
+    """A recomposed future of pure observation stays valid when the
+    carried frozen history already wrote — a committed writer is still
+    a writer."""
+    carried = _action("a1", "x", 1)                 # frozen history
+    observe = WorkflowNode(
+        node_id="a2", kind=NodeKind.ACTION, label="确认状态",
+        contract=ActionContract(contract_id="c2",
+                                semantic_goal="状态可见",
+                                desired_state={}),
+        depends_on=("a1",))
+    graph = WorkflowGraph(nodes=(carried, observe,
+                                 _terminal("t", "a2")))
+    arch = TaskArchitecture(variables=(_var("x", 1),), graph=graph,
+                            exempt_node_ids=frozenset({"a1"}))
+    assert arch is not None
+
+
 # ── no-orphan: every non-exempt node must lead to the TERMINAL ─────────────
 def test_orphan_nodes_are_rejected():
     graph = WorkflowGraph(nodes=(
