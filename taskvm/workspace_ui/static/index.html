@@ -17,6 +17,7 @@
       <div id="autonomy-badge" class="badge badge-idle">idle</div>
       <div id="epoch-badge" class="badge">epoch 0</div>
       <div id="model-calls" class="badge badge-ok">model: —</div>
+      <div id="sync-badge" class="badge badge-warn hidden">⟳ 同步中…</div>
       <button id="btn-newtask" class="btn btn-default">+ New Task</button>
     </header>
 
@@ -36,40 +37,41 @@
       </div>
     </section>
 
-    <!-- ── empty-state hero (Codex-like: nothing until the first msg) ─ -->
+    <!-- ── empty-state hero (goal-only entry: app/surface selection is a
+          runtime capability, not a task-UI semantic — workplan §2) ── -->
     <section id="hero" class="hero hidden">
       <div class="hero-card">
         <h1 class="hero-title">How can I help you today?</h1>
         <p class="hero-sub" id="hero-world">connecting to the world…</p>
         <div class="hero-input-row">
-          <select id="hero-app" class="hero-app-select">
-            <option value="wechat">微信</option>
-            <option value="alipay">支付宝</option>
-          </select>
           <textarea id="hero-goal" rows="2"
-            placeholder="用一句话描述任务，例如：给黄勇发一条消息：我马上到"></textarea>
+            placeholder="用一句话描述你想完成的事，例如：把手机里某个应用的状态改成我想要的样子"></textarea>
           <button id="hero-send" class="btn btn-ok">发送 ⏎</button>
-        </div>
-        <div class="hero-chips" id="hero-chips">
-          <button class="chip" data-goal="给微信里的黄勇发一条消息：我马上到">给黄勇发微信：我马上到</button>
-          <button class="chip" data-goal="给张伟发条微信，告诉他明天上午十点开会">提醒张伟明天十点开会</button>
-          <button class="chip" data-goal="打开支付宝，查一下最近的转账记录，告诉我最大的一笔是多少钱、转给了谁">查支付宝最大一笔转账</button>
         </div>
         <p class="hero-hint" id="hero-hint"></p>
       </div>
     </section>
 
-    <!-- ── bootstrapping panel (compiler+architect running) ──────────── -->
+    <!-- ── bootstrapping panel (progressive task surface, T0 stopgap):
+          the goal card renders the instant the goal is submitted; the
+          single pulse node + stage timeline morph out of real signals
+          (ledger roles), never fabricated plan content ─────────────── -->
     <section id="boot-panel" class="boot-panel hidden">
       <div class="boot-card">
-        <div class="boot-spinner"></div>
-        <div class="boot-text">
-          <div class="boot-title" id="boot-title">正在理解任务…</div>
-          <div class="boot-detail" id="boot-detail">StateCompiler 观察屏幕 → TaskArchitect 编排工作流（真实模型调用）</div>
-          <div class="boot-error hidden" id="boot-error"></div>
-          <button id="boot-back" class="btn btn-default hidden">← 返回重新输入</button>
+        <div class="boot-goal-label">任务目标</div>
+        <div class="boot-goal" id="boot-goal-text"></div>
+        <div class="boot-node" id="boot-node">
+          <span class="boot-node-dot"></span>
+          <span class="boot-node-label" id="boot-node-label">正在观察屏幕…</span>
         </div>
-        <img id="boot-shot" class="boot-shot hidden" alt="">
+        <ol class="boot-stages" id="boot-stages">
+          <li data-stage="compile"><span class="st-ico"></span><span class="st-name">编译任务世界</span><span class="st-time"></span></li>
+          <li data-stage="plan"><span class="st-ico"></span><span class="st-name">生成执行计划</span><span class="st-time"></span></li>
+          <li data-stage="ready"><span class="st-ico"></span><span class="st-name">校验并就绪</span><span class="st-time"></span></li>
+        </ol>
+        <div class="boot-timer" id="boot-timer">0.0s</div>
+        <div class="boot-error hidden" id="boot-error"></div>
+        <button id="boot-back" class="btn btn-default hidden">← 返回重新输入</button>
       </div>
     </section>
 
@@ -77,6 +79,9 @@
       <!-- ── left: workflow map ───────────────────────────── -->
       <section class="panel workflow-panel">
         <h2>Workflow</h2>
+        <div id="ready-banner" class="ready-banner hidden">
+          任务已编译，尚未执行——查看任务变量与计划，然后点击上方 <b>Start</b> 开始自治。
+        </div>
         <div id="workflow-map" class="workflow-map">
           <p class="placeholder">No session selected.</p>
         </div>
@@ -95,8 +100,10 @@
         <section>
           <h2>Live Phone <a id="sim-link" class="sim-link" href="#" target="_blank" title="在新标签页打开手机模拟器">↗</a></h2>
           <div class="phone-shot-wrap">
-            <img id="phone-shot" class="phone-shot" alt="当前手机画面">
+            <img id="phone-shot" class="phone-shot hidden" alt="当前手机画面">
+            <a id="phone-shot-full" class="shot-full-link hidden" href="#" target="_blank" title="查看全图">⛶ 全图</a>
             <div id="phone-shot-placeholder" class="placeholder">任务运行后这里显示实时手机画面</div>
+            <div id="phone-shot-stale" class="shot-stale hidden">画面同步中…</div>
           </div>
         </section>
         <section>
@@ -133,6 +140,13 @@
           <button id="gp-cancel" class="btn btn-default">Cancel</button>
         </div>
       </div>
+    </div>
+
+    <!-- ── toast (non-blocking error surfacing with the server's own
+          message — replaces alert()) ─────────────────────────── -->
+    <div id="toast" class="toast hidden" role="alert">
+      <div id="toast-msg" class="toast-msg"></div>
+      <button id="toast-close" class="toast-close" title="关闭">×</button>
     </div>
   </div>
   <script src="/static/js/taskvm.js"></script>

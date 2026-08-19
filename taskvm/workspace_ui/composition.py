@@ -1,11 +1,9 @@
-"""taskvm.workspace_ui.composition — the D-side composition root for the
-real runtime (substrate.md §8 T1 leg-1; D audit rework D-F2, 2026-08-16).
+"""taskvm.workspace_ui.composition — the composition root for the real
+runtime (substrate.md §8 T1 leg-1).
 
-This module is the production composition root (the legacy
-``taskvm.execution.gui_driver`` import and the legacy
-``workspace_ui/server.py`` write routes were deleted by the Wave-3 cluster
-deletion, 2026-08-16). It is the **single production call site** of
-Agent E's ``taskvm.runtime.bootstrap.compose_runtime`` (RFC-001): the
+This module is the production composition root and the **single
+production call site** of ``taskvm.runtime.bootstrap.compose_runtime``
+(RFC-001): the
 five injected ports are assembled HERE, by composition — the runtime gate
 forbids ``taskvm.runtime`` from importing architect/verifier/concrete
 substrate, and the projection gate forbids ``taskvm.projection`` from
@@ -23,8 +21,8 @@ The five ports (see ``RuntimePorts`` docstring in runtime/bootstrap.py):
   ObservedValues from ``label: value`` / ``label=value`` visible tokens
   (a label that appears more than once is ambiguous → honestly skipped;
   the full regex handle-cache path belongs to the architect compile
-  product — routing that here would duplicate C's ownership).
-- ``verifier``    — ``taskvm.verifier.visible.VisibleVerifier`` (E's
+  product — routing that here would duplicate the architect's ownership).
+- ``verifier``    — ``taskvm.verifier.visible.VisibleVerifier`` (the
   single verifier, real).
 - ``ledger``      — ``taskvm.architect.ModelCallLedger``; ONE instance is
   created here per bundle and is meant to be handed to the architect as
@@ -40,10 +38,12 @@ URLs/config defaults). Nothing under ``taskvm/projection`` or
 """
 from __future__ import annotations
 
+import hashlib
 import re
+import threading
 import uuid
-from dataclasses import replace as _replace
-from typing import Any, Iterable, Mapping, cast
+from dataclasses import replace as _dc_replace, replace as _replace
+from typing import Any, Callable, Iterable, Mapping, cast
 
 from taskvm.architect import (
     ActionContractSerializer, HttpModelPort, ModelCallLedger,
@@ -71,7 +71,7 @@ from taskvm.projection.services.governance import KernelGovernancePort
 
 # ── the CUA model adapter (composition-owned, per RuntimePorts docstring) ──
 
-#: B-01: the action protocol is aligned with the FROZEN GuiAction
+#: The action protocol is aligned with the FROZEN GuiAction
 #: vocabulary (substrate.md §2: GUI_ACTION_KINDS — click|tap|type|key|
 #: scroll|wait|open) and its full field set. The model sees ONLY this
 #: user-visible vocabulary — never substrate internals.
@@ -88,14 +88,14 @@ _CUA_SYSTEM_PROMPT = (
     "坐标归一化到 [0,1000]。不要输出任何其他内容。"
 )
 
-#: B-01: kinds that REQUIRE a coordinate (a click/tap without a target
+#: Kinds that REQUIRE a coordinate (a click/tap without a target
 #: point is unexecutable — an honest fail, never a guess).
 _COORD_REQUIRED = frozenset({"click", "tap"})
-#: B-01: required scalar/text field per kind (missing ⇒ honest fail).
+#: Required scalar/text field per kind (missing ⇒ honest fail).
 _REQUIRED_FIELD_BY_KIND = {
     "type": "text", "key": "key", "open": "target",
 }
-#: B-01: numeric fields coerced with int() — a non-numeric value is an
+#: Numeric fields coerced with int() — a non-numeric value is an
 #: illegal action (honest fail), not a silent drop.
 _NUMERIC_FIELDS = ("magnitude", "duration_ms")
 _SCROLL_DIRECTIONS = frozenset({"up", "down", "left", "right"})
@@ -104,24 +104,24 @@ _SCROLL_DIRECTIONS = frozenset({"up", "down", "left", "right"})
 class HttpCUAModel:
     """``CUAModel`` port over the architect ``HttpModelPort``.
 
-    A-13 single-owner ledger: this adapter declares
+    Single-owner ledger: this adapter declares
     ``records_own_ledger = True`` — it mints a unique ``request_id`` per
     REAL provider request and lands EXACTLY ONE ledger row per request
     on every path (success / unparseable reply / transport exception),
     carrying that ``request_id``. Decisions hand the ``request_id`` back
     so the runtime ANNOTATES the row (node/attempt/repair context)
-    instead of appending a second row (C-2: 1 provider request = 1
+    instead of appending a second row (1 provider request = 1
     ledger row). The pre-flight no-leak check runs BEFORE any provider
     request — a prompt leak issues no request and lands no row (rows
     count provider requests, not harness bugs).
 
-    One ``predict_action`` = one provider request = one ledger record
-    (C-2 discipline). The outgoing prompt passes the no-leak gate; a
+    One ``predict_action`` = one provider request = one ledger record.
+    The outgoing prompt passes the no-leak gate; a
     parse failure is an honest ``fail`` decision — the runtime's repair
     loop owns any re-ask.
     """
 
-    #: A-13 promise: this adapter owns its ledger rows (see class docstring)
+    #: Promise: this adapter owns its ledger rows (see class docstring)
     records_own_ledger = True
 
     def __init__(self, port: ModelPort | None = None,
@@ -145,7 +145,7 @@ class HttpCUAModel:
         retry = (f"\n（第 {attempt} 次重试：上一次操作没有完成任务，请确认修改"
                  "确实生效后再报告完成。）") if attempt > 1 else ""
         user = (f"## 操作目标\n{goal}{retry}\n\n## 屏幕可见文本\n{visible}")
-        # B-01: vision-capable path — a fresh screenshot travels as the
+        # Vision-capable path — a fresh screenshot travels as the
         # multimodal image part (HttpModelPort.complete_json's
         # ``image_data_url``), NEVER as prompt text. Only a real data URL
         # ("data:image/…;base64,…) qualifies: an artifact ref / file path /
@@ -159,8 +159,8 @@ class HttpCUAModel:
             assert_prompt_clean(_CUA_SYSTEM_PROMPT + "\n" + user,
                                 what="cua prompt")
         except Exception as e:  # a leak is a harness bug — fail honestly
-            # No provider request was issued, so NO ledger row (C-2: rows
-            # count real provider requests only — A-13).
+            # No provider request was issued, so NO ledger row (rows
+            # count real provider requests only).
             return CUADecision(kind=CUADecisionKind.FAIL,
                                reason="指令生成内部错误，已安全终止")
         request_id = self._mint_request_id()
@@ -203,7 +203,7 @@ class HttpCUAModel:
 
 
 def _decision_from_json(parsed: Mapping[str, Any]) -> CUADecision:
-    """B-01: parse the model's JSON against the FROZEN GuiAction schema.
+    """Parse the model's JSON against the FROZEN GuiAction schema.
 
     Total over ``GUI_ACTION_KINDS`` (click|tap|type|key|scroll|wait|open)
     and every GuiAction field. Missing REQUIRED fields (click/tap without
@@ -334,7 +334,7 @@ class VisibleLabelExtractor:
         return tuple(out)
 
 
-# ── the observation extractor over the architect compile product (B-07) ───
+# ── the observation extractor over the architect compile product ───
 
 
 class HandleCacheExtractor:
@@ -345,7 +345,7 @@ class HandleCacheExtractor:
     apps render tables / definition lists — ``label: value`` tokens the
     fast-path ``VisibleLabelExtractor`` matches rarely appear there, so the
     OBSERVED plane would freeze at the compiler's initial reading. This
-    adapter closes that gap WITHOUT duplicating C's logic: each runtime
+    adapter closes that gap WITHOUT duplicating the architect's logic: each runtime
     ``Observation`` becomes a one-region ``CompilerObservationView`` and
     every variable re-read goes through ``StateCompiler.extract_observed``
     — the architect's own public static implementation (reuse, not
@@ -388,7 +388,7 @@ class HandleCacheExtractor:
         return tuple(out)
 
 
-# ── A-01: the production multi-surface binding resolver ───────────────────
+# ── the production multi-surface binding resolver ───────────────────
 
 
 class GovernanceServicePort:
@@ -459,7 +459,7 @@ class GovernanceServicePort:
 
 
 class EvidenceSurfaceResolver:
-    """The production ``SurfaceBindingResolver`` (A-01) — composition-owned
+    """The production ``SurfaceBindingResolver`` — composition-owned
     private glue mapping compiler-minted opaque handle ids to session
     surface ids over the frozen provenance chain:
 
@@ -478,7 +478,7 @@ class EvidenceSurfaceResolver:
     _action_handle``), so ONE mapping serves both the contract-evidence and
     variable-evidence resolution paths in the runtime.
 
-    Fail-closed (A-01): a handle resolves ONLY when the boot-time snapshot
+    Fail-closed: a handle resolves ONLY when the boot-time snapshot
     still holds — the bound surface_id still exists, still answers to the
     same visible label, and NO other surface claims that label. A surface
     that disappeared, was recreated under a new id, was renamed, a label
@@ -516,6 +516,104 @@ class EvidenceSurfaceResolver:
         if claimants != [bound_sid]:
             return None          # gone / recreated / renamed / label conflict
         return bound_sid
+
+
+# ── screenshot archiving runtime (keep multi-MB data URLs out
+#    of the projection plane — composition-owned, opt-in) ─────────────────
+
+
+class ScreenshotArchivingRuntime:
+    """Proxy over a real AutonomyRuntime that keeps screenshot data URLs
+    OUT of the projection plane while preserving the bytes as artifacts.
+
+    Why this exists (see eval_results/latency_audit_20260819): every
+    ``ACTION_OBSERVED`` / ``ACTION_LANDED`` runtime event carries the full
+    ``data:image/png;base64,…`` screenshot (~2.6 MB) in ``artifact_ref``;
+    the frozen SSE envelope serialises that field verbatim, so ONE runtime
+    tick pushes a 2.6 MB frame down the ordered SSE stream — every byte
+    behind it (the 105-byte governance acks included) starves on slow
+    links. This proxy is the composition seam's countermeasure:
+
+    * ``runtime_events()`` returns events whose ``artifact_ref`` is a
+      compact token (``shot-<n>``) instead of the data URL;
+    * the decoded bytes are pushed into the session's ``ArtifactStore``
+      under that token, so the FROZEN artifact route serves them unchanged
+      and ``surface_cards`` finds a real ``latest_artifact_ref`` for the
+      first time;
+    * an optional ``on_screenshot`` sink receives ``(token, mime, data)``
+      so the APP shell can run its live-phone/thumbnail side channel.
+
+    Opt-in only: constructed exclusively by ``bootstrap_real_full`` when a
+    ``screenshot_sink`` is passed (the APP shell does; the bench factory
+    passes nothing and gets the unwrapped runtime). Everything
+    else is transparently forwarded to the wrapped runtime.
+    """
+
+    def __init__(self, inner: Any, artifacts: Any,
+                 on_screenshot: Callable[[str, str, bytes], None] | None = None
+                 ) -> None:
+        self._inner = inner
+        self._artifacts = artifacts
+        self._on_screenshot = on_screenshot
+        self._lock = threading.Lock()
+        self._seq = 0
+        self._seen = 0            # events already transformed
+        self._transformed: list[Any] = []   # token-bearing copies (append-only)
+
+    # ── the transformed read the projection consumes ────────────────────
+    def runtime_events(self) -> tuple[Any, ...]:
+        with self._lock:
+            raw = tuple(self._inner.runtime_events())
+            for ev in raw[self._seen:]:
+                ref = getattr(ev, "artifact_ref", "") or ""
+                if isinstance(ref, str) and ref.startswith("data:image/"):
+                    self._seq += 1
+                    token = f"shot-{self._seq:04d}"
+                    decoded = _decode_image_data_url(ref)
+                    if decoded is not None:
+                        mime, data = decoded
+                        try:
+                            self._artifacts.put(token, data, mime=mime)
+                        except Exception:
+                            self._transformed.append(ev)
+                            self._seen += 1
+                            continue
+                        if self._on_screenshot is not None:
+                            try:
+                                self._on_screenshot(token, mime, data)
+                            except Exception:
+                                pass   # the sink is observability, never a
+                                       # failure path for the runtime
+                        self._transformed.append(
+                            _dc_replace(ev, artifact_ref=token))
+                    else:
+                        self._transformed.append(ev)
+                else:
+                    self._transformed.append(ev)
+                self._seen += 1
+            return tuple(self._transformed)
+
+    # ── everything else forwards to the real runtime ────────────────────
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+def _decode_image_data_url(ref: str) -> tuple[str, bytes] | None:
+    """``data:image/…;base64,XXX`` → ``(mime, bytes)``; ``None`` if the
+    payload does not decode (the event then passes through untouched)."""
+    try:
+        import base64
+        head, b64 = ref.split(",", 1)
+        mime = head[5:].split(";", 1)[0] or "image/png"
+        return mime, base64.b64decode(b64)
+    except Exception:
+        return None
+
+
+def artifact_fingerprint(data: bytes) -> str:
+    """A short content fingerprint for the APP's dedup-by-unchanged-screen
+    screenshot route (md5 hex, first 16 chars — dedup only, not security)."""
+    return hashlib.md5(data).hexdigest()[:16]
 
 
 # ── the bundle builder — the ONE compose_runtime call site ────────────────
@@ -559,7 +657,7 @@ def compose_task_runtime(kernel: Any, *, host: str = "localhost",
     ``substrate`` may be injected (tests / alternate providers). By
     default a ``builtin_web`` ``SubstrateSession`` is created through the
     substrate registry from the provider's own URL knowledge.
-    ``surface_resolver`` (A-01) is the composition-owned
+    ``surface_resolver`` is the composition-owned
     ``SurfaceBindingResolver`` (see ``EvidenceSurfaceResolver``); ``None``
     keeps single-surface sessions working (routing-trivial) while a
     multi-surface session without a resolver fails honestly in the
@@ -585,13 +683,84 @@ def compose_task_runtime(kernel: Any, *, host: str = "localhost",
 __all__ = [
     "HttpCUAModel", "VisibleLabelExtractor", "HandleCacheExtractor",
     "EvidenceSurfaceResolver",
+    "ScreenshotArchivingRuntime", "artifact_fingerprint",
+    "DEFAULT_ROLE_MODELS", "parse_role_models", "resolve_role_models",
     "build_runtime_ports", "compose_task_runtime",
     "bootstrap_real_full",
     "CompilerObservationView", "VisibleRegion",
 ]
 
 
-# ── B-07: the genuine real-full composition bootstrap ─────────────────────
+# ── role→model routing table (workplan §20.2; scaffold — A6 wires the
+#    small-model slots, the main chain never degrades) ────────────────────
+
+#: Every model-consuming role TaskVM defines, with its routing default.
+#: ``None`` means "the ModelPort default" (gpt-5.6-sol today) — for the
+#: main chain (compiler/architect/cua) this is ALSO the policy: those roles
+#: are never routed to a cheaper model (bench alignment). ``intent_parser``
+#: and ``nl_polisher`` are presentation-layer slots (workplan §20.2): they
+#: may be routed to a small fast model when A6 wires them; until then the
+#: slots exist so configuration, validation and ledger accounting have a
+#: single home. ``genui_decoder`` defaults to the port model and MAY be
+#: routed down (A4).
+DEFAULT_ROLE_MODELS: dict[str, str | None] = {
+    "state_compiler": None,
+    "task_architect": None,
+    "cua": None,
+    "genui_decoder": None,
+    "intent_parser": None,
+    "nl_polisher": None,
+}
+
+
+def parse_role_models(spec: str) -> dict[str, str]:
+    """Parse ``"role=model,role=model"`` into ``{role: model}``.
+
+    Unknown roles raise ``ValueError`` (fail closed — a typo in a routing
+    config must never silently no-op). Values may not be empty.
+    """
+    out: dict[str, str] = {}
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "=" not in part:
+            raise ValueError(
+                f"role-model entry {part!r} is not 'role=model'")
+        role, model = (s.strip() for s in part.split("=", 1))
+        if role not in DEFAULT_ROLE_MODELS:
+            raise ValueError(
+                f"unknown model role {role!r} (known: "
+                f"{', '.join(sorted(DEFAULT_ROLE_MODELS))})")
+        if not model:
+            raise ValueError(f"role {role!r} has an empty model")
+        out[role] = model
+    return out
+
+
+def resolve_role_models(
+        override: Mapping[str, str] | None = None) -> dict[str, str | None]:
+    """The effective routing table: defaults overlaid with ``override``.
+
+    Sources (in priority order, wired by the caller): explicit mapping →
+    ``TASKVM_ROLE_MODELS`` env (``role=model,...``) → all-port-default.
+    """
+    import os
+    table = dict(DEFAULT_ROLE_MODELS)
+    merged: dict[str, str] = {}
+    env_spec = os.environ.get("TASKVM_ROLE_MODELS", "").strip()
+    if env_spec:
+        merged.update(parse_role_models(env_spec))
+    if override:
+        unknown = set(override) - set(DEFAULT_ROLE_MODELS)
+        if unknown:
+            raise ValueError(f"unknown model roles: {sorted(unknown)}")
+        merged.update(dict(override))
+    table.update(merged)
+    return table
+
+
+# ── the genuine real-full composition bootstrap ─────────────────────
 
 def bootstrap_real_full(*, goal: str, sid: str,
                          substrate: Any = None,
@@ -604,12 +773,16 @@ def bootstrap_real_full(*, goal: str, sid: str,
                          app: str | None = None, host: str = "localhost",
                          base_url: str | None = None,
                          surfaces: list[str] | None = None,
-                         success_criteria: tuple[str, ...] = ()) -> dict:
+                         success_criteria: tuple[str, ...] = (),
+                         role_models: Mapping[str, str] | None = None,
+                         screenshot_sink: Callable[
+                             [str, str, bytes], None] | None = None
+                         ) -> dict:
     """Natural-language goal → fresh observation → StateCompiler →
     TaskArchitect → Kernel → shared ledger → AutonomyRuntime → (optional)
     registered projection session — with ZERO hand-built intermediates.
 
-    This is the RM-0.B real-full path (B-07). Every stage is the REAL
+    Every stage is the REAL
     production object; nothing is hand-assembled:
 
       1. the NL ``goal`` becomes a ``TaskIntent``;
@@ -654,7 +827,7 @@ def bootstrap_real_full(*, goal: str, sid: str,
     surface_infos = substrate.list_surfaces()
 
     # (3-4) fresh observe → visible-only compiler view. The SAME label
-    # mapping (display_name-or-surface_id → surface_id) becomes the A-01
+    # mapping (display_name-or-surface_id → surface_id) becomes the
     # binding snapshot the production resolver re-validates live at every
     # resolve — one source of truth for the provenance chain.
     wanted = set(surfaces) if surfaces else None
@@ -689,15 +862,25 @@ def bootstrap_real_full(*, goal: str, sid: str,
     if ledger is None:
         ledger = ModelCallLedger()
     port = model_port or HttpModelPort()
-    compiler = StateCompiler(port, ledger, model=model)
-    architect = TaskArchitect(port, ledger, model=model)
+    # role→model routing (workplan §20.2): the explicit ``model`` arg wins
+    # over everything (backwards compatibility), else the routing table
+    # decides per role. The main chain (compiler/architect/cua) defaults to
+    # the port model and is never silently degraded; presentation slots
+    # (intent_parser / nl_polisher / genui_decoder) read their slot here so
+    # A4/A6 wiring has a single resolution point. Every routed model id
+    # lands in the ledger's per-call ``model`` field (honest accounting).
+    routing = resolve_role_models(role_models)
+    compiler_model = model or routing["state_compiler"]
+    architect_model = model or routing["task_architect"]
+    compiler = StateCompiler(port, ledger, model=compiler_model)
+    architect = TaskArchitect(port, ledger, model=architect_model)
     compiler_result = compiler.compile(view, intent)
     arch = architect.compose(intent, compiler_result)
     kernel = TaskVMKernel(sid, intent)
     kernel.init_task_state(arch.variables)
     if arch.graph is not None:
         kernel.set_plan(arch.graph)
-    # B-07 observed-plane wiring: the compiler product's handle cache (the
+    # Observed-plane wiring: the compiler product's handle cache (the
     # deterministic ``value_pattern`` re-reads) IS the production observation
     # path for the runtime — handed to the runtime seam through a
     # composition adapter that reuses ``StateCompiler.extract_observed``.
@@ -705,7 +888,7 @@ def bootstrap_real_full(*, goal: str, sid: str,
     # label-token fast path — honest degradation, never a guess.
     if extractor is None and compiler_result.handle_evidence:
         extractor = HandleCacheExtractor(compiler_result.handle_evidence)
-    # A-01: the production multi-surface resolver — compiler handle_id →
+    # The production multi-surface resolver — compiler handle_id →
     # evidence surface_label → the bootstrap binding snapshot → the
     # session's surface ids, re-validated live (read-only) per resolve.
     # Multi-surface sessions route by evidence; single-surface sessions
@@ -723,7 +906,7 @@ def bootstrap_real_full(*, goal: str, sid: str,
 
     # (10) optional projection registration — the PUBLIC lifecycle takes
     # over from here (POST /governance/start → driver → runtime → GUI).
-    # GoalPatch wiring (audit 2026-08-19): the session is registered with
+    # GoalPatch wiring: the session is registered with
     # the GovernanceService-backed governance port, so the public
     # goal_patch route runs the FROZEN closure chain (apply_goal_patch →
     # ONE architect.recompose_future → kernel.recompose → unblock)
@@ -733,12 +916,24 @@ def bootstrap_real_full(*, goal: str, sid: str,
     governance_service = GovernanceService(
         kernel, architect=architect, compiler=compiler, ledger=ledger)
     if store is not None:
-        from taskvm.projection.store import SurfaceDecl
+        from taskvm.projection.store import ArtifactStore, SurfaceDecl
+        # When the APP shell asks for the screenshot side channel
+        # (screenshot_sink), the runtime is wrapped so multi-MB data URLs
+        # never enter the projection plane (see ScreenshotArchivingRuntime).
+        # The bench factory passes no sink and gets the unwrapped runtime.
+        registered_runtime: Any = runtime
+        artifacts: Any = None
+        if screenshot_sink is not None:
+            artifacts = ArtifactStore()
+            registered_runtime = ScreenshotArchivingRuntime(
+                runtime, artifacts, on_screenshot=screenshot_sink)
         decls = tuple(
             SurfaceDecl(surface_id=info.surface_id,
                         display_name=info.display_name or info.surface_id)
             for info in surface_infos)
-        store.register(sid, kernel, runtime=runtime, surfaces=decls,
+        store.register(sid, kernel, runtime=registered_runtime,
+                       surfaces=decls,
+                       artifacts=artifacts,
                        governance=GovernanceServicePort(
                            governance_service, kernel))
 
@@ -748,4 +943,5 @@ def bootstrap_real_full(*, goal: str, sid: str,
                 compiler_result=compiler_result,
                 architecture=arch, surfaces=surface_infos,
                 surface_resolver=surface_resolver,
-                governance_service=governance_service)
+                governance_service=governance_service,
+                role_models=routing)

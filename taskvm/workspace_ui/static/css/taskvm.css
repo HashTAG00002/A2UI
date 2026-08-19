@@ -42,6 +42,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, sans-serif;
 .btn-warn { background: var(--warn); }
 .btn-danger { background: var(--danger); }
 .btn-default { background: var(--surface); }
+/* <100ms optimistic ack (A9.1): the button locks + self-labels the instant
+   it is clicked; the server response confirms or rolls it back */
+.btn.pending { opacity: .65; cursor: progress;
+               animation: pendingPulse 1.2s ease-in-out infinite; }
+@keyframes pendingPulse { 0%,100%{opacity:.65} 50%{opacity:.9} }
 
 /* main grid */
 .main-grid { display: grid; grid-template-columns: 1fr 1fr 320px;
@@ -53,6 +58,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, sans-serif;
 .sidebar > section { flex: 0 0 auto; }
 
 /* workflow */
+.ready-banner { background: rgba(255,152,0,.08); border: 1px solid var(--warn);
+               border-radius: 4px; color: var(--warn); padding: .6em .8em;
+               margin-bottom: .8em; font-size: .85em; }
+.ready-banner b { color: var(--warn); }
 .workflow-map { display: flex; flex-direction: column; gap: .3em; }
 .wf-row { display: flex; align-items: center; gap: .5em;
           padding: .3em .5em; border-radius: 3px; background: var(--bg); }
@@ -116,6 +125,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, sans-serif;
   border: 1px solid var(--border); padding: .3em; }
 .modal-actions { display: flex; gap: .5em; margin-top: 1em; }
 
+/* ── toast (non-blocking error surfacing) ─────────────────────── */
+.toast { position: fixed; right: 1em; bottom: 1em; z-index: 1000;
+         display: flex; align-items: flex-start; gap: .6em;
+         background: var(--surface); border: 1px solid var(--border);
+         border-left: 4px solid var(--danger);
+         border-radius: 5px; padding: .7em .9em; max-width: 420px;
+         box-shadow: 0 4px 16px rgba(0,0,0,.4); }
+.toast-msg { flex: 1; font-size: .85em; word-break: break-word; }
+.toast-close { background: none; border: none; color: var(--dim);
+               cursor: pointer; font-size: 1em; line-height: 1; }
+.toast-close:hover { color: var(--text); }
+.toast.toast-ok { border-left-color: var(--ok); }
+
 /* ── APP empty-state hero (Codex-like) ──────────────────────────────── */
 .hero { display: flex; align-items: center; justify-content: center;
         min-height: calc(100vh - 42px); padding: 2em; }
@@ -126,9 +148,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, sans-serif;
 .hero-input-row { display: flex; gap: .5em; align-items: stretch;
                   background: var(--surface); padding: .6em;
                   border: 1px solid var(--border); border-radius: 8px; }
-.hero-app-select { background: var(--bg); color: var(--text);
-                   border: 1px solid var(--border); border-radius: 4px;
-                   padding: .4em; }
 .hero-input-row textarea { flex: 1; resize: vertical; min-height: 3.2em;
                            background: var(--bg); color: var(--text);
                            border: 1px solid var(--border);
@@ -136,37 +155,61 @@ body { font-family: -apple-system, BlinkMacSystemFont, sans-serif;
                            font-size: 1em; font-family: inherit; }
 .hero-input-row textarea:focus { outline: 1px solid var(--accent); }
 .hero-input-row .btn { white-space: nowrap; }
-.hero-chips { display: flex; flex-wrap: wrap; gap: .5em;
-              justify-content: center; margin-top: 1em; }
-.chip { background: var(--surface); color: var(--text);
-        border: 1px solid var(--border); border-radius: 999px;
-        padding: .35em .9em; cursor: pointer; font-size: .85em; }
-.chip:hover { border-color: var(--accent); }
 .hero-hint { margin-top: 1.4em; color: var(--dim); font-size: .8em; }
 .hero-hint a { color: var(--accent); text-decoration: underline; }
 .hero-hint code { background: var(--surface); padding: .1em .4em;
                   border-radius: 3px; }
 
-/* ── bootstrapping panel ────────────────────────────────────────────── */
+/* ── progressive task surface (A9.1) ────────────────────────────────────────────── */
+/* progressive task surface (A9.1 stopgap): goal card renders the instant
+   the goal is submitted; pulse node + stage timeline morph out of real
+   ledger signals, never fabricated plan content */
 .boot-panel { display: flex; align-items: center; justify-content: center;
-              min-height: calc(100vh - 42px); }
-.boot-card { display: flex; gap: 1.5em; align-items: center;
+              min-height: calc(100vh - 42px); padding: 2em; }
+.boot-card { display: flex; flex-direction: column; gap: 1em;
              background: var(--surface); padding: 2em;
              border: 1px solid var(--border); border-radius: 8px;
-             max-width: 760px; }
-.boot-spinner { width: 36px; height: 36px; border-radius: 50%;
-                border: 4px solid var(--border);
-                border-top-color: var(--accent);
-                animation: spin 1s linear infinite; flex: 0 0 auto; }
-@keyframes spin { to { transform: rotate(360deg); } }
-.boot-title { font-size: 1.1em; font-weight: bold; margin-bottom: .3em; }
-.boot-detail { color: var(--dim); }
-.boot-error { margin-top: .6em; color: var(--danger);
+             width: 100%; max-width: 560px; }
+.boot-goal-label { color: var(--dim); font-size: .72em; text-transform: uppercase;
+                  letter-spacing: .08em; }
+.boot-goal { font-size: 1.05em; font-weight: 600; line-height: 1.5;
+             word-break: break-word; }
+.boot-node { display: flex; align-items: center; gap: .6em;
+             padding: .6em .8em; background: var(--bg);
+             border-radius: 4px; }
+.boot-node-dot { width: 10px; height: 10px; border-radius: 50%;
+                 background: var(--accent); flex: 0 0 auto;
+                 animation: nodePulse 1.6s ease-in-out infinite; }
+@keyframes nodePulse { 0%,100%{ box-shadow: 0 0 0 0 rgba(15,52,96,.7); }
+                       50%{ box-shadow: 0 0 0 6px rgba(15,52,96,0); } }
+.boot-node.failed .boot-node-dot { background: var(--danger);
+                                   animation: none; }
+.boot-node-label { color: var(--dim); font-size: .9em; }
+.boot-node.failed .boot-node-label { color: var(--danger); }
+.boot-stages { list-style: none; display: flex; flex-direction: column;
+               gap: .45em; margin: 0; padding: 0; }
+.boot-stages li { display: flex; align-items: center; gap: .6em;
+                  color: var(--dim); font-size: .9em; }
+.st-ico { width: 14px; height: 14px; border-radius: 50%;
+          border: 2px solid var(--border); flex: 0 0 auto;
+          box-sizing: content-box; }
+.boot-stages li.active { color: var(--text); }
+.boot-stages li.active .st-ico { border-color: var(--warn);
+                                 animation: nodePulse 1.6s ease-in-out infinite; }
+.boot-stages li.done { color: var(--ok); }
+.boot-stages li.done .st-ico { border-color: var(--ok);
+                               background: var(--ok); }
+.st-name { flex: 1; }
+.st-time { font-size: .8em; color: var(--dim);
+           font-variant-numeric: tabular-nums; }
+.boot-stages li.done .st-time { color: var(--ok); }
+.boot-timer { font-variant-numeric: tabular-nums; color: var(--dim);
+              font-size: .85em; text-align: right; }
+.boot-error { margin-top: .2em; color: var(--danger);
               background: rgba(244,67,54,.08); padding: .5em;
               border-radius: 4px; word-break: break-all;
-              white-space: pre-wrap; max-width: 480px; }
-.boot-shot { max-height: 240px; border-radius: 6px;
-             border: 1px solid var(--border); }
+              white-space: pre-wrap; }
+.boot-card .btn { align-self: flex-start; }
 
 /* ── live phone panel ───────────────────────────────────────────────── */
 .sim-link { color: var(--accent); text-decoration: none;
@@ -175,3 +218,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, sans-serif;
 .phone-shot { width: 100%; border-radius: 6px;
               border: 1px solid var(--border); }
 .phone-shot-wrap .placeholder { text-align: center; }
+.shot-full-link { position: absolute; top: .4em; right: .4em;
+                 color: var(--text); text-decoration: none; font-size: .8em;
+                 background: rgba(0,0,0,.55); padding: .15em .5em;
+                 border-radius: 3px; }
+.shot-stale { position: absolute; left: 0; right: 0; bottom: 0;
+              background: rgba(0,0,0,.6); color: var(--warn);
+              font-size: .75em; text-align: center; padding: .25em;
+              border-radius: 0 0 6px 6px; }
+
+/* vestibular safety: kill all loops when the user asks the OS for less motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
