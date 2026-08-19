@@ -14,8 +14,9 @@ Fake-env behavioral tests over the catalog-driven bridge:
     against the method's own source), no internal vocabulary in the
     composed instruction (noleak), and the ModelVerifier three-state
     verdict gates the returned status;
-  * the legacy per-app POST routes answer 302 → /api/mutate/<sid> for the
-    compat window;
+  * the per-app POST routes are GONE (the 302 compat window closed —
+    the R3 tail removed them; POST /api/mutate/<sid> is the only write
+    route);
   * ``session_state`` / ``html_view`` are catalog-driven generic
     projections (every store app joins by having a store, legacy tables
     stay byte-stable).
@@ -361,30 +362,25 @@ def test_mutate_loop_not_done_is_honest_500_not_ok():
     assert "could not complete" in ei.value.text
 
 
-# ── legacy per-app routes: 302 compat window ────────────────────────────────
+# ── legacy per-app routes: removed after the announced R3 window ─────────────
 
-def test_legacy_mutate_routes_redirect_to_generic_route():
-    """The per-app operator routes (wechat / x) answer 302 → the generic
-    /api/mutate/<sid> route for the compat window, with a migration body
-    describing the new payload shape."""
+def test_legacy_mutate_routes_are_gone():
+    """The per-app operator routes (wechat / x) were 302 compat aliases
+    for the generic POST /api/mutate/<sid> route; the removal announced
+    in the R3 report has landed — the old spellings answer 404 now, so
+    no scripted caller can reach a per-app mutate route anymore."""
     env = FakeEnv()
     b = _bridge(env)
 
     async def _probe(url: str):
         app = build_app(b)
         async with TestClient(TestServer(app)) as client:
-            # allow_redirects=False: we want the RAW 302 (the default
-            # would follow it to a GET on the POST-only target → 404)
             resp = await client.post(url, json={"op": "send_message",
-                                                "text": "hi"},
-                                     allow_redirects=False)
-            return resp.status, resp.headers.get("Location"), await resp.text()
+                                                "text": "hi"})
+            return resp.status
 
     for legacy in ("/api/wechat/s1/chat1", "/api/x/s1/p1"):
-        status, location, body = asyncio.run(_probe(legacy))
-        assert status == 302, f"{legacy} -> {status}"
-        assert location == "/api/mutate/s1"
-        assert "migrated" in body and "entity_ref" in body
+        assert asyncio.run(_probe(legacy)) == 404, legacy
 
 
 def test_generic_mutate_route_serves_the_api():
@@ -407,6 +403,91 @@ def test_generic_mutate_route_serves_the_api():
     assert status == 200
     assert payload["status"] == "ok"
     assert payload["verify"]["verdict"] == "changed"
+
+
+# ── seeding merge directives (the R3-tail generalization) ────────────────────
+
+class RecordingSeedEnv(FakeEnv):
+    """FakeEnv + set_state records the patch, so seeding-merge tests can
+    assert the composed patch (the shared fake only records call names)."""
+
+    def __init__(self):
+        super().__init__()
+        self.patches: list[dict] = []
+
+    async def set_state(self, state, deep=False):
+        self.patches.append(state)
+        await super().set_state(state, deep=deep)
+
+
+def test_seed_merge_directive_works_for_any_store_app():
+    """``merge_<field>`` under ANY catalog store app merges into that
+    app's top-level list field — the generalization of the old
+    wechat-only special case (notes carries a top-level ``notes`` list
+    with ``id`` keys, so it exercises the generic path end to end)."""
+    env = RecordingSeedEnv()
+    b = _activated(env)
+    out = asyncio.run(b.inject_task("s1", None, "", {
+        "notes": {"merge_notes": [{"id": "n2", "title": "读书单",
+                                   "content": "三体"}]}}))
+    assert out["status"] == "ok"
+    assert env.patches == [{"apps": {"notes": {"notes": [
+        {"id": "n1", "title": "购物清单", "content": "牛奶 面包"},
+        {"id": "n2", "title": "读书单", "content": "三体"},
+    ]}}}]
+
+
+def test_seed_legacy_wechat_spellings_still_merge():
+    """The frozen bench fixtures speak add_chats/add_contacts (app-keyed
+    wechat shape) — they must keep merging exactly as before the
+    generalization."""
+    env = RecordingSeedEnv()
+    b = _activated(env)
+    asyncio.run(b.inject_task("s1", None, "", {
+        "wechat": {"add_chats": [{"id": "c9",
+                                  "user": {"name": "张三",
+                                           "wxid": "wxid_zs"},
+                                  "messages": []}],
+                   "add_contacts": [{"wxid": "wxid_zs", "name": "张三"}]}}))
+    wc = env.patches[-1]["apps"]["wechat"]
+    assert [c["id"] for c in wc["chats"]] == ["c1", "c9"]
+    assert [c["wxid"] for c in wc["contacts"]] == ["wxid_hy", "wxid_zs"]
+
+
+def test_seed_merge_dedupes_by_primary_key():
+    """An entry whose primary key already exists is NOT appended — the
+    original entry survives verbatim (no duplicate growth across re-runs
+    of the same seed)."""
+    env = RecordingSeedEnv()
+    b = _activated(env)
+    asyncio.run(b.inject_task("s1", None, "", {
+        "wechat": {"add_chats": [{"id": "c1", "user": {"name": "dup"},
+                                  "messages": []}]}}))
+    chats = env.patches[-1]["apps"]["wechat"]["chats"]
+    assert [c["id"] for c in chats] == ["c1"]
+    assert chats[0]["user"]["name"] == "黄勇"     # the original survived
+
+
+def test_seed_without_directives_is_plain_replace():
+    """A seed with no merge directive takes the plain-replace path
+    unchanged (the legacy truthiness: empty directives are no
+    directives)."""
+    env = RecordingSeedEnv()
+    b = _activated(env)
+    asyncio.run(b.inject_task("s1", None, "",
+                              {"wechat": {"chats": []}}))
+    assert env.patches[-1] == {"apps": {"wechat": {"chats": []}}}
+
+
+def test_seed_merge_without_a_primary_key_is_an_honest_error():
+    """Entries carrying none of the candidate primary keys are rejected
+    loudly — an undedupable directive would corrupt the seed with
+    duplicates on every re-run."""
+    env = RecordingSeedEnv()
+    b = _activated(env)
+    with pytest.raises(ValueError):
+        asyncio.run(b.inject_task("s1", None, "", {
+            "notes": {"merge_notes": [{"title": "无主键"}]}}))
 
 
 # ── catalog-driven projections: session_state / html_view ───────────────────

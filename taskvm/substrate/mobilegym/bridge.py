@@ -54,8 +54,6 @@ Routes (mirror the Drive app's contract, app-namespaced):
                                                 via gui_act_async + ModelVerifier gate; undo → 409 if
                                                 irreversible. App-agnostic — no operator enum, no per-app
                                                 branch (catalog validation only).
-    POST /api/wechat/<sid>/<eid>              → 302 → /api/mutate/<sid> (compat alias, removal scheduled)
-    POST /api/x/<sid>/<eid>                   → 302 → /api/mutate/<sid> (compat alias, removal scheduled)
 
 ONE active experimental session at a time.
 The evaluation/setup plane (reset/inject_task/oracle reads) activates a
@@ -84,7 +82,6 @@ import argparse
 import asyncio
 import copy
 import hashlib
-import json
 import logging
 import os
 import threading
@@ -111,6 +108,54 @@ DEFAULT_PORT = 3019
 #   APPS     — the store-backed subset, for get_state(required_apps=...)
 ALL_APPS = list(ALL_APP_IDS)
 APPS = list(STORE_APP_IDS)
+
+#: candidate primary keys for seeding merge directives — the first key
+#: present on EVERY entry of a directive wins (wechat chats carry
+#: ``id``, wechat contacts carry ``wxid``); entries carrying neither
+#: candidate are an honest error, never a blind append
+_MERGE_KEY_CANDIDATES: tuple[str, ...] = ("id", "wxid")
+
+#: legacy wechat-only seeding spellings → the generic merge mechanism
+#: (kept as aliases because frozen bench fixtures still speak them)
+_LEGACY_MERGE_ALIASES: dict[str, str] = {
+    "add_chats": "chats",
+    "add_contacts": "contacts",
+}
+
+
+def _merge_field_of(key: str) -> str | None:
+    """The list field a seeding key merges into, or ``None`` for a
+    non-directive key: the generic ``merge_<field>`` spelling plus the
+    legacy wechat-only aliases."""
+    if key.startswith("merge_") and len(key) > len("merge_"):
+        return key[len("merge_"):]
+    return _LEGACY_MERGE_ALIASES.get(key)
+
+
+def _merged_list(current: list, entries: list, where: str) -> list:
+    """``current`` deep-copied with genuinely-new ``entries`` appended,
+    deduped by the first candidate primary key present on EVERY entry.
+    Entries carrying none of the candidates are rejected — an
+    undedupable directive must fail loudly, never append blindly (the
+    seed would grow duplicates on every re-run)."""
+    if not isinstance(current, list):
+        raise ValueError(
+            f"merge directive {where}: the current field is not a list")
+    merged = copy.deepcopy(list(current))
+    if not entries:
+        return merged
+    key = next((k for k in _MERGE_KEY_CANDIDATES
+                if all(k in e for e in entries)), None)
+    if key is None:
+        raise ValueError(
+            f"merge directive {where}: entries carry none of the "
+            f"candidate primary keys {list(_MERGE_KEY_CANDIDATES)}")
+    existing = {e.get(key) for e in merged}
+    for entry in entries:
+        if entry.get(key) not in existing:
+            merged.append(copy.deepcopy(entry))
+            existing.add(entry.get(key))
+    return merged
 # The Vite dev/preview server URL the env drives.
 DEFAULT_SIM_URL = "http://localhost:3000"
 
@@ -345,46 +390,72 @@ class MobileGymBridge:
         the write/rollback path; the non-invasive boundary applies to the
         write/rollback path only, see memory taskvm-non-invasive-...).
 
-        Recognizes two demo directives under the wechat seed (at EITHER the
-        app-keyed level ``{wechat:{add_chats, add_contacts}}`` or the per-app
-        slice ``{add_chats, add_contacts}`` that ``replay.seed_apps`` passes):
-          - ``add_chats``: merge new ChatSessions into wechat.chats by id
-          - ``add_contacts``: merge new ContactItems into wechat.contacts by wxid
-        Both read current + append (set_state replaces lists, so we merge here).
-        Seeding a synthetic contact (no aiConfig) + an empty chat lets the
-        fixture control the demo target without touching real contacts (the
-        real 黄勇 has aiConfig.enabled=True which would fire an AI reply and
-        complicate round-trip verification)."""
+        Recognizes generic MERGE DIRECTIVES — any catalog store app, any
+        top-level list field (the R3-tail generalization of the old
+        wechat-only special case):
+          - app-keyed: ``{<app>: {"merge_<field>": [entries…]}}`` merges
+            entries into ``apps.<app>.<field>`` — every catalog store
+            app, not just wechat;
+          - bare slice: ``{"merge_<field>": [entries…]}`` at the top
+            level is the WECHAT slice (the legacy per-app-slice shape
+            that ``replay.seed_apps`` passes);
+          - entries dedupe by the first candidate primary key present
+            on every entry (``id``, then ``wxid``); entries carrying
+            neither are an honest error, never a blind append;
+          - ``set_state`` replaces lists wholesale, so a merge reads
+            the current list first and appends only genuinely-new
+            entries;
+          - the legacy wechat-only spellings ``add_chats`` /
+            ``add_contacts`` alias onto the same mechanism (frozen
+            bench fixtures still speak them);
+          - a seed carrying ANY merge directive takes the merge path
+            for the WHOLE seed: plain replace fields must not ride
+            along — split them into two inject_task calls.
+        Seeding a synthetic contact (aiConfig absent) + an empty chat
+        lets a fixture control its demo target without touching real
+        contacts (a real contact with aiConfig.enabled=True would fire
+        an AI reply and complicate round-trip verification)."""
         await self._activate(sid)
         async with self._lock:
             if seed_state:
-                wc_seed = (seed_state.get("wechat") or seed_state)
-                add_chats = wc_seed.get("add_chats")
-                add_contacts = wc_seed.get("add_contacts")
-                if add_chats or add_contacts:
-                    cur = await self.env.get_state(required_apps=["wechat"])
-                    wcur = cur.get("apps", {}).get("wechat", {}) or {}
-                    patch_apps: dict[str, Any] = {}
-                    if add_chats:
-                        chats = copy.deepcopy(wcur.get("chats", []) or [])
-                        existing = {c.get("id") for c in chats}
-                        for c in add_chats:
-                            if c.get("id") not in existing:
-                                chats.append(c)
-                        patch_apps["chats"] = chats
-                    if add_contacts:
-                        contacts = copy.deepcopy(wcur.get("contacts", []) or [])
-                        existing = {c.get("wxid") for c in contacts}
-                        for c in add_contacts:
-                            if c.get("wxid") not in existing:
-                                contacts.append(c)
-                        patch_apps["contacts"] = contacts
-                    patch = {"apps": {"wechat": patch_apps}}
-                else:
+                patch = await self._merge_patch(seed_state)
+                if patch is None:
                     patch = self._normalize_patch(seed_state)
                 await self.env.set_state(patch, deep=True)
                 self._sid_live[sid] = await self.env.get_state(required_apps=APPS)
         return {"status": "ok", "sid": sid, "task_id": task_id}
+
+    async def _merge_patch(self, seed_state: dict) -> dict[str, Any] | None:
+        """Apply the seed's merge directives against the CURRENT live
+        state; ``None`` when the seed carries none (the plain-replace
+        path takes over). See ``inject_task`` for the directive shapes."""
+        found: list[tuple[str, str, list]] = []
+        for key, val in seed_state.items():
+            if isinstance(val, dict):
+                if key not in STORE_APP_IDS:
+                    continue          # e.g. "os" — the plain-replace plane
+                for k2, entries in val.items():
+                    field = _merge_field_of(k2)
+                    if field and isinstance(entries, list) and entries:
+                        found.append((key, field, entries))
+            elif isinstance(val, list) and val:
+                field = _merge_field_of(key)
+                if field:
+                    # bare slice: the legacy per-app slice that
+                    # replay.seed_apps passes only ever seeded wechat
+                    found.append(("wechat", field, val))
+        if not found:
+            return None
+        cur = await self.env.get_state(required_apps=APPS)
+        apps_now = cur.get("apps", {}) or {}
+        patch_apps: dict[str, Any] = {}
+        for app, field, entries in found:
+            current = (apps_now.get(app) or {}).get(field)
+            if current is None:
+                current = []
+            patch_apps.setdefault(app, {})[field] = _merged_list(
+                current, entries, f"{app}.{field}")
+        return {"apps": patch_apps}
 
     @staticmethod
     def _normalize_patch(seed_state: dict) -> dict:
@@ -940,41 +1011,6 @@ def build_app(bridge: MobileGymBridge) -> web.Application:
         action = await request.json()
         return web.json_response(await bridge.act_primitive(sid, action))
 
-    async def api_wechat_mutate(request):
-        """Compat alias: the per-app wechat operator route is superseded by
-        the generic ``POST /api/mutate/<sid>`` (NL intent, no operator
-        enum). Answer 302 pointing at the new route for the compat window;
-        the body describes the migration so a scripted caller can adapt
-        without guessing."""
-        sid = request.match_info["sid"]
-        raise web.HTTPFound(
-            f"/api/mutate/{sid}",
-            text=json.dumps({
-                "migrated": True,
-                "old_route": f"/api/wechat/{sid}/<eid>",
-                "new_route": f"/api/mutate/{sid}",
-                "new_payload": {"app": "<app_id>",
-                                "entity_ref": "<user-visible entity label>",
-                                "intent": "<natural-language intent>",
-                                "undo": False},
-            }, ensure_ascii=False))
-
-    async def api_x_mutate(request):
-        """Compat alias: the per-app X operator route is superseded by the
-        generic ``POST /api/mutate/<sid>`` (same migration as wechat)."""
-        sid = request.match_info["sid"]
-        raise web.HTTPFound(
-            f"/api/mutate/{sid}",
-            text=json.dumps({
-                "migrated": True,
-                "old_route": f"/api/x/{sid}/<eid>",
-                "new_route": f"/api/mutate/{sid}",
-                "new_payload": {"app": "<app_id>",
-                                "entity_ref": "<user-visible entity label>",
-                                "intent": "<natural-language intent>",
-                                "undo": False},
-            }, ensure_ascii=False))
-
     async def api_mutate(request):
         sid = request.match_info["sid"]
         data = await request.json()
@@ -1005,9 +1041,8 @@ def build_app(bridge: MobileGymBridge) -> web.Application:
     app.router.add_post("/api/mutate/{sid}", api_mutate)
     app.router.add_get("/api/app_state/{sid}/{app_id}", api_app_state)
     app.router.add_get("/api/os_state/{sid}", api_os_state)
-    # compat aliases (one-commit window; deletion announced in the R3 report)
-    app.router.add_post("/api/wechat/{sid}/{eid}", api_wechat_mutate)
-    app.router.add_post("/api/x/{sid}/{eid}", api_x_mutate)
+    # (the per-app mutate compat aliases are gone after the announced
+    # R3 window — POST /api/mutate/<sid> is the only write route)
     return app
 
 
