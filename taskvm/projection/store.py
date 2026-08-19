@@ -1,8 +1,8 @@
 """taskvm.projection.store — the composition seam (contract §5).
 
 Projection cannot create sessions (the architecture gate bans importing
-``taskvm.substrate`` from this package). The composition root — Agent E's
-bootstrap / Agent G integration / tests — constructs kernel + runtime +
+``taskvm.substrate`` from this package). The composition root —
+bootstrap / integration / tests — constructs kernel + runtime +
 substrate and REGISTERS the bundle here. Everything the UI serves is read
 from the registered objects' public facades.
 """
@@ -82,9 +82,9 @@ class SurfaceDecl:
 
 class GovernancePortLike(Protocol):
     """Structural port implemented by ``KernelGovernancePort`` (default)
-    or a composition adapter around C's GovernanceService.
+    or a composition adapter around the GovernanceService.
 
-    A-02: pause / resume / stop are NO LONGER on this port — they route
+    pause / resume / stop are NO LONGER on this port — they route
     through the ``DriverPortLike`` (driver → runtime → kernel, single owner)."""
 
     def local_patch(self, updates: dict, rationale: str = "") -> dict: ...

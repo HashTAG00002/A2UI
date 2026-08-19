@@ -52,12 +52,12 @@ class CUADecision:
     ``raw`` is provenance (the model's reply text / fake script id) for the
     call ledger and trace — never an internal id.
 
-    ``request_id`` (A-13 single-owner ledger): when the CUA adapter is the
+    ``request_id`` (single-owner ledger): when the CUA adapter is the
     ledger owner for its provider request (``records_own_ledger`` below),
     it stamps the ledger row's ``request_id`` here so the runtime can
     ANNOTATE that row (node_id / attempt / is_repair / revision) instead of
-    recording a second row for the same provider request (C-2:
-    1 provider request = 1 ledger row). Fakes leave it empty.
+    recording a second row for the same provider request
+    (1 provider request = 1 ledger row). Fakes leave it empty.
     """
 
     kind: CUADecisionKind
@@ -98,7 +98,7 @@ class CUAModel(Protocol):
     observation→prompt, JSON→CUADecision); tests inject a fake. Runtime never
     calls a provider directly.
 
-    Ledger ownership (A-13, C-2 ``1 provider request = 1 ledger row``): an
+    Ledger ownership (single-owner: 1 provider request = 1 ledger row): an
     adapter may declare ``records_own_ledger = True`` (a plain attribute,
     duck-typed — not part of this Protocol's call surface). That is a
     PROMISE that the adapter itself lands exactly one ledger row per real
@@ -106,7 +106,7 @@ class CUAModel(Protocol):
     exception). The runtime then never appends rows of its own for that
     adapter — it only ANNOTATES the adapter's row via ``request_id`` when
     the decision carries one. Adapters without the attribute (test fakes)
-    keep the legacy contract: the runtime records their calls."""
+    keep the default contract: the runtime records their calls."""
 
     def predict_action(self, *, goal: str, observation: Observation,
                        labels: Mapping[str, str] | None = None,
@@ -129,7 +129,7 @@ class ObservationExtractor(Protocol):
 
 @runtime_checkable
 class SurfaceBindingResolver(Protocol):
-    """TaskVM-owned handle → session surface resolution (A-01).
+    """TaskVM-owned handle → session surface resolution.
 
     The runtime must never default to ``surfaces[0]``: evidence gathered on
     surface B must act/verify on surface B. Concrete locators stay
@@ -178,11 +178,11 @@ class ModelCallRecord:
     SAME ``ModelCallLedger`` instance accepts records from both layers (the
     ledger only string-validates ``role``).
 
-    ``request_id`` (A-13): minted by the row's single owner (the transport
+    ``request_id`` (single-owner): minted by the row's single owner (the transport
     / model adapter) at request time; downstream layers reference the row
     ONLY through it (``Ledger.annotate``). ``node_id`` / ``attempt`` are
     execution context the runtime attaches by annotation — a second row is
-    never created for the same provider request (C-2)."""
+    never created for the same provider request (single-owner contract)."""
 
     role: str
     purpose: str
@@ -205,7 +205,7 @@ class CallLedger(Protocol):
     ``taskvm.architect.ModelCallLedger`` (injected as the SAME instance given
     to the architect — one unified report).
 
-    ``annotate`` (A-13): attach execution context (node_id / attempt /
+    ``annotate`` (single-owner): attach execution context (node_id / attempt /
     is_repair / revision / purpose) to an EXISTING row identified by
     ``request_id`` — the contract-compatible alternative to recording a
     second row for the same provider request. Returns the annotated record

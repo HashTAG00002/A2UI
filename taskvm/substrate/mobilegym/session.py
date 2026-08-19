@@ -1,4 +1,4 @@
-"""mobilegym.session — the MobileGym SubstrateSession (Agent B).
+"""mobilegym.session — the MobileGym SubstrateSession.
 
 A thin HTTP client over the resident MobileGym bridge
 (``taskvm.substrate.mobilegym.bridge``, one aiohttp process holding a
@@ -10,7 +10,7 @@ A thin HTTP client over the resident MobileGym bridge
     REAL gestures with MobileGym's own coordinate calibration;
   * ``capture`` → screenshot artifact.
 
-The bridge's legacy operator-mutate routes (wechat send_message, X toggle)
+The bridge's operator-mutate routes (wechat send_message, X toggle)
 are NOT used by this session — those wrap an injected L2 CUA loop; the
 runtime reaches MobileGym only through this session's observe/act port.
 """

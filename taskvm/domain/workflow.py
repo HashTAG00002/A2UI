@@ -1,5 +1,5 @@
 """Workflow — the three research primitives, nothing more (mental-model
-doc §5, handoff 02 'Workflow'):
+doc §5):
 
     Sequence          — nodes with depends_on edges, executed in order
     Fan-out / Barrier — parallel lanes + a fan-in verification point
@@ -205,7 +205,7 @@ class WorkflowGraph:
                 f"TERMINAL {tid!r} must be a sink; depended on by "
                 f"{dependents}")
         # bounded loops: executable body = direct ACTION/VERIFY children.
-        # No nested loops, no containers inside a loop (handoff: 不实现
+        # No nested loops, no containers inside a loop (not implemented
         # nested loop / general recursion / general DAG DSL).
         loops = [n for n in self.nodes if n.kind is NodeKind.BOUNDED_LOOP]
         for lp in loops:

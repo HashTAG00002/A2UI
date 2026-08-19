@@ -2,13 +2,13 @@
 
 The FIRST of the two high-level model roles (architect contract §1). One
 call turns what a user could see on screen into the semantic task state the
-kernel will govern. Fast/slow path discipline (handoff 04):
+kernel will govern. Fast/slow path discipline:
 
 - **fast path, 0 model calls** — :meth:`StateCompiler.extract_observed`
   re-reads a known quantity by applying the deterministic ``value_pattern``
   minted at compile time; :meth:`StateCompiler.rebind` restores a handle by
   visible-label match after a local structural change. A fingerprint change
-  alone is NOT a slow-path trigger (C-F1, Oracle audit): if every known
+  alone is NOT a slow-path trigger: if every known
   handle is still recoverable — label present exactly once on its surface —
   the deterministic rebind answers it with zero model calls.
 - **slow path, 1 model call (+ ≤1 repair)** — a handle's visible label
@@ -141,7 +141,7 @@ class StateCompiler:
         for attempt in range(1 + self._max_repairs):
             is_repair = attempt > 0
             exact_user = user + repair_note
-            # C-1 (Oracle audit): EVERY message actually sent — the initial
+            # EVERY message actually sent — the initial
             # one AND each repair round — passes the no-leak gate on the
             # exact text about to go out. The leak repair note itself is
             # token-free (LEAK_REPAIR_GUIDANCE) so it can never trip here;
@@ -164,7 +164,7 @@ class StateCompiler:
             leaks = scan_json_values(parsed.get("variables"))
             if leaks:
                 # the offending tokens go into the error (honest failure
-                # detail) but NEVER back into the model prompt (C-1).
+                # detail) but NEVER back into the model prompt (no-leak contract).
                 last_err = CompilerOutputError(
                     f"state-compiler output echoes internal vocabulary: "
                     f"{sorted(set(leaks))}")
@@ -228,7 +228,7 @@ class StateCompiler:
         surface; report the rest as lost (they need the slow path). A label
         that now occurs multiple times is same-name AMBIGUOUS — the substring
         match cannot tell the instances apart, so it is honestly reported
-        lost rather than bound to a guessed instance (handoff 04 ladder)."""
+        lost rather than bound to a guessed instance (routing ladder)."""
         kept: list[HandleEvidence] = []
         lost: list[str] = []
         for h in handles:
@@ -262,7 +262,7 @@ class StateCompiler:
     ) -> SlowPathReport:
         """Fast/slow routing — deterministic, no model, no guessing.
 
-        The handoff-04 ladder (C-F1, Oracle audit — a fingerprint change is
+        The routing ladder (a fingerprint change is
         NOT unconditionally slow):
 
           1. fingerprint unchanged → value-extraction fast path (caller
@@ -371,7 +371,7 @@ class StateCompiler:
 
     @staticmethod
     def _repair_note(err: Exception) -> str:
-        # C-4 (Oracle audit, E32), compiler side: same hole, same fix — the
+        # same hole, same fix — the
         # raw error text (which may quote handle ids ha001… minted by the
         # assembly) never goes back to the model; only the classified
         # business-level category does. Detail stays in log + exception.

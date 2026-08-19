@@ -36,7 +36,7 @@ Layering (why this file is legal):
   the world's surfaces are DISCOVERED through the substrate port
   (``list_surfaces``), never hardcoded here.
 
-Single-session honesty (bridge B-1: ONE active sid): the store keeps ONE
+Single-session honesty (bridge contract: ONE active sid): the store keeps ONE
 session per bridge sid; a new goal stops the previous driver and
 re-registers under the same sid.
 

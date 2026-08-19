@@ -1,6 +1,6 @@
 """ActionContractSerializer — deterministic CUA-goal serialisation.
 
-Replaces the deleted LLM ``SubgoalGenerator`` (master handoff §6: "Action
+Replaces the deleted LLM ``SubgoalGenerator`` (contract §6: "Action
 contract 到 CUA instruction 使用确定性序列化；不为每个 patch 额外生成两个
 自然语言候选"). ZERO model calls, ZERO candidates, ZERO mock flag — the same
 contract always serialises to the same instruction (reproducibility is a
@@ -91,7 +91,7 @@ class ActionContractSerializer:
         The kernel derived ``from_observed``/``to_observed`` from its own
         committed action history; the CUA goal simply names the quantity
         and the value reality must return to. No model "invents" reversal
-        copy (master handoff §5: CompensationPatch 重新发明目标).
+        copy (contract §5: CompensationPatch 重新发明目标).
         """
         labels = labels or {}
         name = labels.get(entry.semantic_key, entry.semantic_key)
@@ -107,13 +107,13 @@ class ActionContractSerializer:
         return text
 
 
-# ── legacy PatchOp adapter (deterministic replacement for the deleted
+# ── patch-op adapter (deterministic replacement for the deleted
 #    governance.subgoal_generator.instruction_for_op — same visible-locator
 #    inputs, but ZERO model calls and NO mock flag) ─────────────────────────
 def patchop_cua_goal(*, surface_label: str, visible_locator: str | None,
                      field_display: str, target_value: Any,
                      restore: bool = False, attempt: int = 1) -> str:
-    """One legacy patch-op → goal instruction, deterministically.
+    """One patch-op → goal instruction, deterministically.
 
     ``visible_locator`` None → the honest cannot-locate sentinel (the CUA
     fails rather than the harness fabricating an addressable id).

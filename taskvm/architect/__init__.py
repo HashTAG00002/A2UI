@@ -1,7 +1,7 @@
 """taskvm.architect — L4: State Compiler + Task Architect (frozen contract:
 docs/contracts/architect.md).
 
-Two high-level model roles live here (master handoff §6):
+Two high-level model roles live here (contract §6):
 
 1. **StateCompiler** — visible observations → task variables + binding
    evidence (fast path deterministic, slow path one model call).

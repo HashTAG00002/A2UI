@@ -45,7 +45,7 @@ from taskvm.runtime.sync import StructureInvalidation, SurfaceSync
 # reasons run() may return (audit/UI facing)
 DONE = "done"
 PAUSED = "paused"
-STOPPED = "stopped"          # A-02: persistent lifecycle stop
+STOPPED = "stopped"          # persistent lifecycle stop
 BUDGET_EXHAUSTED = "budget_exhausted"
 PENDING_RECOMPOSE = "pending_recompose"
 NO_PLAN = "no_plan"
@@ -84,7 +84,7 @@ class AutonomyRuntime:
             extractor, ledger, self._budgets)
         self._events: list[RuntimeEvent] = []
         self._paused = False
-        self._stopped = False              # A-02: persistent lifecycle state
+        self._stopped = False              # persistent lifecycle state
         self._stop_reason: str | None = None   # why we paused (budget/…)
         self._model_calls = 0
         self._t0: float = 0.0
@@ -143,7 +143,7 @@ class AutonomyRuntime:
         self._kernel.request_governance("pause", "soft pause requested")
 
     def request_resume(self) -> None:
-        # A-02: resume from a paused state only — stop is persistent
+        # resume from a paused state only — stop is persistent
         if self._stopped:
             return
         self._paused = False
@@ -151,7 +151,7 @@ class AutonomyRuntime:
         self._kernel.request_governance("resume", "soft pause cleared")
 
     def request_stop(self) -> None:
-        """A-02: persistent lifecycle stop. Once stopped, the runtime never
+        """Persistent lifecycle stop. Once stopped, the runtime never
         starts a new GUI atomic action. An in-flight primitive may complete
         (it is already inside substrate.act); but the next _pre_tick returns
         STOPPED and the driver thread exits. Stop is irreversible — only
@@ -159,14 +159,14 @@ class AutonomyRuntime:
         can begin again (the frozen contract does not define restart-from-
         stopped on the same runtime object).
 
-        A-02 stop-during-inference: a stop that lands while
+        Stop-during-inference: a stop that lands while
         ``predict_action`` is blocked on the provider must make the
         prediction's returned ACT stale on arrival — the ACT branch
         re-enters the lifecycle gate BEFORE start_action/substrate.act
         (0 GUI writes). Stop deliberately does NOT bump the kernel epoch
         (``request_governance`` bumps only for pause; the kernel is frozen
         there) and stays ONE governance event — the single-owner path
-        pinned by tests/projection/test_lifecycle_a02.py."""
+        pinned by lifecycle tests."""
         self._stopped = True
         self._paused = True  # also pause to break out of action loop
         self._stop_reason = "stopped"
@@ -178,7 +178,7 @@ class AutonomyRuntime:
         substrate. Forward autonomy is blocked by the kernel while the plan is
         pending (runtime.md §7).
 
-        A-01: each entry routes to the surface that owns its semantic key's
+        Each entry routes to the surface that owns its semantic key's
         binding (resolved from the variable's evidence handle), NOT to a
         default surface. ``surface_id`` (explicit override) still wins — the
         caller may know the surface from context; per-entry resolution then
@@ -187,7 +187,7 @@ class AutonomyRuntime:
                      for v in self._kernel.task_state().variables}
         # single-surface sessions are routing-trivial (one candidate — no
         # ambiguity, hence not a surface-0 "fallback"); the resolver chain
-        # only becomes LOAD-BEARING in multi-surface sessions (A-01)
+        # only becomes LOAD-BEARING in multi-surface sessions
         trivial = (self._sync.surfaces[0]
                    if len(self._sync.surfaces) == 1 else None)
         surface_for_entry: dict[str, str] = {}
@@ -237,7 +237,7 @@ class AutonomyRuntime:
 
     @property
     def budgets(self) -> RuntimeBudgets:
-        """The flat budget object (read-only view; runtime.md §5). A-03:
+        """The flat budget object (read-only view; runtime.md §5). The
         the production driver reads ``inactive_heartbeat_seconds`` from
         here — the cadence is a runtime-layer budget, never a hardcoded
         projection-layer constant."""
@@ -245,7 +245,7 @@ class AutonomyRuntime:
 
     # ── the tick ──────────────────────────────────────────────────────────
     def _pre_tick(self) -> str | None:
-        # A-02: persistent stop — checked FIRST, before anything else.
+        # persistent stop — checked FIRST, before anything else.
         # Once stop lands, the runtime never resumes on any tick.
         if self._stopped:
             return STOPPED
@@ -282,7 +282,7 @@ class AutonomyRuntime:
         return last == "pause"
 
     def _governance_says_stopped(self) -> bool:
-        """A-02: check whether the last governance event was a stop.
+        """Check whether the last governance event was a stop.
         Handles the case where an external caller wrote stop directly to
         the kernel (not through the driver path)."""
         last = None
@@ -342,7 +342,7 @@ class AutonomyRuntime:
             self._kernel.requeue(node.node_id)   # FAILED → READY, same world
             repair_note = detail
 
-    # ── A-01: contract-evidence → surface routing ──────────────────────
+    # ── contract-evidence → surface routing ──────────────────────
     def _resolve_surface_for_contract(self, contract, node) -> str | None:
         """Route an ActionContract to the surface its target evidence was
         grounded on — never a ``surfaces[0]`` default.
@@ -395,7 +395,7 @@ class AutonomyRuntime:
         ``"verify_failed"`` when the verdict failed and repair may still fix
         it; anything else ends the pass for this node.
 
-        A-01: the surface is resolved from the CONTRACT's target evidence
+        The surface is resolved from the CONTRACT's target evidence
         AFTER ``request_action`` hands the contract over — evidence grounded
         on surface B drives surface B. An unresolvable binding in a
         multi-surface session ⇒ honest fail (StructureInvalidated), never a
@@ -470,12 +470,12 @@ class AutonomyRuntime:
             except Exception as e:            # provider/parse failure
                 invalid += 1
                 self._model_calls += 1
-                # A-13: when the adapter owns its ledger (declared via
+                # single-owner accounting: when the adapter owns its ledger (declared via
                 # ``records_own_ledger``) the row for THIS request already
                 # exists (the adapter records on every path, including the
                 # exception path) — appending another would double-count.
                 # Fakes without the declaration keep the runtime as their
-                # row owner (legacy contract).
+                # row owner (default contract).
                 if not getattr(self._cua, "records_own_ledger", False):
                     self._ledger.record(ModelCallRecord(
                         role=MODEL_ROLE_CUA,
@@ -511,7 +511,7 @@ class AutonomyRuntime:
                 # ACT kind guarantees a gesture (CUADecision validation);
                 # this belt-and-braces guard keeps the type contract local
                 return "stopped", ""
-            # A-02 (stop during inference): ``predict_action`` may block on
+            # stop during inference: ``predict_action`` may block on
             # the provider for arbitrarily long. A public stop/pause that
             # landed while the model was thinking makes this prediction
             # stale ON ARRIVAL — re-enter the lifecycle gate (the same
@@ -523,7 +523,7 @@ class AutonomyRuntime:
             # ``request_governance("stop")`` directly; that path bumps no
             # epoch, so the kernel gate alone would not veto the gesture).
             # The provider row was already recorded above (1 request = 1
-            # row); execution disposition is NOT a ledger field (C-2). The
+            # row); execution disposition is NOT a ledger field (single-owner contract). The
             # attempt's lifecycle evidence is the kernel's
             # GOVERNANCE_REQUESTED(stop) event + run() returning STOPPED;
             # the handle honestly stays REQUESTED — never started, never
@@ -640,7 +640,7 @@ class AutonomyRuntime:
     def _advance_verify(self, node: WorkflowNode) -> None:
         surface = self._verify_surface(node)
         if surface is None:
-            # A-01: a VERIFY node whose condition keys carry no resolvable
+            # a VERIFY node whose condition keys carry no resolvable
             # binding (multi-surface session) cannot be honestly judged —
             # land a failed verdict + StructureInvalidated, never verify
             # against a guessed surface-0 world.
@@ -677,7 +677,7 @@ class AutonomyRuntime:
         self._kernel.land_verification(vr)
 
     def _verify_surface(self, node: WorkflowNode) -> str | None:
-        """A-01: the surface a VERIFY node's condition is grounded on —
+        """The surface a VERIFY node's condition is grounded on —
         parsed from its ``key == value`` predicate; then the variables'
         evidence handles; then the trivial single-surface case. ``None`` in
         a multi-surface session with no resolvable binding (honest fail)."""
@@ -802,10 +802,10 @@ class AutonomyRuntime:
     def _record_call(self, decision: CUADecision, purpose: str, *,
                      is_repair: bool = False,
                      node_id: str = "", attempt: int = 0) -> None:
-        """A-13 single-owner accounting. When the decision carries a
+        """Single-owner accounting. When the decision carries a
         ``request_id`` the CUA adapter already landed the provider-request
         row — we ANNOTATE it with execution context instead of appending a
-        second row (C-2: 1 provider request = 1 ledger row). An adapter
+        second row (1 provider request = 1 ledger row). An adapter
         that declares ``records_own_ledger`` (the production
         ``HttpCUAModel``) owns its row on EVERY path — even a decision
         without a ``request_id`` (a test fake or a variant adapter) is

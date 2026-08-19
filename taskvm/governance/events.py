@@ -1,4 +1,4 @@
-"""Governance events — the unified L4 entry vocabulary (handoff 04).
+"""Governance events — the unified L4 entry vocabulary.
 
 Six events, one entry point (``GovernanceService.handle``). They carry
 pure governance SEMANTICS — user-visible intent, never platform selectors

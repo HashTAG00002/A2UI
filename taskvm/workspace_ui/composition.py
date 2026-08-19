@@ -132,7 +132,7 @@ class HttpCUAModel:
 
     @property
     def request_count(self) -> int:
-        """REAL provider requests issued through this adapter (A-13 test
+        """REAL provider requests issued through this adapter (test
         invariant: this must equal the number of ledger rows the adapter
         owns — and the runtime must add none of its own)."""
         return self._requests

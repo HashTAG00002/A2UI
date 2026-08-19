@@ -64,7 +64,7 @@ header .sim-link { margin-left: auto; font-size: 12px; }
 header .sim-link a { color: var(--teal); text-decoration: none; }
 header .sim-link a:hover { text-decoration: underline; }
 
-/* split-screen: left governance panel, right live phone sim (handoff §4.4) */
+/* split-screen: left governance panel, right live phone sim (contract §4.4) */
 main.split {
   max-width: 1600px; margin: 18px auto; padding: 0 18px;
   display: grid; grid-template-columns: 1fr 420px; gap: 18px; align-items: start;

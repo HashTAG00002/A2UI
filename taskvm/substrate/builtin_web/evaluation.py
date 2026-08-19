@@ -1,16 +1,14 @@
-"""builtin_web.evaluation — the Web EvaluationEnvironment (Agent B).
+"""builtin_web.evaluation — the Web EvaluationEnvironment.
 
 Exam-room powers over the builtin Flask apps (contract §4): ``reset`` /
-``seed`` / ``oracle_state`` (the successor of the legacy
-``StateAdapter.read_canonical``) / ``session_state``. This object is for
+``seed`` / ``oracle_state`` / ``session_state``. This object is for
 the evaluation plane (verifier, benchmark runners, demo seeding). It is a
 DIFFERENT object from ``WebSubstrateSession`` on purpose: possession of a
 runtime session grants none of these powers and vice versa.
 
-What is intentionally ABSENT from the RUNTIME: any write/mutate reach. The
-legacy API mutation executor (``requests.post`` to
-``/api/<resource>/<sid>/<eid>`` as a runtime WRITE path) is deleted for
-good (task brief §一; handoff 03 §删除 API Executor). The one exception on
+What is intentionally ABSENT from the RUNTIME: any write/mutate reach —
+app mutation over HTTP is never a runtime write path (task brief §一).
+The one exception on
 this plane is ``force_write`` — an exam-room injection that simulates an
 EXTERNAL actor's edit for reconciliation scenarios. It is reachable only
 through an EvaluationEnvironment, never a SubstrateSession, and the static
@@ -30,8 +28,7 @@ logger = logging.getLogger(__name__)
 class WebEvaluationEnvironment:
     """Evaluation-plane adapter for ONE builtin web app.
 
-    Read shape (unchanged from the legacy contract so the verifier keeps
-    working): ``oracle_state(sid) -> {"entities": {id: {field: value}}}``.
+    Read shape: ``oracle_state(sid) -> {"entities": {id: {field: value}}}``.
     """
 
     app: str = ""
@@ -114,7 +111,7 @@ class WebEvaluationEnvironment:
         return f"<{self.__class__.__name__} {self.app} @ {self.base_url}>"
 
 
-# ── per-app tables (migrated from legacy substrate/base.py) ─────────────────
+# ── per-app tables ──────────────────────────────────────────────────────────
 
 class CalendarEvaluationEnv(WebEvaluationEnvironment):
     app = "calendar"
@@ -182,7 +179,6 @@ def make_evaluation_environment(app: str, port: int | None = None,
 def make_evaluation_environments(
         apps: list[str] | None = None, **kwargs
         ) -> dict[str, WebEvaluationEnvironment]:
-    """``{app: WebEvaluationEnvironment}`` for an app set. This replaces the
-    legacy ``make_adapters()`` oracle/seed surface (the runtime write
-    surface lives in the runtime plane, ``taskvm.runtime``)."""
+    """``{app: WebEvaluationEnvironment}`` for an app set (the runtime
+    write surface lives in the runtime plane, ``taskvm.runtime``)."""
     return {a: make_evaluation_environment(a, **kwargs) for a in (apps or [])}

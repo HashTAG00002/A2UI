@@ -3,7 +3,7 @@
 Invariant 2 lives here: schema revision and data revision are independent
 counters. A value/progress update bumps ONLY the data revision, so the
 projection layer can keep rendering the cached schema (no re-composition,
-no model call — master handoff §3.1 / §6).
+no model call — contract §3.1 / §6).
 """
 from __future__ import annotations
 

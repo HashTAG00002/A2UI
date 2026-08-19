@@ -292,7 +292,7 @@ class TaskArchitect:
         for attempt in range(1 + self._max_repairs):
             is_repair = attempt > 0
             exact_user = user + repair_note
-            # C-1 (Oracle audit): EVERY message actually sent — the initial
+            # EVERY message actually sent — the initial
             # one AND each repair round — passes the no-leak gate on the
             # exact text about to go out. The leak repair note is token-free
             # (LEAK_REPAIR_GUIDANCE); any other note that unexpectedly
@@ -310,7 +310,7 @@ class TaskArchitect:
             leaks = scan_json_values(parsed)
             if leaks:
                 # the offending tokens go into the error (honest failure
-                # detail) but NEVER back into the model prompt (C-1).
+                # detail) but NEVER back into the model prompt (no-leak contract).
                 last_err = ArchitectOutputError(
                     "architect output echoes internal vocabulary: "
                     f"{sorted(set(leaks))}")
@@ -393,7 +393,7 @@ class TaskArchitect:
 
     @staticmethod
     def _repair_note(err: Exception) -> str:
-        # C-4 (Oracle audit, E32): the raw error text may quote internal
+        # the raw error text may quote internal
         # ids minted by the assembly (n001/c001/…) — only the business-level
         # category goes back to the model; the detail stays in the log and
         # in the exception for the honest-failure path.
@@ -512,7 +512,7 @@ class TaskArchitect:
             label_to_id[label] = next_id()
             parsed_nodes.append(rn)
 
-        # A-01 (handle provenance): build the compiler-minted handle index
+        # build the compiler-minted handle index
         # from the observed variables' evidence — a Task Architect action
         # targeting a label the State Compiler already grounded MUST reuse
         # that same handle (same opaque id), so the surface binding chain

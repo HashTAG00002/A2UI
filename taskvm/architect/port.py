@@ -7,12 +7,12 @@ The architect layer is deliberately free of any model SDK: it talks to a
 environment conventions (``OPENAI_BASE_URL`` / ``OPENAI_API_KEY`` /
 ``TASKVM_MODEL``).
 
-Why the ledger exists (master handoff §6 + architect contract §5): the
+Why the ledger exists (architect contract §5): the
 benchmark must be able to distinguish **compiler calls / architect calls /
 CUA calls** so the paper can honestly report the harness's model-call
 overhead. Nothing in this layer may call a model without landing a record,
 and no port may retry internally: **one ``complete_json`` = one provider
-request = one ledger record** (C-2).
+request = one ledger record** (single-owner contract).
 """
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ class ModelPort(Protocol):
     """The port L4 consumes. ``complete_json`` returns a JSON-decoded reply.
 
     ``image_data_url`` (optional): a base64 data-URL screenshot — the vision
-    path. There is NO port-level retry (C-2, Oracle audit): one call = one
+    path. There is NO port-level retry (single-owner contract): one call = one
     provider request = one ledger record, so the benchmark's reported
     model-call overhead is the true one. An unparseable reply returns
     ``parsed=None``; the L4 semantic repair loop is the single repair
@@ -64,15 +64,15 @@ class ModelPort(Protocol):
 class ModelCallRecord:
     """One landed (or failed) high-level model call — audit raw material.
 
-    ``request_id`` (RM-0 A-13): minted by the row's single owner — the
+    ``request_id`` (single-owner): minted by the row's single owner — the
     transport/model adapter that actually issued the provider request. Every
     real provider request gets exactly one row carrying a fresh unique
     ``request_id``; downstream layers (runtime, evaluation) reference that
     row ONLY via ``Ledger.annotate`` (node_id / attempt / execution
     context) — never by appending a second row for the same request
-    (C-2: ``1 provider request = 1 ledger row``)."""
+    (single-owner: ``1 provider request = 1 ledger row``)."""
 
-    role: str                    # one of MODEL_ROLES (or an E-side extension)
+    role: str                    # one of MODEL_ROLES
     purpose: str                 # e.g. "initial_compose", "goal_recompose"
     model: str
     ok: bool
@@ -82,7 +82,7 @@ class ModelCallRecord:
     latency_ms: int = 0
     revision: int = 0            # task-state revision at call time (0 = n/a)
     error: str = ""
-    request_id: str = ""         # unique id minted by the row's owner (A-13)
+    request_id: str = ""         # unique id minted by the row's owner
     node_id: str = ""            # execution context, attached via annotate
     attempt: int = 0             # execution context, attached via annotate
 
@@ -92,7 +92,7 @@ class ModelCallLedger:
 
     ``counts_by_role()`` is what the benchmark reads to separate compiler /
     architect / CUA overhead. Records are immutable; the ledger never edits
-    history. ``annotate`` (A-13) is the single sanctioned mutation: it
+    history. ``annotate`` (single-owner) is the single sanctioned mutation: it
     REPLACES a row in place (same request_id, same provider request) with
     execution context attached — it can never create or drop rows, so the
     ``provider request == ledger row`` invariant survives annotation.
@@ -120,7 +120,7 @@ class ModelCallLedger:
         return rec
 
     def annotate(self, request_id: str, **fields: Any) -> ModelCallRecord | None:
-        """Attach execution context to an existing row (A-13).
+        """Attach execution context to an existing row (single-owner contract).
 
         Only the annotation fields (``purpose`` / ``node_id`` / ``attempt`` /
         ``is_repair`` / ``revision``) may be set; unknown field names raise

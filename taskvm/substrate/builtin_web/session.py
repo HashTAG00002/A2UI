@@ -1,4 +1,4 @@
-"""builtin_web.session — the Web SubstrateSession (Agent B).
+"""builtin_web.session — the Web SubstrateSession.
 
 Implements the unified port (``taskvm.substrate.port``) over one Playwright
 page on a builtin web app:

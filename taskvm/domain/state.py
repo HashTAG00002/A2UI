@@ -13,9 +13,9 @@ values, because TaskVM is a control system over reality, not a scratchpad:
 When ``desired != observed`` the variable is in *pending divergence* —
 work is in flight or not yet started. The kernel never lets a patch
 pretend the world already moved, and never lets an observation rewrite
-the user's intent (master handoff §3.2 双向可执行性 + §3.5 诚实性).
+the user's intent (contract §3.2 双向可执行性 + §3.5 诚实性).
 
-Hard boundary (master handoff §3.2 / §5): nothing in this module may
+Hard boundary (contract §3.2 / §5): nothing in this module may
 carry a database primary key, an app-internal operation name, or a
 substrate-specific selector. ``SurfaceHandle`` is a TaskVM-owned,
 short-lived handle id ONLY; the mapping from handle id to any concrete

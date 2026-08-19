@@ -9,7 +9,7 @@ validation against hand-rolled schemas.
 
 ⚠ v0.9 binding syntax (verified three ways: official ``a2ui_protocol.md``
 example, ``evolution_guide.md`` v0.8→v0.9 migration table, and the SDK
-validator rejecting the legacy form): a dynamic property binds via the
+validator rejecting the old form): a dynamic property binds via the
 ``DataBinding`` branch of its ``Dynamic*`` type —
 
     {"id": "f", "component": "TextField", "label": "Date",

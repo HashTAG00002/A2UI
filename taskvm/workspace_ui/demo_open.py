@@ -15,8 +15,8 @@ Substrates (``--substrate``)
   sim. The launcher provides exactly the allowed glue (re-prompt §Task C):
   a ``--bridge-url``, app/device parameters, a minimal health check, and
   an OPTIONAL ``--start-bridge`` that spawns the bridge subprocess from a
-  CLOSED flag whitelist identical to the bench factory's (B-09:
-  ``--port`` / ``--sim-url`` / ``--screenshot-dir`` only — a CUA-loop
+  CLOSED flag whitelist identical to the bench factory's
+  (``--port`` / ``--sim-url`` / ``--screenshot-dir`` only — a CUA-loop
   injection flag can never appear on this launch line).
 * ``builtin_web`` (explicit fallback/test substrate) — same registry
   entry, same bootstrap, real builtin web app.
@@ -57,7 +57,7 @@ What is honestly limited here (documented, never hidden)
    ``OPENAI_API_KEY`` is unset, in which case bootstrap fails at the
    first provider call — honestly, not silently.
 2. One session per launcher run (one ``--sid``); multi-surface open
-   routing is the A-01 resolver's job downstream, not the launcher's.
+   routing is the resolver's job downstream, not the launcher's.
 
 Usage
 -----
@@ -101,7 +101,7 @@ DEFAULT_BRIDGE_PORT = 3019
 DEFAULT_SIM_URL = "http://localhost:3000"
 
 #: the CLOSED bridge launch-flag whitelist — byte-for-byte the bench
-#: factory's B-09 discipline (taskvm_bench/evaluation/mobilegym_factory.py
+#: factory's discipline (taskvm_bench/evaluation/mobilegym_factory.py
 #: ``_BRIDGE_ALLOWED_FLAGS``): if a flag is not in this set the launcher
 #: refuses to pass it, so no CUA-loop injection can ever appear on an
 #: open-launcher start line either.
@@ -170,7 +170,7 @@ def _bridge_url(args: argparse.Namespace) -> str:
 
 
 def _spawn_bridge_argv(args: argparse.Namespace) -> list[str]:
-    """The bridge subprocess launch line — CLOSED whitelist (B-09).
+    """The bridge subprocess launch line — CLOSED whitelist.
 
     Mirrors the bench factory's ``_bridge_argv``: only ``--port`` /
     ``--sim-url`` / ``--screenshot-dir`` may ever appear (``''`` disables

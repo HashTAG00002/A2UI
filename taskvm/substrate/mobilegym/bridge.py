@@ -8,7 +8,7 @@ instance and exposes the TaskVM adapter contract (``reset`` / ``inject_task``
 / ``read_canonical`` / ``mutate``) as REST routes, translating each sync HTTP
 call into an ``await env.xxx`` on the internal event loop.
 
-Why a bridge, not a direct adapter (handoff §2): MobileGym's agent write path
+Why a bridge, not a direct adapter (contract §2): MobileGym's agent write path
 is GUI gestures (``env.step(Action(CLICK/TYPE/...))`` → ``__SIM_INPUT__``),
 NOT ``set_state`` (which MobileGym's runtime-api.md L276 defines as setup-only
 "inject task-initial conditions"). TaskVM's rollback/verifier only talk to the
@@ -45,11 +45,11 @@ Routes (mirror the Drive app's contract, app-namespaced):
     POST /api/act/<sid>                       → env.step(real gesture) (RUNTIME; requires active sid)
     GET  /api/app_state/<sid>/<app_id>        → raw store state of ANY catalog app [oracle]
     GET  /api/os_state/<sid>                  → OS runtime state (tasks/settings/...) [oracle]
-    GET  /api/session_state/<sid>             → generic per-app summary (legacy summary block kept as compat alias)
-    GET  /api/wechat_chats/<sid>              → flattened wechat chats (legacy compat alias)
-    GET  /api/alipay_transactions/<sid>       → flattened alipay transferRecords (legacy compat alias)
-    GET  /api/x_posts/<sid>                   → X post rows (legacy compat alias; non-invasive store read)
-    GET  /api/x_state/<sid>                   → X toggle lists (legacy compat alias)
+    GET  /api/session_state/<sid>             → generic per-app summary (summary block kept as compat alias)
+    GET  /api/wechat_chats/<sid>              → flattened wechat chats (compat alias)
+    GET  /api/alipay_transactions/<sid>       → flattened alipay transferRecords (compat alias)
+    GET  /api/x_posts/<sid>                   → X post rows (compat alias; non-invasive store read)
+    GET  /api/x_state/<sid>                   → X toggle lists (compat alias)
     POST /api/mutate/<sid>                    → GENERIC model-driven write: {"app","entity_ref","intent"}
                                                 via gui_act_async + ModelVerifier gate; undo → 409 if
                                                 irreversible. App-agnostic — no operator enum, no per-app
@@ -57,21 +57,21 @@ Routes (mirror the Drive app's contract, app-namespaced):
     POST /api/wechat/<sid>/<eid>              → 302 → /api/mutate/<sid> (compat alias, removal scheduled)
     POST /api/x/<sid>/<eid>                   → 302 → /api/mutate/<sid> (compat alias, removal scheduled)
 
-B-1 (Oracle audit 2026-08-15): ONE active experimental session at a time.
+ONE active experimental session at a time.
 The evaluation/setup plane (reset/inject_task/oracle reads) activates a
 sid; the runtime plane (observe/act/mutate routes) REQUIRES the active sid
 and honestly refuses a mismatch (409 session mismatch) — the runtime never
 switches reality via env.reset/get_state/set_state underneath the caller.
 
-B-04 (Oracle audit — Non-invasive MobileGym evaluation oracle, fixed
-2026-08-17): the X oracle read (``GET /api/x_posts/<sid>``, backing
-``MobileGymEvaluationEnvironment.oracle_state`` for the "x" app) used to
-call ``env.open_app("x", wait_stable=True)`` + ``asyncio.sleep(1.5)`` on
-EVERY read — switching the live sim's foreground app and burning wall
-clock just to grade it, polluting the very screen/latency the runtime is
-being measured on. Fixed: the grading-relevant fields (is_liked/
+Non-invasive X oracle: the X oracle read (``GET /api/x_posts/<sid>``,
+backing ``MobileGymEvaluationEnvironment.oracle_state`` for the "x" app)
+must NEVER call ``env.open_app("x", wait_stable=True)`` +
+``asyncio.sleep(1.5)`` on every read — switching the live sim's
+foreground app and burning wall clock just to grade it would pollute
+the very screen/latency the runtime is
+being measured on. Instead, the grading-relevant fields (is_liked/
 is_retweeted/is_bookmarked — the only fields any checkpoint criterion
-reads) now come straight from the zustand store dict ``env.get_state()``
+reads) come straight from the zustand store dict ``env.get_state()``
 already returns (``_x_toggle_rows`` — a pure projection, zero env calls,
 same data ``x_state()`` has always used). The non-grading ``content``
 preview field is best-effort from whatever ``[data-post-id]`` DOM is
@@ -151,7 +151,7 @@ class MobileGymBridge:
     # ── env lifecycle ────────────────────────────────────────────────────────
     async def start_env(self) -> None:
         from bench_env.env.mobile_gym import MobileGymEnv
-        # Headed honesty (E7-style — don't fake headed): if the caller asked
+        # Headed honesty (don't fake headed): if the caller asked
         # for a visible browser (--headed) but this box has no X display (no
         # $DISPLAY, no /tmp/.X11-unix socket, no xvfb — common on a headless
         # server), fall back to headless with a LOUD warning rather than crash
@@ -207,7 +207,7 @@ class MobileGymBridge:
         if self.env is not None:
             await self.env.close()
 
-    # ── L1 primitive routes (Agent B): observe / act over REAL gestures ────
+    # ── L1 primitive routes: observe / act over REAL gestures ────────────
     # These back the ``MobileGymSubstrateSession`` port implementation
     # (substrate/mobilegym/session.py). They carry no operator semantics,
     # no entity ids, no store contents — the runtime's CUA loop composes
@@ -217,7 +217,7 @@ class MobileGymBridge:
         fingerprint of the live sim page (zero-exposure: only what a real
         user can see on the rendered screen).
 
-        B-1 (Oracle audit): the runtime plane NEVER switches reality. The
+        The runtime plane NEVER switches reality. The
         live sim is bound to ONE active experimental session, established
         by the evaluation/setup plane (reset/inject_task). A mismatched sid
         is an honest error — no ``reset``/``get_state``/``set_state`` from
@@ -247,7 +247,7 @@ class MobileGymBridge:
         MobileGym's own ``env.step(Action...)`` norm_0_1000 calibration —
         identical pipeline to the grounding loop's gestures.
 
-        B-1: runtime plane — requires the evaluation plane to have made
+        Runtime plane — requires the evaluation plane to have made
         ``sid`` the active session first; never context-switches. The
         guard runs BEFORE the bench_env import so a session mismatch is
         answered with zero environment side effects."""
@@ -288,9 +288,9 @@ class MobileGymBridge:
             return {"status": "ok", "detail": f"open({target})"}
         return {"status": "failed", "detail": f"unsupported kind {kind!r}"}
 
-    # ── session activation (B-1: EVALUATION/SETUP plane only) ───────────────
+    # ── session activation (EVALUATION/SETUP plane only) ───────────────
     async def _require_active(self, sid: str) -> None:
-        """Runtime-plane guard (B-1, Oracle audit): ``observe`` / ``act`` /
+        """Runtime-plane guard: ``observe`` / ``act`` /
         task-level mutate routes must NEVER switch reality. The browser
         holds ONE live experimental session, established by the evaluation
         plane (``reset`` / ``inject_task`` — the exam-room powers). A
@@ -406,16 +406,15 @@ class MobileGymBridge:
             rows = self._flatten_alipay_txs(apps.get("alipay", {}))
             return {"site": SITE, "sid": sid, "alipay_transactions": rows}
         if resource == "x_posts":
-            # B-04 (Oracle audit 2026-08-15/17 — Non-invasive MobileGym
-            # evaluation oracle): the OLD path called
-            # ``env.open_app("x", wait_stable=True)`` + ``asyncio.sleep(1.5)``
-            # here — switching the live sim's FOREGROUND app + burning wall
-            # clock BEFORE every oracle read. That is the exact violation the
-            # audit flagged: "per-op 判卷...改变前台 app...改变下一轮模型截图
-            # ...把 oracle 时间算进 projection latency" — a judge that moves
-            # furniture in the room it is grading.
+            # Non-invasive MobileGym evaluation oracle: this read must NOT
+            # call ``env.open_app("x", wait_stable=True)`` +
+            # ``asyncio.sleep(1.5)`` — that would switch the live sim's
+            # FOREGROUND app + burn wall clock BEFORE every oracle read
+            # ("per-op 判卷...改变前台 app...改变下一轮模型截图
+            # ...把 oracle 时间算进 projection latency" — a judge that
+            # moves furniture in the room it is grading).
             #
-            # Fix (priority 1 — read the in-memory store, no UI at all):
+            # Read the in-memory store instead (no UI at all):
             # the fields that actually matter for grading (is_liked /
             # is_retweeted / is_bookmarked — the checkpoint criterion in
             # ``mobilegym_fixtures.SOCIAL_MORNING_BRIEF`` only ever asserts
@@ -429,14 +428,14 @@ class MobileGymBridge:
             # it lives in a base dataset (posts.json, loaded via preload())
             # that MobileGym never puts in the zustand store, so the ONLY
             # way to read it is the rendered DOM (see
-            # ``_flatten_x_posts_async``'s docstring). Rather than force a
-            # navigation to get it, this is priority-3 non-invasive: read
-            # WHATEVER is already on the live screen right now (a passive
-            # observation identical in kind to "the agent glancing at its
-            # own last screenshot"), and if X's timeline is not currently
-            # the foreground view, honestly leave ``content`` blank instead
-            # of manufacturing a foreground switch to fetch it. The oracle
-            # never calls ``open_app`` and never sleeps.
+            # ``_x_oracle_rows_noninvasive``'s docstring). Rather than force
+            # a navigation to get it, this is a non-invasive passive read:
+            # read WHATEVER is already on the live screen right now (a
+            # passive observation identical in kind to "the agent glancing
+            # at its own last screenshot"), and if X's timeline is not
+            # currently the foreground view, honestly leave ``content``
+            # blank instead of manufacturing a foreground switch to fetch
+            # it. The oracle never calls ``open_app`` and never sleeps.
             rows = await self._x_oracle_rows_noninvasive(apps.get("x", {}))
             return {"site": SITE, "sid": sid, "x_posts": rows}
         raise web.HTTPNotFound(text=f"unknown resource {resource}")
@@ -470,8 +469,8 @@ class MobileGymBridge:
 
     @staticmethod
     def _x_toggle_rows(x_state: dict) -> dict[str, dict]:
-        """PURE, read-only, store-only projection of the X toggle lists
-        (B-04 fix, priority 1). ``apps.x.user.{liked,retweeted,bookmarked}
+        """PURE, read-only, store-only projection of the X toggle lists.
+        ``apps.x.user.{liked,retweeted,bookmarked}
         PostIds`` are plain in-memory zustand-store DATA — the SAME dict
         ``env.get_state()`` already returns, no DOM/UI involved at all.
         This is the ONLY thing MobileGym oracle grading actually checks
@@ -494,20 +493,19 @@ class MobileGymBridge:
         return out
 
     async def _x_oracle_rows_noninvasive(self, x_state: dict) -> list[dict]:
-        """B-04 (Oracle audit — Non-invasive MobileGym evaluation oracle)
-        replacement for the deleted ``_flatten_x_posts_async``. NEVER
-        calls ``env.open_app`` and NEVER sleeps — the oracle must not move
-        the foreground app or burn wall-clock time the runtime's projection
-        latency would otherwise be charged for (the exact B-04 complaint).
+        """Non-invasive X oracle rows.
+        NEVER calls ``env.open_app`` and NEVER sleeps — the oracle must not
+        move the foreground app or burn wall-clock time the runtime's
+        projection latency would otherwise be charged for.
 
-        Priority-1 half (grading-relevant, non-invasive by construction):
+        Grading half (non-invasive by construction):
         the toggle booleans come STRAIGHT from the zustand store
         (``_x_toggle_rows`` — a pure dict projection, zero env calls).
 
-        Priority-3 half (``content``, non-grading, best-effort): the post
+        Content half (``content``, non-grading, best-effort): the post
         TEXT lives only in a base dataset MobileGym renders into the DOM
-        and never puts in the store (see the historical docstring this
-        replaces, preserved below), so there is no store path for it. Instead
+        and never puts in the store (see the content DOM-read mechanics
+        below), so there is no store path for it. Instead
         of forcing a foreground switch to fetch it, this reads WHATEVER
         ``data-post-id`` cards are ALREADY rendered on the live page right
         now — a passive observation, not a navigation. If the X timeline
@@ -518,15 +516,14 @@ class MobileGymBridge:
         app-switch) and the row still carries the (store-sourced) toggle
         booleans, which is everything grading needs.
 
-        Historical note (content DOM-read mechanics, unchanged from the
-        pre-B-04 ``_flatten_x_posts_async``): X's post table lives in a base
+        Content DOM-read mechanics: X's post table lives in a base
         dataset (posts.json, loaded via preload()) that is NOT part of the
         zustand store — so state['apps']['x']['posts'] is always an empty
         dict. The posts ARE rendered in the DOM, each in a
-        ``<div data-post-id="p_...">`` container (Task B, 2026-08-12 fix —
-        added to ``XTimelinePostCard.tsx``'s root div). Reading that
-        attribute directly (one query, no ancestor walking) avoids the E14
-        cross-contamination bug (.mrules Task B) where a ``closest(...)``
+        ``<div data-post-id="p_...">`` container
+        (``XTimelinePostCard.tsx``'s root div). Reading that
+        attribute directly (one query, no ancestor walking) avoids
+        cross-contamination, where a ``closest(...)``
         ancestor walk from the action-bar buttons resolved to a shared
         grandparent across sibling posts."""
         toggle_by_id = self._x_toggle_rows(x_state)
@@ -617,9 +614,9 @@ class MobileGymBridge:
         live store, the top-level collection counts (``{field: n}`` for
         each list/dict-valued field). No per-app field names are hardcoded
         here — an app joins the summary by HAVING a store, not by being
-        enumerated. The legacy ``summary`` block (n_chats/n_contacts/n_tx/
+        enumerated. The ``summary`` block (n_chats/n_contacts/n_tx/
         balance) is retained as a compat alias for existing consumers
-        during the compat window (removal announced in the R3 report)."""
+        during the compat window."""
         await self._activate(sid)
         state = self._sid_live.get(sid) or await self.env.get_state(required_apps=APPS)
         apps = state.get("apps", {})
@@ -637,7 +634,7 @@ class MobileGymBridge:
         return {"site": SITE, "sid": sid,
                 "has_task": True,
                 "apps": apps_summary,
-                # legacy compat projection (fixed consumers read these)
+                # compat projection (fixed consumers read these)
                 "summary": {"n_chats": len(wechat.get("chats", []) or []),
                             "n_contacts": len(wechat.get("contacts", []) or []),
                             "n_tx": len(alipay.get("transferRecords", []) or []),
@@ -700,7 +697,7 @@ class MobileGymBridge:
             and the bridge answers the honest 409 irreversible (this is an
             honesty boundary, not an enumeration).
         """
-        # B-1: runtime write path — requires the active session; never
+        # Runtime write path — requires the active session; never
         # context-switches reality underneath the CUA loop.
         await self._require_active(sid)
         try:
@@ -788,28 +785,28 @@ class MobileGymBridge:
                     "verify": {"verdict": v, "evidence": evidence},
                     "trace": trace}
 
-    # The per-app operator-enum write paths (wechat send_message /
-    # x toggle_*) are REPLACED by the generic ``mutate`` above. Their HTTP
-    # routes answer 302 → /api/mutate/<sid> for the compat window (one
+    # The per-app write paths (wechat send_message / x toggle_*) are
+    # replaced by the generic ``mutate`` above; their HTTP routes answer
+    # 302 → /api/mutate/<sid> for the compat window (one
     # commit), then are deleted. The non-invasive read helpers they shared
     # (``_flatten_wechat_chats`` / ``_flatten_alipay_txs`` /
-    # ``_x_toggle_rows``) stay — the legacy oracle read routes still use
+    # ``_x_toggle_rows``) stay — the compat oracle read routes still use
     # them.
 
 
     @staticmethod
     def _generic_app_sections(apps: dict) -> str:
-        """Render every non-legacy app's store generically: one section per
-        app (catalog display name as the heading), one table per top-level
-        list field, one row per item, one ``data-field`` cell per scalar
-        field (values stringified, escaped, capped at 120 chars). Pure
-        projection of ``app_state`` + catalog metadata — zero per-app
-        knowledge. Apps already served by the legacy tables (wechat /
+        """Render every non-table-backed app's store generically: one section
+        per app (catalog display name as the heading), one table per
+        top-level list field, one row per item, one ``data-field`` cell per
+        scalar field (values stringified, escaped, capped at 120 chars).
+        Pure projection of ``app_state`` + catalog metadata — zero per-app
+        knowledge. Apps already served by the byte-stable tables (wechat /
         alipay) are skipped here so their markup stays byte-stable."""
         sections: list[str] = []
         for app_id in APPS:
             if app_id in ("wechat", "alipay"):
-                continue                      # legacy tables own these
+                continue                      # byte-stable tables own these
             app_state = apps.get(app_id)
             if not isinstance(app_state, dict) or not app_state:
                 continue                      # no store / empty store
@@ -841,7 +838,8 @@ class MobileGymBridge:
         — the SAME DOM contract the core apps use
         (``replay_engine.parse_dom_entities`` + ``_row_fields``).
 
-        Catalog-driven and app-agnostic: the two legacy projections
+        Catalog-driven and app-agnostic: the two table-backed
+        projections
         (wechat chats / alipay transactions) keep their byte-stable table
         markup for existing consumers; EVERY OTHER app with a store is
         rendered generically — one section per app (titled by its catalog
@@ -932,7 +930,7 @@ def build_app(bridge: MobileGymBridge) -> web.Application:
         resource = request.match_info["resource"]
         return web.json_response(await bridge.read_resource(sid, resource))
 
-    # ── L1 primitive routes (Agent B): back the SubstrateSession port ─────
+    # ── L1 primitive routes: back the SubstrateSession port ─────────────
     async def api_observe(request):
         sid = request.match_info["sid"]
         return web.json_response(await bridge.observe(sid))
@@ -1046,7 +1044,7 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s")
     # chromium env via portable discovery (env vars > CONDA_PREFIX > repo
-    # .chromelibs) — Agent B replaced the hardcoded /mnt/dolphinfs/... path.
+    # .chromelibs) — no hardcoded absolute paths.
     bp = (os.environ.get("TASKVM_PLAYWRIGHT_BROWSERS_PATH")
           or (os.path.join(os.environ.get("CONDA_PREFIX", ""), "opt",
                            "ms-playwright")

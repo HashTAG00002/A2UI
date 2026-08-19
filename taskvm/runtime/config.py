@@ -1,7 +1,7 @@
 """taskvm.runtime.config — the flat autonomy budget (runtime.md §5).
 
-The legacy ``max_steps × max_attempts × outer full retries`` triple-amp is
-gone. One layer, per-quantity ceilings. ``max_replans_per_task`` is NOT here:
+One layer, per-quantity ceilings (no triple-amp retry stacking).
+``max_replans_per_task`` is NOT here:
 replan is a governance/architect budget, runtime never replans.
 """
 from __future__ import annotations

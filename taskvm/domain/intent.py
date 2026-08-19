@@ -18,7 +18,7 @@ class TaskIntent:
     """The governable terminal condition of one task session.
 
     Changed only by a GoalPatch (never by a LocalPatch — that is the
-    defining boundary between the two patch classes, handoff §5).
+    defining boundary between the two patch classes, contract §5).
     """
 
     goal: str

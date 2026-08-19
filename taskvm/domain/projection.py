@@ -1,6 +1,6 @@
 """Projection — what the human sees (L5's data source, kernel-owned truth).
 
-Schema and data are deliberately separated (master handoff §3.1 +
+Schema and data are deliberately separated (contract §3.1 +
 §Definition-of-Done): ordinary value/progress changes only bump the DATA
 revision and must never force a re-composition of the UI structure
 (schema revision). The kernel enforces that the two revision counters are

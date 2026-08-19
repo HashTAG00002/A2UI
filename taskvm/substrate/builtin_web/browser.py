@@ -1,22 +1,19 @@
-"""builtin_web.browser — Playwright-backed browser surface (Agent B).
+"""builtin_web.browser — Playwright-backed browser surface.
 
-Migrated from ``harness/browser_controller.py`` (which no longer exists —
-Web/Playwright specifics may not live in generic harness). Changes in the
-migration (handoff 03 §Built-in Web 实现):
+Web/Playwright specifics live here, never in generic harness. Invariants:
 
 1. NO hardcoded user absolute paths. The chromium launch recipe is
    discovered from (in order): explicit config, environment variables
    (``TASKVM_PLAYWRIGHT_BROWSERS_PATH`` / ``TASKVM_CHROMELIBS_PATH``), or
    left to the default Playwright installation discovery. A repo test
    asserts no ``/mnt/...`` style absolute paths ship here.
-2. ``element_at_point_norm`` no longer returns ``data-*-id`` row identity
-   (the E21 leak class). It reports only what a user can see: tag,
-   visible text, class.
-3. Write surface unchanged and GUI-only: real mouse clicks, real keyboard,
-   real wheel events. No evaluate()-based value setting, no DOM mutation,
+2. ``element_at_point_norm`` never returns ``data-*-id`` row identity.
+   It reports only what a user can see: tag, visible text, class.
+3. Write surface is GUI-only: real mouse clicks, real keyboard, real
+   wheel events. No evaluate()-based value setting, no DOM mutation,
    no ``page.fill`` shortcuts that bypass focus semantics.
 
-RM-0.B Smoke-1 addition: the resident chromium now lives on ONE dedicated
+Threading model: the resident chromium lives on ONE dedicated
 owner thread. The sync Playwright API is thread-affine (its greenlet may
 only switch in the thread that started it), and production drives the same
 page from several threads — the composition root observes during
@@ -361,8 +358,8 @@ class BrowserController:
                               y_norm: float) -> Optional[dict]:
         """Grounding verify: what VISIBLE element is under the point?
         Returns tag / visible text / class only. Hidden identity
-        (``data-*-id`` row keys) is intentionally NOT read — that was the
-        E21 leak class; a user cannot see those attributes."""
+        (``data-*-id`` row keys) is intentionally NOT read — a user
+        cannot see those attributes."""
         x, y = self._norm_to_px(x_norm, y_norm)
         return self._submit(lambda page: page.evaluate(
             "(args) => { const e = document.elementFromPoint(args[0], args[1]); "

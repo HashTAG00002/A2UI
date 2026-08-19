@@ -9,10 +9,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-#: builtin desktop-app demo services (host/port per app). Kept from the
-#: legacy ``substrate/base.py`` DEFAULT_PORTS table so existing deployments
-#: keep working; overridable via ``TASKVM_<APP>_PORT`` env vars and by the
-#: provider config dict.
+#: builtin desktop-app demo services (host/port per app). Overridable via
+#: ``TASKVM_<APP>_PORT`` env vars and by the provider config dict.
 BUILTIN_APP_PORTS: dict[str, int] = {
     "calendar": 3013,
     "taskboard": 3014,

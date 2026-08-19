@@ -1,4 +1,4 @@
-"""The three governance patch classes (master handoff §5, oracle export
+"""The three governance patch classes (oracle export
 §3.1: '论文就讲 LocalPatch / GoalPatch / CompensationPatch 三种').
 
 The class boundary IS the semantics — the kernel routes on the type:
@@ -174,6 +174,6 @@ class CompensationPlan:
 
 
 def requires_replan(patch: Patch) -> bool:
-    """The one-line classifier (handoff 02: '判定规则：是否改变 terminal
+    """The one-line classifier: whether the patch changes the terminal
     success predicate / scope / workflow topology')."""
     return isinstance(patch, GoalPatch)

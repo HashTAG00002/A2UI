@@ -3,7 +3,7 @@
 The one-question test (docs/A2UI_GG阶段开工目标 §0): *\"this string — could
 a real user see it on the rendered screen?\"* If not, it must never enter a
 model input. This module scans **actually-built messages** (never just
-templates) for the internal vocabulary of the legacy stack:
+templates) for the internal vocabulary of the stack:
 
 - database-ish ids: ``E1`` / ``T12`` / ``wxid_xxx`` / ``evt:00042`` /
   ``action:00007`` / ``ckpt:C2`` / ``comp:00001`` …
@@ -25,7 +25,7 @@ class PromptLeakError(Exception):
     """A model-facing message carried internal, non-visible vocabulary."""
 
 
-# C-1 (Oracle audit): when a model OUTPUT leaks internal vocabulary, the
+# When a model OUTPUT leaks internal vocabulary, the
 # repair note sent BACK to the model states the error CLASS only — repeating
 # the offending tokens would re-leak them into a model input (the very
 # violation the gate exists to stop). Error detail with the tokens stays in
@@ -39,7 +39,7 @@ LEAK_REPAIR_GUIDANCE = (
 )
 
 
-# C-4 (Oracle audit, E32): the SAME hole via a different, entirely normal
+# the SAME hole via a different, entirely normal
 # branch — domain validators legitimately report failures in terms of the
 # ids the assembly minted (workflow node ids n001…, contract ids c001…,
 # projection ids p001…, handle ids ha001…), which _DB_ID_RE above
@@ -47,7 +47,7 @@ LEAK_REPAIR_GUIDANCE = (
 # game). So the SOURCE is fixed instead: a repair note NEVER carries the
 # raw exception text. The message is classified here into a short
 # business-level guidance snippet; the full detail stays in the exception
-# and the log for the honest-failure path. Same philosophy as C-1.
+# and the log for the honest-failure path.
 _REPAIR_GUIDANCE: tuple[tuple[re.Pattern, str], ...] = (
     (re.compile(r"not a JSON object", re.I),
      "your reply was not a JSON object with the required keys — output "
@@ -106,7 +106,7 @@ GENERIC_REPAIR_GUIDANCE = (
 
 
 def repair_guidance(err: BaseException) -> str:
-    """Business-level guidance for a rejected model output (C-4).
+    """Business-level guidance for a rejected model output.
 
     The raw error text is NEVER returned or embedded: domain errors
     legitimately quote internal ids (n001/ha001/…), and repeating them
@@ -131,7 +131,7 @@ _DB_ID_RE = re.compile(
     r"|\bentity_id\b|\bdata-[a-z-]*id\b",
 )
 
-# internal operator / API vocabulary of the legacy stack (extendable via
+# internal operator / API vocabulary of the stack (extendable via
 # extra_terms at call sites for task-specific operators)
 _OPERATOR_JARGON = (
     "move_event", "set_deadline", "toggle_like", "send_message",

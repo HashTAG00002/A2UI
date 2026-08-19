@@ -14,7 +14,7 @@
  * page JS when the /<sid>/checkpoint (or /adopt_milestone) response carries
  * `milestone_reached` / `checkpoint_reached`.
  *
- * Pure vanilla JS (no framework — handoff §4.3). No-roles: the static render
+ * Pure vanilla JS (no framework — contract §4.3). No-roles: the static render
  * (segments + colors + honest one-liner) is the primary honest artifact the
  * gate/audit greps; this script only adds the interactive drag + celebration.
  */

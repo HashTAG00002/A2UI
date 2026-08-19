@@ -1,4 +1,4 @@
-"""Events — the single source of truth for 'what happened' (handoff 02 §Event).
+"""Events — the single source of truth for 'what happened'.
 
 Every kernel mutation appends exactly one event to the session's EventLog.
 Each event carries the session id, the domain revision and execution epoch

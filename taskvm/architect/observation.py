@@ -1,6 +1,6 @@
 """CompilerObservationView — the ONLY observation type L4 accepts.
 
-Pure layer-internal DTO (handoff 04: C defines it, C never sees B's
+Pure layer-internal DTO (defined here; never sees the substrate's
 ``SubstrateObservation`` concrete type). Everything on it is content a real
 user could see on the rendered screen (GG red line §0):
 

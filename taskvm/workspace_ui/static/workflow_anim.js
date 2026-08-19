@@ -8,7 +8,7 @@
  *   - Loop: SVG circular orbit; a ball travels the track, each lap adds a ✓
  *     tick + increments the "已完成 i / N 次" counter; full-green on done.
  *
- * Pure vanilla JS + inline SVG (handoff §6.4: no framework). Listens to the
+ * Pure vanilla JS + inline SVG (contract §6.4: no framework). Listens to the
  * server's SSE `workflow_progress` event (FF.5 §6.3) and re-renders on push.
  * Also exposes window.TaskVMWorkflow.render(container, state) for tests / seed.
  */

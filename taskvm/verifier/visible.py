@@ -1,4 +1,4 @@
-"""taskvm.verifier.visible — the RUNTIME-visible verifier (Agent E; runtime.md §6).
+"""taskvm.verifier.visible — the RUNTIME-visible verifier (runtime.md §6).
 
 The single owner of verification CONTENT legality (layered ownership protocol
 §1): ``VerificationResult.passed`` reflects an independent visible-world

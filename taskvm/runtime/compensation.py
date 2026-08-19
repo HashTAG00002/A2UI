@@ -74,7 +74,7 @@ class CompensationExecutor:
         """Land every reversible entry; return the kernel disposition
         (``complete`` / ``partial`` / ``failed`` / ``discarded``).
 
-        A-01: ``surface_for_entry`` maps ``node_id → surface_id`` — each
+        ``surface_for_entry`` maps ``node_id → surface_id`` — each
         compensation entry lands on the surface that owns its binding (the
         runtime resolved it from the variable's evidence handle). Entries
         WITHOUT a mapping are honestly not-compensated: a routing failure
@@ -148,7 +148,7 @@ class CompensationExecutor:
                 # honest accounting as the forward loop (runtime.md §5):
                 # a model call that produced NO usable prediction, bounded
                 # by the small invalid ceiling, never a silent crash.
-                # A-13: the adapter may already own the row
+                # the adapter may already own the row
                 # (``records_own_ledger``) — never double-count.
                 invalid += 1
                 self._calls += 1
@@ -214,7 +214,7 @@ class CompensationExecutor:
     def _record_call(self, decision, node_id: str, model: str | None) -> None:
         ok = decision.kind is not CUADecisionKind.FAIL
         self._calls += 1
-        # A-13 single-owner accounting: annotate the adapter's row when the
+        # single-owner accounting: annotate the adapter's row when the
         # decision carries its request_id; fakes keep the runtime as owner.
         if decision.request_id and callable(
                 getattr(self._ledger, "annotate", None)):

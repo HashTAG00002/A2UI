@@ -1,4 +1,4 @@
-"""taskvm.substrate.mobilegym — the MobileGym substrate (Agent B).
+"""taskvm.substrate.mobilegym — the MobileGym substrate.
 
 Everything MobileGym-specific lives here:
   - ``bridge``: the resident aiohttp bridge holding one ``MobileGymEnv``
@@ -10,8 +10,6 @@ Everything MobileGym-specific lives here:
   - ``evaluation``: the EvaluationEnvironment (reset/seed/oracle_state —
     the only place ``set_state`` semantics are reachable);
   - ``provider``: composition entries for both registries.
-
-The old ``taskvm.harness.mobilegym_bridge`` shim is deleted.
 """
 from taskvm.substrate.mobilegym.bridge import (
     MobileGymBridge, build_app, main,

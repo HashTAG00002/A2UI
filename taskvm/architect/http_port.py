@@ -2,16 +2,16 @@
 
 The architect layer is stdlib-whitelisted by the architecture gate, so the
 OpenAI-compatible chat call is implemented with ``urllib.request`` — no SDK.
-Environment conventions are IDENTICAL to the legacy
+Environment conventions are IDENTICAL to the
 ``taskvm/benchmark/model_client.py`` so ops do not change:
 
 - ``OPENAI_BASE_URL`` (default ``https://aigc.sankuai.com/v1/openai/native``)
 - ``OPENAI_API_KEY``
 - ``TASKVM_MODEL`` (default ``gpt-5.6-sol``)
 
-JSON extraction mirrors the legacy client: strip ``<think>`` blocks and code
+JSON extraction mirrors the client: strip ``<think>`` blocks and code
 fences, then parse the first balanced ``{...}`` / ``[...]``. There is NO
-port-level retry (C-2, Oracle audit): one ``complete_json`` call issues
+port-level retry (single-owner contract): one ``complete_json`` call issues
 exactly ONE provider request, so ledger records always equal real provider
 calls — an unparseable reply returns ``parsed=None`` and the L4 semantic
 repair loop (the single repair owner) decides whether to re-ask.
@@ -57,7 +57,7 @@ class HttpModelPort:
                       model: str | None = None, max_tokens: int = 3072,
                       temperature: float | None = None,
                       image_data_url: str | None = None) -> ModelReply:
-        """ONE provider request per call — no hidden retry (C-2).
+        """ONE provider request per call — no hidden retry.
 
         The ledger records one call per ``complete_json``; an internal
         parse-retry would make real provider calls exceed ledger records
@@ -68,7 +68,7 @@ class HttpModelPort:
         mdl = model or self.default_model
         raw = self._chat(system, user, mdl, max_tokens, temperature,
                          image_data_url)
-        # C-5 (Oracle audit, E32): the provider's usage block IS the token
+        # the provider's usage block IS the token
         # accounting the ledger contract requires. _chat already parsed it
         # off the response — carry it into the ModelReply so every ledger
         # record reports the true cost of its one real provider request.

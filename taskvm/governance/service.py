@@ -1,4 +1,4 @@
-"""GovernanceService — the unified governance entry (handoff 04 §Governance).
+"""GovernanceService — the unified governance entry.
 
 One ``handle(event)`` routes the six governance events onto the kernel
 facade (and, for GoalPatch ONLY, one Task Architect recomposition). The

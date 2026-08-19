@@ -1,5 +1,5 @@
 """ActionContract — the cross-layer semantic action contract (master
-handoff §5: "跨层协议必须是 substrate-neutral semantic action contract").
+contract §5: "跨层协议必须是 substrate-neutral semantic action contract").
 
 This is the ONLY unit of work that flows from the task layer down to the
 autonomy runtime. It describes WHAT must become true and how a human
@@ -12,7 +12,7 @@ would recognise the target — never HOW a specific platform performs it:
   the substrate session resolves it privately at execution time.
 
 Serialisation of a contract into a concrete low-level instruction is a
-deterministic, runtime-side concern (master handoff §6).
+deterministic, runtime-side concern (contract §6).
 """
 from __future__ import annotations
 

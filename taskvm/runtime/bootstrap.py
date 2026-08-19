@@ -10,13 +10,11 @@ forbids ``taskvm.runtime`` from importing architect/verifier/concrete-
 substrate, so the composition root — NOT the runtime — wires concrete ports.
 
 This module is the **clean public interface** composition (workspace_ui /
-integration) calls. The legacy operator-write adapter
-(``taskvm.execution.gui_driver.make_task_adapters``, substrate.md §8 T1)
-was deleted by the Wave-3 cluster deletion (2026-08-16). It
+integration) calls. It
 bundles the injected ports into one typed ``RuntimePorts`` object and exposes
 ``compose_runtime`` as the single entry point that assembles a real
 ``AutonomyRuntime`` over a real ``SubstrateSession`` driven by ActionContract
-→ CUA → GuiAction (runtime.md §3/§9) — NOT the legacy operator-write
+→ CUA → GuiAction (runtime.md §3/§9) — never via the operator-write
 ``adapter.mutate`` transport (the platform-table / internal-id API path the
 frozen contract bans).
 
@@ -79,13 +77,13 @@ def compose_runtime(kernel: Any, substrate: "SubstrateSession",
 
     This is the clean bootstrap seam workspace_ui (D) calls to drive the
     real runtime (ActionContract → CUA → GuiAction → SubstrateSession.act →
-    fresh observe → verify) instead of the legacy
+    fresh observe → verify) instead of the
     ``gui_driver.make_task_adapters`` operator-write adapters. Composition
     owns building the kernel, the SubstrateSession (via
     ``substrate_registry.create_session``), and the five ports; this function
     only wires them into the runtime facade.
 
-    ``surface_resolver`` (optional, A-01): a composition-owned
+    ``surface_resolver`` (optional): a composition-owned
     ``SurfaceBindingResolver`` (see runtime/ports.py) mapping compiler-minted
     opaque handle ids on evidence to session surface ids. Multi-surface
     routing uses it to act/verify on the surface the evidence was grounded

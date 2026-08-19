@@ -1,5 +1,5 @@
-"""taskvm.substrate.port — the L1 Substrate Port (Agent B, contract frozen
-2026-08-14 in ``docs/contracts/substrate.md``).
+"""taskvm.substrate.port — the L1 Substrate Port (contract frozen in
+``docs/contracts/substrate.md``).
 
 This module is the ONLY part of ``taskvm.substrate`` upper layers may import
 (``from taskvm.substrate import SubstrateSession, GuiAction, ...``). It is
@@ -9,7 +9,7 @@ implements and every upper layer consumes:
     SubstrateRegistry.create_session(name, config)  -> SubstrateSession   (runtime)
     EvaluationRegistry.create(name, config)         -> EvaluationEnvironment (eval plane)
 
-Two physically separate capability sets (handoff 00 §3.3, task brief §二):
+Two physically separate capability sets (contract §3.3):
 
   * ``SubstrateSession``  — what a real human could do on the same device:
     observe (screenshot + scrubbed visible text/a11y), act (real GUI
@@ -86,7 +86,7 @@ class SurfaceHandle:
 
 
 #: DOM/JSON attributes that can never enter an Observation — they encode the
-#: app's internal database identity (E16/E21 leaks; contract §6).
+#: app's internal database identity (contract §6).
 VISIBLE_ID_PATTERNS: tuple[str, ...] = (
     "data-*-id", "data-event-*", "data-task-*", "data-file-*",
     "data-post-id", "data-chat-id", "data-transaction-id",
@@ -96,9 +96,9 @@ VISIBLE_ID_PATTERNS: tuple[str, ...] = (
 _HIDDEN_ID_RE = re.compile(
     r"data-(?:[a-z0-9]+-)*?(?:event|task|file|post|chat|transaction|"
     r"appointment|mail|action(?:-params)?)[a-z0-9-]*"
-    # B-3: consume the attribute VALUE too — the value IS the internal
-    # id (E16/E21 leak class); redacting only the attribute name kept
-    # the primary key itself in the observation.
+    # Consume the attribute VALUE too — the value IS the internal id;
+    # redacting only the attribute name kept the primary key itself in
+    # the observation.
     r"(?:\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+))?",
     re.IGNORECASE,
 )
@@ -125,7 +125,7 @@ GUI_ACTION_KINDS: tuple[str, ...] = (
 @dataclass(frozen=True)
 class GuiAction:
     """One real-world input event. Coordinates are NORMALIZED to [0,1000]
-    (UITARS convention — same as the legacy browser controller)."""
+    (UITARS convention)."""
     kind: str                                  # one of GUI_ACTION_KINDS
     coordinate: tuple[float, float] | None = None   # normalized [0,1000]
     text: str | None = None                    # for kind="type"
@@ -255,7 +255,7 @@ class _BaseRegistry:
             return self._cache[name]
         spec = self._entrypoints.get(name)
         if spec is None:
-            # B-3 (Oracle audit): an unknown substrate is honest
+            # An unknown substrate is honest
             # unavailability — the port's own exception contract — never a
             # raw KeyError leaking to upper layers.
             raise SubstrateUnavailable(

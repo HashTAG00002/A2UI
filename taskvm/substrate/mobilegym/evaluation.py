@@ -1,4 +1,4 @@
-"""mobilegym.evaluation — the MobileGym EvaluationEnvironment (Agent B).
+"""mobilegym.evaluation — the MobileGym EvaluationEnvironment.
 
 Exam-room powers for the MobileGym substrate (contract §4): ``reset`` /
 ``seed`` (``env.set_state`` IS the documented setup API — MobileGym
@@ -6,7 +6,7 @@ runtime-api.md L276 — so this is the legitimate seed path, setup-only) /
 ``oracle_state`` (flattened entity maps over the sim store) /
 ``session_state`` / the generic ``app_state`` + ``os_state`` oracle reads.
 
-Oracle reads, generic vs legacy (MG-FULL-APPS / PURETY-GEN):
+Oracle reads, generic vs semantic projection:
   * ``app_state(sid, app_id)`` — the RAW zustand store slice of ANY app in
     the catalog (27 apps; storeless apps like calculator honestly return
     an empty state — their state IS the screen). App-agnostic: no
@@ -14,8 +14,8 @@ Oracle reads, generic vs legacy (MG-FULL-APPS / PURETY-GEN):
   * ``os_state(sid)`` — the OS runtime slice (tasks, activeAppId,
     settings, notifications, home_screen): the part of the phone world
     that belongs to no app.
-  * ``oracle_state(sid)`` — the LEGACY semantic projection for the three
-    historical apps (wechat chats / alipay transactions / x posts).
+  * ``oracle_state(sid)`` — the semantic projection for the three
+    table-backed apps (wechat chats / alipay transactions / x posts).
     Kept byte-stable for existing consumers; new code reads ``app_state``.
 
 Physical separation: this object shares nothing with
@@ -43,10 +43,11 @@ class MobileGymEvaluationEnvironment:
         self._bridge = bridge_url.rstrip("/")
         self.timeout = timeout
 
-    # legacy semantic projection tables (wechat / alipay / x only — the
-    # three historical apps). Kept for byte-stable backward compatibility;
-    # the generic oracle reads (app_state / os_state) carry no per-app
-    # knowledge. New consumers should prefer ``app_state``.
+    # semantic projection tables (wechat / alipay / x only — the
+    # three table-backed apps). Kept for byte-stable backward
+    # compatibility; the generic oracle reads (app_state / os_state)
+    # carry no per-app knowledge. New consumers should prefer
+    # ``app_state``.
     _RESOURCE = {"wechat": "wechat_chats", "alipay": "alipay_transactions",
                  "x": "x_posts"}
     _ID_FIELD = {"wechat": "id", "alipay": "id", "x": "id"}
@@ -93,7 +94,7 @@ class MobileGymEvaluationEnvironment:
         (verifier/benchmark only). App-agnostic — the bridge validates the
         app_id against the catalog (404 for unknown apps) and returns the
         store slice verbatim; storeless apps (calculator, theme_store)
-        honestly return an empty state. For the three legacy apps
+        honestly return an empty state. For the three table-backed apps
         (wechat/alipay/x) callers that want the flattened semantic
         projection should keep using ``oracle_state()``; this method
         returns the raw store dict either way."""
@@ -142,7 +143,7 @@ class MobileGymEvaluationEnvironment:
                 f"@ {self._bridge}>")
 
 
-#: legacy ports (kept for deployment continuity; env-overridable)
+#: default ports (env-overridable)
 DEFAULT_BRIDGE_PORT = 3019
 
 

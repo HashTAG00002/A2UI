@@ -2,9 +2,8 @@
 (contract §6: route matrix; §3: 0 model calls on read paths; §5: no
 substrate import).
 
-Route matrix (frozen contract §6, REVISED by RFC-D1 — see
-docs/contracts/projection_rfc_backlog.md; governance-authorized via the
-D audit rework order 2026-08-16):
+Route matrix (frozen contract §6; see
+docs/contracts/projection_rfc_backlog.md for revision history):
 
     GET  /sessions/<sid>                        SPA page (or JSON snapshot)
     GET  /api/sessions                          list sessions
@@ -80,7 +79,7 @@ def create_app(store: ProjectionSessionStore,
 
     def _notify(sid: str, envelope: dict[str, Any]) -> None:
         try:
-            frame = format_sse(envelope)  # vocabulary assertion (D-F3)
+            frame = format_sse(envelope)  # vocabulary assertion
         except ValueError:
             return  # an unregistered sse_type never reaches the wire
         with _sub_lock:
@@ -116,7 +115,7 @@ def create_app(store: ProjectionSessionStore,
 
     def _driver_for(sess: ProjectionSession):
         """Return the session's driver, lazily constructing the default
-        ThreadedRuntimeDriver over the registered runtime (D-F2: the
+        ThreadedRuntimeDriver over the registered runtime (the
         HTTP start path must be able to begin autonomy). ``None`` when
         the session has no runtime at all — the route reports honestly."""
         if sess.driver is not None:
@@ -133,7 +132,7 @@ def create_app(store: ProjectionSessionStore,
 
         sess.driver = ThreadedRuntimeDriver(
             sess.runtime, on_event=_on_runtime_event,
-            kernel=sess.kernel)  # A-03: heartbeat path forwards kernel events
+            kernel=sess.kernel)  # heartbeat path forwards kernel events
         return sess.driver
 
     # ── helpers ──────────────────────────────────────────────────────────
@@ -161,7 +160,7 @@ def create_app(store: ProjectionSessionStore,
         return str(value)
 
     def _error_status(e: Exception) -> int:
-        """Typed error → HTTP status (RFC-D1 §6 error semantics)."""
+        """Typed error → HTTP status (contract §6 error semantics)."""
         if isinstance(e, UnknownCheckpointError):
             return 404
         if isinstance(e, PatchSemanticsError):
@@ -275,7 +274,7 @@ def create_app(store: ProjectionSessionStore,
 
     # ── governance command routes ─────────────────────────────────────────
 
-    #: per-route success status (RFC-D1: 201 checkpoint creation, 202
+    #: per-route success status (201 checkpoint creation, 202
     #: async two-phase goal_patch / plan-accepted rollback, 200 the rest)
     _SUCCESS_STATUS = {
         "local_patch": 200, "goal_patch": 202, "checkpoint": 201,
@@ -318,7 +317,7 @@ def create_app(store: ProjectionSessionStore,
 
     @app.route("/api/sessions/<sid>/governance/pause", methods=["POST"])
     def gov_pause(sid: str) -> Response:
-        """A-02: pause routes through the DRIVER (single-owner path):
+        """Pause routes through the DRIVER (single-owner path):
         driver.pause() → runtime.request_pause() → kernel governance.
         No separate KernelGovernancePort.pause() double-write."""
         sess = _get_session(sid)
@@ -339,7 +338,7 @@ def create_app(store: ProjectionSessionStore,
 
     @app.route("/api/sessions/<sid>/governance/resume", methods=["POST"])
     def gov_resume(sid: str) -> Response:
-        """A-02: resume routes through the DRIVER (single-owner path):
+        """Resume routes through the DRIVER (single-owner path):
         driver.resume() → runtime.request_resume() → kernel governance.
         Resume from stopped returns 409 (stop is persistent)."""
         sess = _get_session(sid)
@@ -365,7 +364,7 @@ def create_app(store: ProjectionSessionStore,
 
     @app.route("/api/sessions/<sid>/governance/stop", methods=["POST"])
     def gov_stop(sid: str) -> Response:
-        """A-02: stop routes through the DRIVER (single-owner path):
+        """Stop routes through the DRIVER (single-owner path):
         driver.stop() → runtime.request_stop() → kernel governance.
         Stop is persistent — start() cannot revive a stopped driver."""
         sess = _get_session(sid)
@@ -409,7 +408,7 @@ def create_app(store: ProjectionSessionStore,
 
     @app.route("/api/sessions/<sid>/governance/start", methods=["POST"])
     def gov_start(sid: str) -> Response:
-        """D-F2: the HTTP path that begins autonomy via the runtime
+        """The HTTP path that begins autonomy via the runtime
         driver. 409 when the kernel awaits recompose (GoalPatch phase-1
         landed but the architect has not closed the composition) or when
         the session registered no runtime — honest conflicts, never 500."""
@@ -427,7 +426,7 @@ def create_app(store: ProjectionSessionStore,
             state = driver.start()
         except Exception as e:
             return jsonify(_error_body("start", e)), 400
-        # A-02: if the driver is persistently stopped, start() returns
+        # if the driver is persistently stopped, start() returns
         # "stopped" — the route must report 409 (cannot revive a stopped
         # driver; a fresh composition is required).
         if state == "stopped":
@@ -444,7 +443,7 @@ def create_app(store: ProjectionSessionStore,
 
     @app.route("/sessions/<sid>")
     def session_page(sid: str) -> Response:
-        """RFC-D1 §6: the per-session page. Serves the SPA shell when a
+        """Contract §6: the per-session page. Serves the SPA shell when a
         static frontend is wired (the SPA reads the sid from the path);
         otherwise the JSON snapshot (200) — 404 for unknown sid either way."""
         sess = _get_session(sid)

@@ -77,7 +77,7 @@ _DESIRED_DATE = "2026-08-18"
 
 class _OfflineCUA:
     """Deterministic offline placeholder — an honest FAIL, never a fake
-    success (handoff 08: 不得用 fake 的成功声称真实 CUA 已通过)."""
+    success."""
 
     def predict_action(self, *, goal: str, observation, **kw) -> CUADecision:
         return CUADecision(

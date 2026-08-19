@@ -1,4 +1,4 @@
-"""osworld.session — the OSWorld SubstrateSession (Agent B, minimal).
+"""osworld.session — the OSWorld SubstrateSession (minimal).
 
 Contract §5 minimum viable adapter:
   - connect to one OSWorld session;
@@ -9,13 +9,13 @@ Contract §5 minimum viable adapter:
     exactly what a human's mouse/keyboard would produce);
   - return unified Observation / ActionReceipt.
 
-Honesty (handoff 03 §OSWorld 实现): this environment has no OSWorld VM
+Honesty: this environment has no OSWorld VM
 attached during development, so the integration entrypoint here has NOT
 been exercised against a live OSWorld deployment. What IS verified:
 contract tests against a fake runtime transport (``tests/substrate/
 test_osworld_contract.py``) and a clear ``SubstrateUnavailable`` error
 when the VM endpoint is missing. The remaining blocker is recorded in
-the Agent B handoff report.
+the OSWorld report.
 
 Transport: OSWorld exposes its desktop via a remote-agent HTTP service
 (screenshot + action endpoints). ``OSWorldRuntime`` is a thin HTTP client

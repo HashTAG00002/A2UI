@@ -1,4 +1,4 @@
-"""taskvm.domain — pure data + invariants (master handoff §3.1).
+"""taskvm.domain — pure data + invariants (contract §3.1).
 
 This package is the bottom of the dependency stack. It imports ONLY the
 Python standard library; it must never import Flask / Playwright / a model

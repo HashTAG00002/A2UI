@@ -1,6 +1,6 @@
 """taskvm.projection.events — typed kernel/runtime event → SSE adapter
 (contract §7: SSE vocabulary is the frozen event-kind set; no free-form
-strings — D-F3 repair, RFC-D1 revision).
+strings).
 
 A single ``sse_envelope(event)`` converts any ``taskvm.domain.events.Event``
 or ``RuntimeEvent`` into a JSON-safe dict suitable for ``json.dumps`` +
@@ -19,7 +19,7 @@ from typing import Any, Mapping
 
 from taskvm.domain.events import Event, EventKind
 
-#: Frozen SSE type vocabulary — kernel events (contract §7, RFC-D1).
+#: Frozen SSE type vocabulary — kernel events (contract §7).
 #: Frontend routes on ``sse_type``; the raw ``kind`` is kept in ``detail``
 #: for inspection.
 KERNEL_EVENT_SSE: dict[EventKind, str] = {
@@ -49,9 +49,8 @@ KERNEL_EVENT_SSE: dict[EventKind, str] = {
 }
 
 #: Runtime events (``taskvm.runtime.ports.RuntimeEventKind`` VALUE strings →
-#: SSE types). TOTAL over the runtime's own typed kinds — the old table
-#: carried three keys that were never RuntimeEventKind values (dead
-#: mappings) and missed five real ones (D-F3 totality repair).
+#: SSE types). TOTAL over the runtime's own typed kinds — the table is
+#: exhaustive: every RuntimeEventKind value has an entry.
 RUNTIME_EVENT_SSE: dict[str, str] = {
     "action_observed":       "action.observed",
     "action_landed":         "action.landed",
@@ -66,7 +65,7 @@ RUNTIME_EVENT_SSE: dict[str, str] = {
 #: Transport-level frame types the SSE endpoint itself emits (not derived
 #: from any event object): the initial snapshot a subscriber receives on
 #: connect, and the acknowledgment pushed when a governance command lands.
-#: Registered here (D-F3) so no free-form ``sse_type`` ever leaves the app.
+#: Registered here so no free-form ``sse_type`` ever leaves the app.
 TRANSPORT_EVENT_SSE: dict[str, str] = {
     "snapshot":          "snapshot",
     "governance.applied": "governance.applied",
@@ -107,7 +106,7 @@ def sse_envelope(event: Any) -> dict[str, Any]:
     (``kind`` is a ``RuntimeEventKind``; its VALUE string is the lookup key).
     An unmapped kind raises ``ValueError`` — the mapping is total by
     construction, so a raise means a new kind was added without registering
-    its SSE type (the free-form-string regression D-F3 closed).
+    its SSE type (the free-form-string regression this vocabulary closes).
     """
     raw_kind = getattr(event, "kind", None)
     kind_val = getattr(raw_kind, "value", raw_kind) if raw_kind else None
@@ -168,7 +167,7 @@ def format_sse(envelope: dict[str, Any]) -> str:
     """Format one envelope as a ``text/event-stream`` frame.
 
     The envelope's ``sse_type`` MUST be inside ``SSE_TYPE_VOCABULARY``
-    (D-F3 assertion lives at the single emission chokepoint)."""
+    (assertion lives at the single emission chokepoint)."""
     sse_type = envelope.get("sse_type")
     if sse_type not in SSE_TYPE_VOCABULARY:
         raise ValueError(

@@ -1,17 +1,15 @@
 """taskvm.projection.services.driver — threaded autonomy driver port
 (contract §6/§7: governance UX drives autonomy through this port).
 
-The default ``ThreadedRuntimeDriver`` runs Agent E's
+The default ``ThreadedRuntimeDriver`` runs the
 ``AutonomyRuntime.run(step_budget=1)`` in a background thread with
 pause/resume/stop controls. The composition root may inject a different
 driver (e.g. a process-based driver) as long as it satisfies
 ``DriverPortLike`` in ``store.py``.
 
-D-F2 repair notes:
+Wiring contract:
 - ``AutonomyRuntime`` has NO ``step()`` method — its public stepping API is
-  ``run(step_budget=N)``. The pre-repair driver called a method that does
-  not exist (dead wiring: nothing ever started the driver over a real
-  runtime). One node per tick keeps pause/stop responsive.
+  ``run(step_budget=N)``. One node per tick keeps pause/stop responsive.
 - lifecycle methods (``start``/``pause``/``resume``/``stop``) return their
   DETERMINISTIC lifecycle value ("running"/"paused"/"running"/"stopped").
   ``status()`` ALSO prefers lifecycle state: if ``_pause_event`` is set or
@@ -68,13 +66,13 @@ class ThreadedRuntimeDriver:
         self._runtime = runtime
         self._step_interval = step_interval
         self._on_event = on_event
-        # A-03: explicit cadence override — wins over the runtime budget.
+        # explicit cadence override — wins over the runtime budget.
         # ``None`` means "derive from the runtime's
         # budgets.inactive_heartbeat_seconds"; a runtime exposing neither
         # disables the heartbeat (structural typing, same as run()).
         self._heartbeat_override = heartbeat_seconds
         self._next_heartbeat = time.monotonic()
-        # A-03: optional duck-typed kernel (``.events()``) so heartbeat-
+        # optional duck-typed kernel (``.events()``) so heartbeat-
         # caused kernel events (OBSERVATION_RECEIVED / CONFLICT_DETECTED)
         # reach SSE. ONLY the heartbeat path forwards kernel events — the
         # HTTP handlers push their own commands' kernel events
@@ -85,11 +83,11 @@ class ThreadedRuntimeDriver:
         self._thread: threading.Thread | None = None
         self._pause_event = threading.Event()
         self._stop_flag = threading.Event()
-        self._lifecycle_stopped = False  # A-02: persistent stop — start() refuses to revive
+        self._lifecycle_stopped = False  # persistent stop — start() refuses to revive
         self._status = "idle"
         self._last_event_count = 0
 
-    # ── A-03: inactive-surface heartbeat cadence ─────────────────────
+    # ── inactive-surface heartbeat cadence ─────────────────────
     def heartbeat_seconds(self) -> float | None:
         """Resolved heartbeat cadence (run manifests record this — the
         number is configuration, never a hardcoded constant): explicit
@@ -103,9 +101,9 @@ class ThreadedRuntimeDriver:
             return float(sec)
         return None
 
-    # ── lifecycle (A-02: single-owner path — driver → runtime → kernel) ───
+    # ── lifecycle (single-owner path — driver → runtime → kernel) ───
     def start(self) -> str:
-        # A-02: a stopped driver is persistent — start() cannot revive it.
+        # a stopped driver is persistent — start() cannot revive it.
         # The frozen contract does not define restart-from-stopped on the
         # same runtime object; a fresh composition is required.
         if self._lifecycle_stopped:
@@ -124,7 +122,7 @@ class ThreadedRuntimeDriver:
         return "running"
 
     def pause(self) -> str:
-        # A-02: single-owner: driver sets pause_event → runtime writes
+        # single-owner: driver sets pause_event → runtime writes
         # kernel governance state. No second kernel.write path.
         if self._lifecycle_stopped:
             return "stopped"
@@ -139,7 +137,7 @@ class ThreadedRuntimeDriver:
         return "paused"
 
     def resume(self) -> str:
-        # A-02: single-owner: driver clears pause_event → runtime writes
+        # single-owner: driver clears pause_event → runtime writes
         # kernel governance state. Resume from stopped is refused.
         if self._lifecycle_stopped:
             return "stopped"
@@ -154,7 +152,7 @@ class ThreadedRuntimeDriver:
         return "running"
 
     def stop(self) -> str:
-        # A-02: persistent lifecycle stop — the driver thread exits, the
+        # persistent lifecycle stop — the driver thread exits, the
         # runtime's _stopped flag prevents any further GUI action, and
         # start() can never revive this driver instance.
         self._stop_flag.set()
@@ -172,7 +170,7 @@ class ThreadedRuntimeDriver:
         return "stopped"
 
     def status(self) -> str:
-        # A-02 race fix: lifecycle states (paused/stopped) are authoritative —
+        # race fix: lifecycle states (paused/stopped) are authoritative —
         # a per-tick disposition ("step_budget"/"done"/…) that the worker
         # wrote *before* pause() landed must not leak through status().
         # The worker checks _pause_event/_stop_flag AFTER run() returns and
@@ -210,7 +208,7 @@ class ThreadedRuntimeDriver:
 
     # ── internals ────────────────────────────────────────────────────────
     def _maybe_heartbeat(self, now: float) -> None:
-        """A-03: monotonic inactive-surface heartbeat (runtime.md §8).
+        """Monotonic inactive-surface heartbeat (runtime.md §8).
 
         READ-ONLY: ``poll_inactive_surfaces()`` observes every surface
         the CUA is NOT driving; an unchanged fingerprint costs 0 model
@@ -239,7 +237,7 @@ class ThreadedRuntimeDriver:
         self._forward_new_kernel_events()
 
     def _forward_new_kernel_events(self) -> None:
-        """A-03: push kernel events produced since the last heartbeat-
+        """Push kernel events produced since the last heartbeat-
         driven forward (heartbeat-only; HTTP handlers push their own
         commands' events via ``_push_kernel_events``)."""
         if self._on_event is None or self._kernel is None:
@@ -279,11 +277,11 @@ class ThreadedRuntimeDriver:
 
     def _run(self) -> None:
         while not self._stop_flag.is_set():
-            # A-03: the heartbeat cadence is independent of the action
+            # the heartbeat cadence is independent of the action
             # loop — it fires while paused too (read-only world sync).
             self._maybe_heartbeat(time.monotonic())
             if self._pause_event.is_set():
-                # A-02 race fix: ensure status reflects paused even if a
+                # race fix: ensure status reflects paused even if a
                 # per-tick disposition was written after pause() set the
                 # event but before the worker reached this check.
                 self._status = "paused"
@@ -292,7 +290,7 @@ class ThreadedRuntimeDriver:
             try:
                 stop = self._runtime.run(step_budget=1)
                 self._forward_new_events()
-                # A-02: if the runtime itself returned STOPPED (its own
+                # if the runtime itself returned STOPPED (its own
                 # _stopped flag was set, e.g. by an external governance
                 # stop), the driver must also enter the persistent stopped
                 # state — not just a soft stop.
@@ -300,7 +298,7 @@ class ThreadedRuntimeDriver:
                     self._lifecycle_stopped = True
                     self._status = "stopped"
                     break
-                # A-02 race fix: re-check lifecycle flags AFTER run() returns
+                # race fix: re-check lifecycle flags AFTER run() returns
                 # but BEFORE writing per-tick disposition. If pause() or stop()
                 # was called while run() was in-flight, the lifecycle state
                 # must not be overwritten by the per-tick disposition.

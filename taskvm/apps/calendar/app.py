@@ -126,9 +126,9 @@ def _mutate_event(sess: dict, eid: str, op: str, value) -> tuple | None:
         return old, ev
 
 
-# legacy alias (the old move_event-only helper) for any caller still using it
+# alias for callers still using the old move_event-only helper
 def _move_event(sess: dict, eid: str, new_date: str) -> tuple[str, dict] | None:
-    """Legacy move_event helper — delegates to the generic _mutate_event."""
+    """Move-event helper — delegates to the generic _mutate_event."""
     return _mutate_event(sess, eid, "move_event", new_date)
 
 

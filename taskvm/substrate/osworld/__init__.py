@@ -1,4 +1,4 @@
-"""taskvm.substrate.osworld — the OSWorld substrate (Agent B, minimal).
+"""taskvm.substrate.osworld — the OSWorld substrate (minimal).
 
 ``session``: unified-port SubstrateSession over an OSWorld remote-agent
 transport (connect / list desktop surface / screenshot / click / type /

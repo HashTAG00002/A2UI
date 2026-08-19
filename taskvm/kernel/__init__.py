@@ -1,4 +1,4 @@
-"""taskvm.kernel — the L3 state machine (master handoff §2 'L3 TaskVM Kernel').
+"""taskvm.kernel — the L3 state machine (contract §2 'L3 TaskVM Kernel').
 
 Depends ONLY on taskvm.domain (+ stdlib). Knows nothing about Flask,
 Playwright, model providers, substrates, benchmarks, or evaluation —

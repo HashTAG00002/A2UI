@@ -36,7 +36,7 @@ class KernelGovernancePort:
     def __init__(self, kernel: TaskVMKernel) -> None:
         self._kernel = kernel
 
-    # ── autonomy lifecycle control (A-02: moved to driver single-owner path) ──
+    # ── autonomy lifecycle control (moved to driver single-owner path) ──
     # pause / resume / stop are NO LONGER on KernelGovernancePort — they
     # are routed through the ThreadedRuntimeDriver, which calls
     # runtime.request_pause/resume/stop, which writes kernel governance.
@@ -134,7 +134,7 @@ class KernelGovernancePort:
 class GoalRecomposer:
     """High-level convenience wrapper for the goal-patch path.
     The composition root may inject a different implementation that
-    routes through Agent C's architect instead of the kernel directly."""
+    routes through the architect instead of the kernel directly."""
 
     def __init__(self, port: KernelGovernancePort) -> None:
         self._port = port
