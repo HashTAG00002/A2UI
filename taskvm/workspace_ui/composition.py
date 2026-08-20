@@ -62,6 +62,7 @@ from taskvm.substrate import (
 )
 from taskvm.skills.loader import inject_skill
 from taskvm.verifier.visible import VisibleVerifier
+from taskvm.workspace_ui.verifier_escalation import build_escalating_verifier
 
 from taskvm.domain.state import ObservedValue, SurfaceEvidence, TaskVariable
 from taskvm.domain.intent import TaskIntent
@@ -627,10 +628,18 @@ def build_runtime_ports(*, model_port: ModelPort | None = None,
                         ledger: ModelCallLedger | None = None,
                         cua_model: Any = None,
                         extractor: Any = None,
-                        ) -> RuntimePorts:
+                        verifier: Any = None) -> RuntimePorts:
     """Assemble the five injected ports. Pass ``ledger`` to SHARE one
     instance with the architect (the unified call report); pass
     ``cua_model``/``extractor`` to override with test fakes.
+
+    The verifier default is the ESCALATION route (owner order
+    2026-08-20): deterministic ``VisibleVerifier`` first, then — only on
+    a rule-unresolvable mismatch — the R4 ``ModelVerifier`` as the final
+    judge (rules never veto the model; the per-app vocabulary route is
+    deleted). Env-gated like every real-model path: without
+    ``OPENAI_API_KEY`` the default is the plain deterministic verifier.
+    Pass ``verifier`` to force either behavior in tests.
 
     The ``cast`` below documents the seam's duck-typing contract:
     ``architect.ModelCallLedger`` and ``runtime.ports.CallLedger`` declare
@@ -638,12 +647,14 @@ def build_runtime_ports(*, model_port: ModelPort | None = None,
     dataclasses — a nominal-type checker cannot see that identity, the
     ledger only string-validates ``role`` at runtime)."""
     ledger = ledger if ledger is not None else ModelCallLedger()
+    port = model_port or HttpModelPort()
+    if verifier is None:
+        verifier = build_escalating_verifier(port=port, ledger=ledger)
     return RuntimePorts(
         serializer=ActionContractSerializer(),
-        cua_model=cua_model or HttpCUAModel(
-            port=model_port or HttpModelPort(), ledger=ledger),
+        cua_model=cua_model or HttpCUAModel(port=port, ledger=ledger),
         extractor=extractor or VisibleLabelExtractor(),
-        verifier=VisibleVerifier(),
+        verifier=verifier,
         ledger=cast(CallLedger, ledger))
 
 
