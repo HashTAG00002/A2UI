@@ -449,8 +449,35 @@ def _lazy_driver(sess):
     return sess.driver
 
 
+def _surface_shot_entries(state: "AppState") -> list[dict[str, Any]]:
+    """The screenshot wall's card list (A9.2): one entry per world
+    surface, each carrying ONLY user-visible fields + ready-to-render
+    URLs (the client never assembles internal ids into URLs).
+
+    Foreground surface → the live-shot side channel (fresh every poller
+    tick). Background surfaces (multi-substrate worlds, and the A-03
+    heartbeat fresh-observe channel when one is registered) extend this
+    list with ``role: "background"`` — same card shape, lower cadence.
+    """
+    entries: list[dict[str, Any]] = []
+    shot = state.screenshot(state.sid)
+    fg_name = (state.surfaces[0]["name"] if state.surfaces
+               else "MobileGym")
+    if shot is not None:
+        _mime, _data, seq, fp = shot
+        entries.append({
+            "name": fg_name,
+            "role": "foreground",
+            "hash": fp,
+            "seq": seq,
+            "thumbUrl": f"/api/app/screenshot?thumb=1&w=240&h={fp}",
+            "fullUrl": f"/api/app/screenshot?h={fp}",
+        })
+    return entries
+
+
 def register_app_routes(app, store: ProjectionSessionStore,
-                         state: AppState) -> None:
+                        state: AppState) -> None:
     """Add the APP-shell routes to the stock projection Flask app.
 
     These are composition-seam routes (session creation + screenshot
@@ -559,6 +586,20 @@ def register_app_routes(app, store: ProjectionSessionStore,
             if thumb is not None:
                 data, mime = thumb, "image/jpeg"
         return _shot_response(data, mime, fp=fp, cacheable=False)
+
+    # ── GET /api/app/surface_shots — the A9.2 screenshot wall's feed ───
+    #     One card per world surface; URLs are pre-assembled server-side
+    #     so the client never touches internal ids (repo contract §3).
+    @app.route("/api/app/surface_shots")
+    def app_surface_shots():
+        from flask import jsonify
+        return jsonify({
+            "ok": True,
+            "entries": _surface_shot_entries(state),
+            "surfaces": [{"name": s["name"],
+                          "role": ("foreground" if i == 0 else "background")}
+                         for i, s in enumerate(state.surfaces)],
+        })
 
     # ── POST /api/app/governance/<command> — the island's optimistic ───
     #     first-response proxy (A9.1). Zero model calls by construction;

@@ -21,7 +21,8 @@
  *    the last rendered state + a "同步中" badge — never a blank page;
  *  - the staged timeline (`progressive/StageTimeline.tsx`) shows the
  *    compile chain with LIVE timers, stamped by real signals;
- *  - the thumbnail pipeline (`a2ui/liveShot.ts`): ≤240px thumbs, hash
+ *  - the thumbnail pipeline (`a2ui/liveShot.ts`) feeds the A9.2
+ *    screenshot wall (`wall/SurfaceWall.tsx`): ≤240px thumbs, hash
  *    dedup (unchanged screen ⇒ zero bytes), 150ms burst coalescing,
  *    adaptive slow-network cadence.
  *
@@ -39,6 +40,7 @@ import {
   type WorkflowNodeChip,
 } from './progressive/ProgressiveTaskPlane';
 import { StageTimeline, type StageMark } from './progressive/StageTimeline';
+import { SurfaceWall, type WallLane } from './wall/SurfaceWall';
 import { SnakeProgress } from './progressive/SnakeProgress';
 import { CelebrationLayer } from './motion/CelebrationLayer';
 import { IntentConsole } from './intent/IntentConsole';
@@ -55,6 +57,7 @@ import {
 } from './a2ui/transport';
 import { postGovernance, type GovCommand } from './a2ui/governanceApi';
 import { loadSnapshot, saveSnapshot } from './a2ui/snapshotCache';
+import { useLiveShot } from './a2ui/liveShot';
 import {
   INITIAL_ISLAND_STATE,
   reduceProgress,
@@ -100,6 +103,9 @@ export function TaskExperience() {
   const [evidenceCount] = useState(2);
   const [stageMarks, setStageMarks] = useState<StageMark[]>([]);
   const [govPending, setGovPending] = useState<readonly GovCommand[]>([]);
+  const [wallSurfaces, setWallSurfaces] = useState<
+    { name: string; role: string }[]
+  >([]);
 
   // ── the A7 motion layer (governance SSE events → pure reducer) ───────
   const [motion, setMotion] = useState<GovernanceMotionState>(
@@ -109,6 +115,9 @@ export function TaskExperience() {
   // the trajectory keeps consuming t2 node updates through the whole
   // run — that is exactly what "verified progress" means
   const [snakeNodes, setSnakeNodes] = useState<WorkflowNodeChip[]>([]);
+
+  // ── A9.2: the live-shot thumbnail pipeline → the screenshot wall ────
+  const liveShot = useLiveShot(true);
 
   // The processor is created inside useA2uiStream; the action handler
   // needs it (to read the client-side data model) BEFORE the hook's
@@ -253,7 +262,8 @@ export function TaskExperience() {
     });
     // Refresh recovery: the fixed APP shell's public status route is the
     // authority for the goal text while no progress event has arrived
-    // yet (e.g. the island was opened directly after a goal started).
+    // yet (e.g. the island was opened directly after a goal started) —
+    // AND the world's surface names feed the A9.2 screenshot wall.
     fetchAppStatus().then((st) => {
       const goals = st?.goals ?? [];
       const last = goals[goals.length - 1];
@@ -261,6 +271,16 @@ export function TaskExperience() {
         setState((s) => (s.goal ? s : { ...s, goal: last.goal }));
       }
     });
+    fetch('/api/app/surface_shots')
+      .then((r) => r.json())
+      .then((feed: { surfaces?: { name: string; role: string }[] }) => {
+        if (Array.isArray(feed.surfaces) && feed.surfaces.length > 0) {
+          setWallSurfaces(feed.surfaces);
+        }
+      })
+      .catch(() => {
+        // the wall degrades to the feed entry alone — honest, not fatal
+      });
     return () => conn.close();
   }, [processMessages, handleProgress, handleGovernance]);
 
@@ -407,6 +427,12 @@ export function TaskExperience() {
 
   const showSnake = state.phase === 'live' && snakeNodes.length > 0;
   const verifiedCount = snakeNodes.filter((n) => n.status === 'verified').length;
+  const wallLanes: WallLane[] = useMemo(
+    () => snakeNodes.map((n) => ({
+      label: n.label, kind: n.kind, status: n.status,
+    })),
+    [snakeNodes],
+  );
 
   return (
     <GovernanceShell
@@ -433,6 +459,13 @@ export function TaskExperience() {
         verifiedCount={verifiedCount}
         totalCount={snakeNodes.length}
         executing={state.status === 'running'}
+      />
+      <SurfaceWall
+        entry={liveShot.entry}
+        thumbUrl={liveShot.url}
+        loading={liveShot.loading}
+        surfaces={wallSurfaces}
+        lanes={wallLanes}
       />
       <ProgressiveTaskPlane
         phase={state.phase}
