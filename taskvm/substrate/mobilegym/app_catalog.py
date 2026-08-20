@@ -90,3 +90,36 @@ def get_display_name(app_id: str) -> str:
     """The user-visible (Chinese) display name for ``app_id``; falls back
     to the id itself for unknown inputs."""
     return DISPLAY_NAMES.get(app_id, app_id)
+
+
+#: display_name -> app_id (exact). The manifest displayName is what the
+#: RENDERED HOME SCREEN shows, so it is the only spelling a GUI-only
+#: speaker (a CUA restricted to visible text) can legitimately produce.
+_DISPLAY_TO_ID: dict[str, str] = {v: k for k, v in DISPLAY_NAMES.items()}
+#: lowercase app_id -> app_id, for case-insensitive resolution. The 27
+#: catalog ids are unique and clash-free under ``lower()`` (locked by
+#: test_catalog_ids_unique_case_insensitive).
+_ID_LOWER_TO_ID: dict[str, str] = {a.lower(): a for a in ALL_APP_IDS}
+
+
+def resolve_app_id(name: str) -> str | None:
+    """Resolve a GUI-visible app spelling to the canonical catalog app_id.
+
+    GUI-only contract (GATE-G0 2026-08-20 postmortem, r3): the CUA system
+    prompt restricts the model to what the rendered screen shows — the
+    manifest displayName ("X", "支付宝") — NEVER internal ids ("x",
+    "alipay"). The bridge's ``open`` gesture must therefore TRANSLATE the
+    visible spelling instead of demanding the internal one (r3 burned 11
+    of 12 gestures re-finding an app the model had already named
+    correctly on gesture #1). Resolution order (most specific first):
+    exact app_id → exact display name → case-insensitive app_id.
+    Returns ``None`` for anything else — an honest unknown, never a guess.
+    """
+    n = (name or "").strip()
+    if not n:
+        return None
+    if n in DISPLAY_NAMES:
+        return n
+    if n in _DISPLAY_TO_ID:
+        return _DISPLAY_TO_ID[n]
+    return _ID_LOWER_TO_ID.get(n.lower())

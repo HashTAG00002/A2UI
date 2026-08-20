@@ -23,7 +23,10 @@ from typing import Any
 
 import requests
 
-from taskvm.substrate.mobilegym.app_catalog import get_display_name
+from taskvm.substrate.mobilegym.app_catalog import (
+    get_display_name,
+    resolve_app_id,
+)
 from taskvm.substrate.port import (
     ActionReceipt,
     GuiAction,
@@ -108,7 +111,20 @@ class MobileGymSubstrateSession:
         if action.duration_ms:
             payload["duration_ms"] = action.duration_ms
         if action.target:
-            payload["target"] = action.target
+            target = action.target
+            if action.kind == "open":
+                # GUI-only normalization (GATE-G0 2026-08-20 r3 postmortem):
+                # the CUA speaks only the RENDERED screen — the manifest
+                # displayName ("X", "支付宝") — never internal ids. Translate
+                # that visible spelling (or a case-slipped id like "X" for
+                # "x") to the canonical app_id BEFORE the bridge sees it;
+                # r3 burned 11 of 12 gestures re-finding an app the model
+                # had already named correctly on gesture #1. Unknown
+                # spellings pass through unchanged — the bridge's honest
+                # "unknown app" receipt is the correct answer for a name
+                # that appears on no screen (no guessing here either).
+                target = resolve_app_id(target) or target
+            payload["target"] = target
         try:
             r = requests.post(f"{self._bridge}/api/act/{self._sid}",
                               json=payload, timeout=self._timeout)

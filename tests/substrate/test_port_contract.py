@@ -84,3 +84,56 @@ def test_surface_handle_is_ephemeral_token_shape():
         h.handle_id = "event-42"          # frozen — handles never mutate
     assert h.bbox_norm is None            # position optional
     assert h.fingerprint == ""            # filled by the producing session
+
+
+def test_open_gesture_translates_gui_visible_name_to_app_id(monkeypatch):
+    """GUI-only contract (GATE-G0 2026-08-20 r3 postmortem): ``GuiAction.
+    target`` is "surface_id or visible app name" (port contract), and a
+    GUI-only CUA can ONLY produce the visible spelling — the manifest
+    displayName the home screen renders ("X", "支付宝"). The mobilegym
+    session must translate that visible spelling to the canonical app_id
+    before the bridge sees it (r3: the model named "X" correctly on
+    gesture #1 and then burned 11 of its 12 gestures re-finding the app,
+    because the bridge only accepted the internal id "x")."""
+    import taskvm.substrate.mobilegym.session as session_mod
+    from taskvm.substrate.mobilegym.session import MobileGymSubstrateSession
+    from taskvm.substrate.port import GuiAction
+
+    sent: list[dict] = []
+
+    class _FakeResp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"status": "ok", "detail": "open"}
+
+    def _fake_post(url, json=None, timeout=None):
+        sent.append(json)
+        return _FakeResp()
+
+    monkeypatch.setattr(session_mod.requests, "post", _fake_post)
+    session = MobileGymSubstrateSession(
+        sid="s1", bridge_url="http://localhost:3019", surface_app="wechat")
+
+    def _open(target):
+        session.act(None, GuiAction(kind="open", target=target), epoch="e1")
+        return sent[-1]
+
+    # the rendered home screen shows "X" — the only legal GUI-only spelling
+    assert _open("X")["target"] == "x"
+    # Chinese display names translate too (the only spelling on screen)
+    assert _open("支付宝")["target"] == "alipay"
+    assert _open("微信读书")["target"] == "wechat_reading"
+    # the canonical internal id passes through untouched (both directions)
+    assert _open("x")["target"] == "x"
+    # whitespace is the model's, not the catalog's — strip before resolving
+    assert _open(" X ")["target"] == "x"
+    # a name on NO screen passes through unchanged so the bridge answers
+    # its honest "unknown app" receipt — never guessed, never dropped
+    assert _open("phone")["target"] == "phone"
+
+    # non-open gestures never touch the target translation (open is the
+    # only kind whose target names an app)
+    session.act(None, GuiAction(kind="type", text="核心CPI下降"), epoch="e1")
+    assert sent[-1] == {"kind": "type", "text": "核心CPI下降"}

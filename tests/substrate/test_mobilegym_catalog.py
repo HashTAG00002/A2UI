@@ -85,3 +85,36 @@ def test_display_names_are_the_home_screen_chinese_names():
         assert ac.get_display_name(aid) == name
     # honest fallback for unknown ids: the id itself, never a fake name
     assert ac.get_display_name("not_an_app") == "not_an_app"
+
+
+def test_catalog_ids_unique_case_insensitive():
+    """``resolve_app_id``'s case-insensitive leg is only safe because no
+    two catalog ids collide under ``lower()`` — lock that invariant."""
+    lowers = [a.lower() for a in ac.ALL_APP_IDS]
+    assert len(lowers) == len(set(lowers)), (
+        "two catalog app_ids differ only by case — the case-insensitive "
+        "resolution leg becomes ambiguous")
+
+
+def test_resolve_app_id_translates_gui_visible_spellings():
+    """GUI-only contract (GATE-G0 2026-08-20 r3 postmortem): a CUA
+    restricted to the rendered screen can only name an app by its
+    manifest displayName ("X") — ``resolve_app_id`` translates that
+    visible spelling (and case-slipped ids) to the canonical app_id,
+    honestly returning None for names on no screen."""
+    # exact internal id — passes through
+    assert ac.resolve_app_id("x") == "x"
+    assert ac.resolve_app_id("wechat_reading") == "wechat_reading"
+    # the RENDERED displayName — the only spelling a GUI-only speaker has
+    assert ac.resolve_app_id("X") == "x"
+    assert ac.resolve_app_id("支付宝") == "alipay"
+    assert ac.resolve_app_id("微信读书") == "wechat_reading"
+    assert ac.resolve_app_id("铁路12306") == "railway12306"
+    # storeless apps resolve too (their state IS the screen)
+    assert ac.resolve_app_id("计算器") == "calculator"
+    # whitespace is the caller's, not the catalog's
+    assert ac.resolve_app_id("  X  ") == "x"
+    # honest unknowns: None, never a guess
+    assert ac.resolve_app_id("phone") is None
+    assert ac.resolve_app_id("") is None
+    assert ac.resolve_app_id(None) is None
