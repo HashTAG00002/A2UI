@@ -829,3 +829,168 @@ def test_w02_default_repair_budget_is_four_attempts():
     with pytest.raises(ArchitectOutputError, match="4 attempt"):
         TaskArchitect(port).compose(INTENT, OBSERVED_VARS)
     assert len(port.calls) == 4, "default budget consumed exactly 4 calls"
+
+
+# ── r8 regression: _chain_fill must not create deadlock cycles ──────────
+#
+# The r8 test failure (WORLD_WITNESS_MISSING) was caused by _chain_fill
+# auto-chaining top-level SEQUENCE and CHECKPOINT nodes that were already
+# transitively linked through a FAN_OUT + BARRIER path.  The auto-chain
+# added CHECKPOINT → SEQUENCE_CONTAINER, creating a cycle:
+#
+#   CHECKPOINT → SEQUENCE(all children COMMITTED) → … → BARRIER → FAN_OUT → CHECKPOINT
+#
+# This deadlocked the scheduler (no_ready_work).  The fix: skip the
+# auto-chain when consecutive top-level pairs are already transitively
+# connected.
+
+R8_DEADLOCK_JSON = {
+    "variables": [
+        {"semantic_key": "post_liked", "label": "点赞状态",
+         "value_type": "boolean", "mutability": "editable",
+         "desired": True},
+        {"semantic_key": "post_favorited", "label": "收藏状态",
+         "value_type": "boolean", "mutability": "editable",
+         "desired": True},
+    ],
+    "workflow": {"nodes": [
+        # SEQUENCE container (top-level)
+        {"kind": "sequence", "label": "操作流程"},
+        # children of the sequence
+        {"kind": "action", "label": "搜索帖子",
+         "container": "操作流程",
+         "semantic_goal": "找到目标帖子",
+         "sets": {},
+         "completion": "帖子可见",
+         "reversibility": "reversible", "risk": "",
+         "target_evidence": ["帖子标题"]},
+        {"kind": "action", "label": "点赞",
+         "container": "操作流程",
+         "semantic_goal": "点赞目标帖子",
+         "sets": {"post_liked": True},
+         "completion": "post_liked == true",
+         "reversibility": "reversible", "risk": "",
+         "target_evidence": ["点赞按钮"]},
+        {"kind": "action", "label": "收藏",
+         "container": "操作流程",
+         "semantic_goal": "收藏目标帖子",
+         "sets": {"post_favorited": True},
+         "completion": "post_favorited == true",
+         "reversibility": "reversible", "risk": "",
+         "target_evidence": ["收藏按钮"]},
+        {"kind": "verify", "label": "核验操作",
+         "container": "操作流程",
+         "condition": "post_liked == true and post_favorited == true"},
+        # FAN_OUT (top-level, depends on the last verify inside the seq)
+        {"kind": "fan_out", "label": "并行验证", "after": ["核验操作"]},
+        {"kind": "action", "label": "验证点赞",
+         "container": "并行验证",
+         "semantic_goal": "确认点赞已生效",
+         "sets": {},
+         "completion": "点赞标记可见",
+         "reversibility": "reversible", "risk": "",
+         "target_evidence": ["点赞标记"]},
+        {"kind": "action", "label": "验证收藏",
+         "container": "并行验证",
+         "semantic_goal": "确认收藏已生效",
+         "sets": {},
+         "completion": "收藏标记可见",
+         "reversibility": "reversible", "risk": "",
+         "target_evidence": ["收藏标记"]},
+        # BARRIER (inside the sequence, fans in the FAN_OUT)
+        {"kind": "barrier", "label": "汇合", "container": "操作流程",
+         "after": ["并行验证"]},
+        # CHECKPOINT (top-level)
+        {"kind": "checkpoint", "label": "完成检查点", "after": ["汇合"]},
+        {"kind": "terminal", "label": "完成", "after": ["完成检查点"]},
+    ]},
+    "projection": {"root": "总览", "components": [
+        {"label": "总览", "type": "card", "binds": None,
+         "children": ["点赞状态", "收藏状态"]},
+        {"label": "点赞状态", "type": "field", "binds": "post_liked",
+         "editable": False, "children": []},
+        {"label": "收藏状态", "type": "field", "binds": "post_favorited",
+         "editable": False, "children": []},
+    ]},
+}
+
+
+def test_r8_chain_fill_no_deadlock_for_transitively_linked_tops():
+    """The r8 regression: a SEQUENCE container and a CHECKPOINT are both
+    top-level.  The CHECKPOINT depends on a BARRIER inside the SEQUENCE,
+    which depends on a FAN_OUT that is also top-level and depends on a
+    VERIFY inside the SEQUENCE.  The old _chain_fill added
+    CHECKPOINT → SEQUENCE (auto-chain), creating a deadlock cycle.
+
+    After the fix, _chain_fill detects the transitive connection and
+    skips the auto-chain — the graph validates as acyclic and the first
+    action node is READY (execution can start)."""
+    port = FakePort(R8_DEADLOCK_JSON)
+    arch = TaskArchitect(port).compose(
+        TaskIntent(goal="搜索帖子并点赞和收藏"),
+        (TaskVariable(semantic_key="post_liked", label="点赞状态",
+                      observed=False, value_type="boolean"),
+         TaskVariable(semantic_key="post_favorited", label="收藏状态",
+                      observed=False, value_type="boolean")))
+
+    by_label = {n.label: n for n in arch.graph.nodes}
+    seq = by_label["操作流程"]
+    cp = by_label["完成检查点"]
+
+    # The CRITICAL assertion: the checkpoint must NOT depend on the
+    # sequence container (that would create a deadlock cycle).
+    assert seq.node_id not in cp.depends_on, (
+        "_chain_fill must not add CHECKPOINT → SEQUENCE_CONTAINER "
+        "when they are already transitively linked")
+
+    # The graph must validate (acyclic — checked by WorkflowGraph.__init__)
+    assert len(arch.graph.terminal_nodes()) == 1
+
+    # Simulate execution: the first action must be READY
+    from taskvm.kernel.workflow_store import WorkflowStore
+    store = WorkflowStore()
+    store.install_graph(arch.graph, epoch=0)
+    snap = store.snapshot()
+    ready_ids = {n.node_id for n in snap.graph.ready_nodes(snap.statuses)
+                 if snap.statuses.get(n.node_id) == NodeStatus.READY}
+    first_action = by_label["搜索帖子"]
+    assert first_action.node_id in ready_ids, (
+        "The first action in the sequence must be READY — "
+        "if _chain_fill created a cycle, no node would be READY")
+
+
+def test_r8_chain_fill_still_chains_unrelated_tops():
+    """Sanity check: when top-level nodes are truly unrelated (no
+    transitive path between them), _chain_fill still auto-chains them
+    in listed order.  This confirms the fix does not over-suppress."""
+    simple_json = {
+        "variables": [
+            {"semantic_key": "x", "label": "x",
+             "value_type": "number", "mutability": "editable",
+             "desired": 1},
+        ],
+        "workflow": {"nodes": [
+            {"kind": "action", "label": "step1",
+             "semantic_goal": "set x", "sets": {"x": 1},
+             "completion": "x == 1",
+             "reversibility": "reversible", "risk": "",
+             "target_evidence": ["x"]},
+            {"kind": "checkpoint", "label": "cp1"},
+            {"kind": "terminal", "label": "done", "after": ["cp1"]},
+        ]},
+        "projection": {"root": "root", "components": [
+            {"label": "root", "type": "card", "binds": None,
+             "children": ["x_field"]},
+            {"label": "x_field", "type": "field", "binds": "x",
+             "editable": False, "children": []},
+        ]},
+    }
+    port = FakePort(simple_json)
+    arch = TaskArchitect(port).compose(
+        TaskIntent(goal="set x to 1"),
+        (TaskVariable(semantic_key="x", label="x",
+                      observed=0, value_type="number"),))
+    by_label = {n.label: n for n in arch.graph.nodes}
+    # step1 and cp1 are both top-level and unrelated → auto-chained
+    assert by_label["step1"].node_id in by_label["cp1"].depends_on, (
+        "Unrelated top-level nodes should still be auto-chained")

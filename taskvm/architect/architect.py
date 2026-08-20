@@ -101,7 +101,19 @@ termination predicate in words>", "max_iterations": 3},
     "semantic_goal": "<what must become true, in business words>",
     "sets": {"<semantic_key>": "<target value>"} (or {} for a navigation/
      observation/trigger step that writes no variable),
-    "completion": "<how a user recognises completion on the visible screen>",
+    "completion": "<EXACTLY ONE clause 'semantic_key == value' (exact match) \
+or 'semantic_key ~= value' (substring/contains match) — the RFC-003 \
+deterministic form the runtime verifier machine-checks against the fresh \
+observation. Use '==' when the observed value must equal the target exactly \
+(e.g. 'post_liked == true'). Use '~=' when the target is a SUBSTRING of the \
+full observed text (e.g. 'target_post_text ~= 核心CPI意外下降' matches any \
+post whose text CONTAINS that phrase). Express boolean targets in \
+canonical form ('post_liked == true'): the deterministic verifier \
+compares GENERIC literals only — a rendering-vocabulary gap (e.g. a CJK \
+toggle label on screen) honestly fails the rule layer and escalates to \
+the model-based verifier, which judges the fresh screen as the final \
+arbiter. Free prose here FAILS the node \
+fail-closed: the verifier is not an NLP parser>",
     "reversibility": "reversible|partially_reversible|irreversible",
     "risk": "<one short risk note, or empty>",
     "target_evidence": ["<a visible label a user could read on screen>"]},
@@ -128,7 +140,16 @@ value differs from observed must be finally written by some action to that \
 exact value; at least one action in the whole task must write a variable \
 (navigation/observation/trigger steps may keep 'sets' empty); \
 address targets ONLY by visible labels and business keys, \
-never by internal ids or operator names.
+never by internal ids or operator names. \
+Keep the topology FLAT and SIMPLE: prefer at most ONE top-level container \
+(or a single linear chain of top-level containers connected by explicit \
+'after' edges). If you need a fan-out for parallel steps, place the \
+fan-out+barrier as a self-contained pair at one position in the main flow \
+rather than splitting the barrier into a different container. A barrier \
+should depend on its fan-out (or the fan-out's lanes) and be the fan-out's \
+direct successor — do NOT place a barrier inside a sequence while its \
+fan-out is a separate top-level node, as this creates cross-container \
+dependencies that can deadlock the scheduler.
 Output ONLY the JSON object."""
 
 
@@ -652,7 +673,18 @@ class TaskArchitect:
            dependency is an external checkpoint). An explicit edge that
            CONTRADICTS the listed order is rejected honestly with a
            specific message (business labels only, no internal ids).
-        2. Top level with no intra-top edges → listed order (unchanged).
+        2. Top level: if NO pair of top-level new nodes has an explicit
+           ``after`` edge between them, connect them in listed order —
+           BUT only if doing so cannot create a cycle.  When top-level
+           nodes are already connected *indirectly* (e.g. a CHECKPOINT
+           that a FAN_OUT lane depends on, while the FAN_OUT's barrier
+           lives inside a SEQUENCE that the CHECKPOINT would be chained
+           after), the indirect path already establishes an ordering.
+           Chaining on top of that creates a deadlock cycle.  We therefore
+           skip the auto-chain for any pair already linked by a transitive
+           dependency, and skip the entire auto-chain if *any* pair of
+           consecutive top-level nodes is already transitively connected
+           (to avoid partial chains that still deadlock).
         3. Stitch the carried frontier: the terminal also depends on every
            carried TOP-LEVEL node it cannot already reach — committed
            history must remain on the path to the end. This can never
@@ -686,19 +718,57 @@ class TaskArchitect:
                     by_id[next_nid] = replace(
                         node,
                         depends_on=node.depends_on + (prev_nid,))
-        # 2. top level with no intra-top edges → listed order
-        def has_explicit_edges(scope_ids: set[str]) -> bool:
-            return any(set(by_id[nid].depends_on)
-                       & (scope_ids - {nid})
-                       for nid in scope_ids if nid in by_id)
+        # 2. top level: auto-chain in listed order, but ONLY when no
+        #    pair of top-level nodes is already transitively connected.
+        #    Indirect connections (via child nodes, cross-container edges,
+        #    or the parent → child membership edge) already establish an
+        #    ordering.  Adding a chain edge on top creates a cycle that
+        #    deadlocks the scheduler (r8 regression: CHECKPOINT →
+        #    SEQUENCE-container → … → FAN_OUT → CHECKPOINT).
+        def _top_reaches(start: str, target: str,
+                         edge_map: dict[str, set[str]]) -> bool:
+            """True if ``target`` is reachable from ``start`` via the
+            given forward adjacency map."""
+            seen: set[str] = {start}
+            stack = [start]
+            while stack:
+                cur = stack.pop()
+                if cur == target:
+                    return True
+                for s in edge_map.get(cur, ()):
+                    if s not in seen:
+                        seen.add(s)
+                        stack.append(s)
+            return False
 
-        if len(top_new_ids) > 1 and not has_explicit_edges(top_new_ids):
-            chain = [n.node_id for n in nodes if n.node_id in top_new_ids]
-            for prev_nid, next_nid in zip(chain, chain[1:]):
-                node = by_id[next_nid]
-                if prev_nid not in node.depends_on:
-                    by_id[next_nid] = replace(
-                        node, depends_on=node.depends_on + (prev_nid,))
+        if len(top_new_ids) > 1:
+            # Build forward adjacency including the parent-membership
+            # edge (child → parent) so transitive paths through
+            # containers are captured.
+            fwd: dict[str, set[str]] = {}
+            for n in nodes:
+                for d in n.depends_on:
+                    fwd.setdefault(d, set()).add(n.node_id)
+                if n.parent_id is not None:
+                    fwd.setdefault(n.node_id, set()).add(n.parent_id)
+
+            top_chain = [n.node_id for n in nodes
+                         if n.node_id in top_new_ids]
+            # Check each consecutive pair; if any pair is already
+            # transitively linked, skip the entire auto-chain to
+            # avoid creating a partial chain that could still deadlock.
+            already_linked = False
+            for prev_nid, next_nid in zip(top_chain, top_chain[1:]):
+                if _top_reaches(next_nid, prev_nid, fwd):
+                    already_linked = True
+                    break
+            if not already_linked:
+                for prev_nid, next_nid in zip(top_chain, top_chain[1:]):
+                    node = by_id[next_nid]
+                    if prev_nid not in node.depends_on:
+                        by_id[next_nid] = replace(
+                            node,
+                            depends_on=node.depends_on + (prev_nid,))
         # refresh to the CURRENT edge set before reachability
         nodes = [by_id[n.node_id] for n in nodes]
         # 2. stitch carried frontier to the terminal
