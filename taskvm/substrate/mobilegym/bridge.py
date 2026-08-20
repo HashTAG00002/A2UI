@@ -273,14 +273,48 @@ class MobileGymBridge:
         import base64
         data_url = "data:image/png;base64," + base64.b64encode(png).decode()
         visible_text = await page.evaluate(
-            "() => (document.body && document.body.innerText || '')"
-            ".slice(0, 8000)")
+            "() => { const base = (document.body && "
+            "document.body.innerText || '');"
+            # Visible input VALUES: a real user SEES the text inside an
+            # input box, yet input.value never appears in innerText (the
+            # DOM keeps it in the value property, not a text node). Append
+            # each visible, non-empty input value so the visible-text
+            # projection matches what a user actually reads on the
+            # rendered screen (GUI-only: input box text passes the "can a
+            # user see it on the rendered screen?" test; hidden/empty
+            # inputs contribute nothing; values already in innerText are
+            # not duplicated). GATE-G0 r6 postmortem: the X search phrase
+            # lived only in the search box's input.value, so the CUA
+            # completed the search while the extractor never saw the
+            # phrase — the node's desired_state was unobservable.
+            "const vals = [];"
+            "for (const el of document.querySelectorAll("
+            "'input, textarea')) {"
+            "const v = (el.value || '').trim(); if (!v) continue;"
+            "const r = el.getBoundingClientRect();"
+            "if (r.width <= 0 || r.height <= 0) continue;"
+            "const st = getComputedStyle(el);"
+            "if (st.visibility === 'hidden' || st.display === 'none')"
+            " continue;"
+            "if (!vals.includes(v) && !base.includes(v)) vals.push(v); }"
+            "return (base + (vals.length ? '\\n' + vals.join('\\n')"
+            " : '')).slice(0, 8000); }")
         digest = await page.evaluate(
             "() => { const walk = (n, d) => { if (!n || d > 18) return ''; "
             "let s = ''; for (const c of n.children || []) { "
             "s += c.tagName + '(' + ((c.innerText || '').trim()"
             ".slice(0, 24)) + ')' + walk(c, d + 1); } return s; }; "
-            "return walk(document.body, 0).slice(0, 4000); }")
+            "let out = walk(document.body, 0); "
+            # the fingerprint must move when a visible input's value
+            # changes (same GUI-only rationale as visible_text above):
+            # otherwise a type gesture leaves the screen fingerprint
+            # frozen while the rendered screen actually changed.
+            "for (const el of document.querySelectorAll("
+            "'input, textarea')) { "
+            "const v = (el.value || '').trim(); "
+            "if (v && !out.includes(v)) out += 'INPUT(' + "
+            "v.slice(0, 24) + ')'; } "
+            "return out.slice(0, 4000); }")
         fingerprint = hashlib.sha1(digest.encode("utf-8")).hexdigest()[:16]
         self._revision += 1
         return {"sid": sid, "revision": self._revision,
