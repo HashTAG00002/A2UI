@@ -355,6 +355,20 @@ class AppState:
                     sess.model_call_probe = ledger.total
                     _ScreenshotPoller(self, self.sid, sess).start()
                     if self.a2ui is not None:
+                        # A6: re-wire the intent parser onto THIS goal's
+                        # shared ledger + port (rows for an old goal
+                        # never land in the new one) and the §20.2
+                        # routing slot (the small fast model when
+                        # TASKVM_ROLE_MODELS/TASKVM_INTENT_PARSER_MODEL
+                        # sets one; the port default otherwise).
+                        from taskvm.genui import IntentParser
+                        from taskvm.workspace_ui.composition import (
+                            resolve_role_models,
+                        )
+                        self.a2ui.set_intent_parser(IntentParser(
+                            port, ledger,
+                            model=resolve_role_models().get(
+                                "intent_parser")))
                         try:
                             self.a2ui.attach_session(self.sid, sess)
                         except A2uiTransportError:
