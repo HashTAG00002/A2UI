@@ -80,6 +80,32 @@ def is_data_binding(value: Any) -> bool:
             and isinstance(value["path"], str))
 
 
+def literal_type_error(var, value: Any) -> str | None:
+    """THE one literal-type rule — shared by the C2S enforcement points
+    (ActionRouter + the A6 IntentParser's intent-driven updates; the
+    S2C SurfacePolicy twin is drift-locked by the verdict-equality
+    mirror test). Returns the error message, or None when ``value`` is
+    a type-correct literal for ``var.value_type``. bool never poses as
+    a number; a DataBinding is NOT a literal (callers reject bindings
+    before/instead of this check — bindings never ride the write
+    path)."""
+    vt = var.value_type
+    bad = False
+    if vt == "boolean":
+        bad = not isinstance(value, bool)
+    elif vt == "number":
+        bad = (not isinstance(value, (int, float))
+               or isinstance(value, bool))
+    elif vt == "integer":
+        bad = not isinstance(value, int) or isinstance(value, bool)
+    elif vt in ("string", "date", "text", "status"):
+        bad = not isinstance(value, str)
+    if bad:
+        return (f"variable {var.semantic_key!r} ({vt}) rejects value "
+                f"{value!r}")
+    return None
+
+
 class ActionRouter:
     """Validate one renderer action against the surface ground truth
     and mint the structured intent. Stateless per call: ``context`` is
@@ -137,22 +163,9 @@ class ActionRouter:
     # ── literal type gate ─────────────────────────────────────────────
     @staticmethod
     def _check_value_type(var, value: Any) -> None:
-        """Identical literal semantics to SurfacePolicy._check_value_type
-        (post A5-IFACE-01) — one rule set, two enforcement points (S2C
-        tree validation + C2S write path). bool never poses as a
-        number."""
-        vt = var.value_type
-        bad = False
-        if vt == "boolean":
-            bad = not isinstance(value, bool)
-        elif vt in ("number",):
-            bad = not isinstance(value, (int, float)) \
-                or isinstance(value, bool)
-        elif vt in ("integer",):
-            bad = not isinstance(value, int) or isinstance(value, bool)
-        elif vt in ("string", "date", "text", "status"):
-            bad = not isinstance(value, str)
-        if bad:
-            raise ActionRouteError(
-                f"variable {var.semantic_key!r} ({vt}) rejects value "
-                f"{value!r}")
+        """Thin wrapper over the shared ``literal_type_error`` rule —
+        one rule set, many enforcement points (the A6 IntentParser runs
+        the same function on intent-driven updates)."""
+        err = literal_type_error(var, value)
+        if err is not None:
+            raise ActionRouteError(err)

@@ -19,6 +19,11 @@ plain JSON / value objects, no kernel references):
   (C2S write-path validation half; execution belongs to the
   composition root, which hands the intent to the session's
   GovernanceService-backed governance port);
+- IntentParser (A6): free-text intent → structured governance intent
+  (GoalPatch / LocalPatch / Checkpoint / RollbackIntent) via the SMALL
+  presentation model (workplan §20.2), deterministic validation, and
+  the honest clarify fallback (never a guess — the parser never
+  invents semantics it cannot ground in the public snapshot);
 - schema: vendored-mirror → official a2ui-agent-sdk catalog/validator.
 
 The layer is a plain-JSON port layer (tests/genui/test_imports.py): the
@@ -37,10 +42,15 @@ from taskvm.genui.decoder import (
     DecodeAttempt, DecodeResult, GenUIDecoder, SOURCE_FALLBACK,
     SOURCE_MODEL,
 )
+from taskvm.genui.intent_parser import (
+    INTENT_KINDS, IntentAttempt, IntentParser, ParsedIntent,
+    SOURCE_CLARIFY,
+)
 from taskvm.genui.policy import SurfacePolicy
 from taskvm.genui.protocol import (
     ACTION_LOCAL_PATCH, ALLOWED_SURFACE_ACTIONS, CATALOG_ID,
-    GENUI_DECODER_MODEL_ROLE, PROTOCOL_VERSION, surface_id_for_session,
+    GENUI_DECODER_MODEL_ROLE, INTENT_PARSER_MODEL_ROLE, PROTOCOL_VERSION,
+    surface_id_for_session,
 )
 from taskvm.genui.store import SurfaceStore, SurfaceStoreRegistry
 from taskvm.genui.validator import (
@@ -58,8 +68,14 @@ __all__ = [
     "DecodeResult",
     "GENUI_DECODER_MODEL_ROLE",
     "GenUIDecoder",
+    "INTENT_KINDS",
+    "INTENT_PARSER_MODEL_ROLE",
+    "IntentAttempt",
+    "IntentParser",
     "LocalPatchIntent",
     "PROTOCOL_VERSION",
+    "ParsedIntent",
+    "SOURCE_CLARIFY",
     "SOURCE_FALLBACK",
     "SOURCE_MODEL",
     "SurfacePolicy",

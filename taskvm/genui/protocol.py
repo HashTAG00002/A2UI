@@ -84,6 +84,19 @@ GOVERNANCE_ACTION_NAMES: frozenset[str] = frozenset({
     "goal_patch", "recompose", "resolve_conflict",
 })
 
+#: The A6 intent parser's model-call role for the shared ledger AND its
+#: slot name in the workspace_ui role→model routing table (workplan
+#: §20.2 — presentation slots run on a SMALL fast model by default).
+#: One string in both places, pinned by contract test (the
+#: GENUI_DECODER_MODEL_ROLE precedent).
+INTENT_PARSER_MODEL_ROLE: str = "intent_parser"
+
+#: Model routing for the intent parser (workplan §20.2): priority is
+#: constructor arg > this env var > the role-routing slot's default
+#: (None = the port's own model). The chosen id lands in every ledger
+#: row — honest accounting either way.
+INTENT_PARSER_MODEL_ENV: str = "TASKVM_INTENT_PARSER_MODEL"
+
 #: The GenUI decoder's model-call role for the shared ledger. Identical
 #: string to ``taskvm.architect.port.MODEL_ROLE_GENUI_DECODER`` so the
 #: SAME ModelCallLedger instance buckets decoder calls under the key the
