@@ -25,6 +25,8 @@ export type TaskStatus =
 export interface CheckpointChip {
   /** User-visible label only — internal ids never enter the island. */
   label: string;
+  /** reached checkpoints carry the A7 small-reward visual state */
+  reached?: boolean;
 }
 
 export interface GovernanceShellProps {
@@ -43,6 +45,9 @@ export interface GovernanceShellProps {
   onOpenEvidence: () => void;
   substrateLabel: string;
   onOpenSubstrate: () => void;
+  /** The A6 free-text intent console — FIXED shell chrome, never
+   *  model-generated, rendered between the goal card and the controls. */
+  intentConsole?: ReactNode;
   /** The dynamic task region (model-generated A2UI surface / skeleton). */
   children: ReactNode;
 }
@@ -89,6 +94,7 @@ export function GovernanceShell({
   onOpenEvidence,
   substrateLabel,
   onOpenSubstrate,
+  intentConsole,
   children,
 }: GovernanceShellProps) {
   const started = status === 'running' || status === 'paused';
@@ -117,6 +123,12 @@ export function GovernanceShell({
         <p className="shell__goal-text" data-testid="goal-text">{goal}</p>
       </section>
 
+      {intentConsole && (
+        <section className="shell__intent" data-testid="intent-console-slot">
+          {intentConsole}
+        </section>
+      )}
+
       <section className="shell__controls" data-testid="governance-controls">
         <GovButton action="start" label="开始" onClick={onStart}
                    disabled={!canStart || started || finished} tone="primary" />
@@ -137,7 +149,11 @@ export function GovernanceShell({
       {checkpoints.length > 0 && (
         <section className="shell__checkpoints" data-testid="checkpoint-strip">
           {checkpoints.map((cp, i) => (
-            <span key={`${cp.label}-${i}`} className="checkpoint-chip">
+            <span
+              key={`${cp.label}-${i}`}
+              className={`checkpoint-chip${cp.reached ? ' checkpoint-chip--reached' : ''}`}
+              data-reached={cp.reached ? 'true' : 'false'}
+            >
               {cp.label}
             </span>
           ))}

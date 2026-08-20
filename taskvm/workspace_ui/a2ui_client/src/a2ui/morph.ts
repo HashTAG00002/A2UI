@@ -41,7 +41,10 @@ export const INITIAL_ISLAND_STATE: IslandState = {
 const KINDS = new Set(['step', 'verification', 'checkpoint', 'goal']);
 const STATUSES = new Set(['waiting', 'executing', 'verified', 'failed']);
 
-function toChip(n: { label: string; kind: string; status: string }): WorkflowNodeChip {
+/** Collapse a raw progress-node onto the four known chip tones (shared
+ * by the T2 plane and the A7 snake trajectory). Unknown kinds/statuses
+ * degrade honestly to step/waiting — never a guessed tone. */
+export function toChip(n: { label: string; kind: string; status: string }): WorkflowNodeChip {
   return {
     label: n.label,
     kind: (KINDS.has(n.kind) ? n.kind : 'step') as WorkflowNodeChip['kind'],

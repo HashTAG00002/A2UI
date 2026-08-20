@@ -292,6 +292,375 @@
 /* A2UI renderer base styling inside the island */
 .plane--live :where(button) { font: inherit; }
 
+/* ── A6 intent console (fixed shell chrome) ─────────────────────────── */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.shell__intent {
+  background: var(--tv-card);
+  border: 1px solid var(--tv-line);
+  border-radius: var(--tv-radius-lg);
+  padding: 16px 18px;
+  box-shadow: 0 6px 24px rgba(28, 35, 51, 0.06);
+}
+
+.intent-console {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.intent-console__hint {
+  margin: -4px 0 0;
+  font-size: 12px;
+  color: var(--tv-muted);
+}
+
+.intent-console__row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.intent-console textarea {
+  flex: 1;
+  resize: vertical;
+  min-height: 56px;
+  border-radius: var(--tv-radius-md);
+  border: 1px solid var(--tv-line);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--tv-ink);
+  background: #fafbff;
+}
+
+.intent-console textarea:focus-visible {
+  outline: 2px solid var(--tv-primary);
+  outline-offset: 1px;
+}
+
+.intent-console__pending {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--tv-ink-soft);
+}
+
+.intent-console__error {
+  border-radius: var(--tv-radius-md);
+  background: var(--tv-danger-soft);
+  color: var(--tv-danger);
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.intent-card {
+  border-radius: var(--tv-radius-md);
+  border: 1px solid var(--tv-line);
+  padding: 12px 14px;
+  background: #fafbff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.intent-card--clarify {
+  border-color: #ecd9ac;
+  background: var(--tv-warn-soft);
+}
+
+.intent-card__head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--tv-ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.intent-card__question {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--tv-ink);
+}
+
+.intent-card__note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--tv-muted);
+}
+
+.intent-card__goal {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 650;
+  color: var(--tv-ink);
+  line-height: 1.45;
+}
+
+.intent-updates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.intent-updates li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13.5px;
+}
+
+.intent-updates code {
+  font-family: ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--tv-primary-deep);
+  background: var(--tv-primary-soft);
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
+.intent-updates strong { color: var(--tv-ink); }
+
+.intent-card__chips {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.intent-card__chip-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--tv-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.intent-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.intent-chip {
+  padding: 2px 10px;
+  border-radius: var(--tv-radius-pill);
+  background: var(--tv-primary-soft);
+  color: var(--tv-primary-deep);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.intent-card__checkpoint {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--tv-success);
+}
+
+.intent-card__rationale {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--tv-ink-soft);
+  border-top: 1px dashed var(--tv-line);
+  padding-top: 8px;
+}
+
+/* ── A7 verified snake trajectory ───────────────────────────────────── */
+
+.snake {
+  position: relative;
+  margin: 4px 0 10px;
+}
+
+.snake__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.snake__track { stroke: var(--tv-line); }
+.snake__body { stroke: var(--tv-primary); }
+
+.snake__node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 23%;
+  text-align: center;
+  z-index: 1;
+}
+
+.snake__dot {
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 3px solid var(--tv-muted);
+  background: var(--tv-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.snake__node--crossed .snake__dot {
+  border-color: var(--tv-success);
+  background: var(--tv-success);
+}
+
+.snake__node--executing .snake__dot {
+  border-color: var(--tv-primary);
+  animation: tv-breathe 1.4s ease-in-out infinite;
+}
+
+.snake__node--failed .snake__dot {
+  border-color: var(--tv-danger);
+  color: var(--tv-danger);
+}
+
+.snake__node--k-checkpoint .snake__dot {
+  box-shadow: 0 0 0 4px rgba(22, 163, 74, 0.18);
+}
+
+.snake__node--k-checkpoint .snake__label {
+  font-weight: 700;
+}
+
+.snake__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tv-ink);
+  line-height: 1.25;
+}
+
+.snake__node--waiting .snake__label { color: var(--tv-ink-soft); }
+
+.snake__kind {
+  font-size: 10px;
+  color: var(--tv-muted);
+}
+
+.snake__head {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  background: var(--tv-primary);
+  box-shadow: 0 2px 10px rgba(79, 70, 229, 0.45);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.snake__head-core {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.snake__caption {
+  position: absolute;
+  right: 0;
+  top: -10px;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--tv-primary-deep);
+  background: var(--tv-primary-soft);
+  padding: 2px 10px;
+  border-radius: var(--tv-radius-pill);
+}
+
+.snake__caption--paused {
+  color: var(--tv-warn);
+  background: var(--tv-warn-soft);
+}
+
+/* ── A7 checkpoint reward state ─────────────────────────────────────── */
+
+.checkpoint-chip--reached {
+  background: var(--tv-success);
+  color: #fff;
+  animation: tv-pop 500ms ease;
+}
+
+@keyframes tv-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.22); }
+  100% { transform: scale(1); }
+}
+
+/* the paused status keeps breathing — the ONLY motion while paused */
+.pill--paused .pill__dot { animation: tv-breathe 2.4s ease-in-out infinite; }
+
+/* ── A7 final celebration (final_pass ONLY) ─────────────────────────── */
+
+.final-celebration {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  pointer-events: none;
+  z-index: 50;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(255, 255, 255, 0.94),
+    rgba(255, 255, 255, 0.72) 62%,
+    transparent
+  );
+}
+
+.final-celebration__emoji {
+  font-size: 88px;
+  line-height: 1;
+}
+
+.final-celebration__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--tv-success);
+}
+
+.final-celebration__label {
+  margin: 0;
+  font-size: 13px;
+  color: var(--tv-ink-soft);
+}
+
 /* ── reduced motion: honor the OS preference everywhere ─────────────── */
 
 @media (prefers-reduced-motion: reduce) {
@@ -299,5 +668,9 @@
     transition: none;
     transform: none;
   }
-  .pulse-node, .pill--running .pill__dot { animation: none; }
+  .pulse-node, .pill--running .pill__dot, .pill--paused .pill__dot {
+    animation: none;
+  }
+  .snake__node--executing .snake__dot { animation: none; }
+  .checkpoint-chip--reached { animation: none; }
 }

@@ -2,11 +2,15 @@
  * transport — the island's REAL connection to the A2UI server half
  * (`taskvm/workspace_ui/a2ui_transport.py`).
  *
- * One EventSource carries both streams:
+ * One EventSource carries three streams:
  *  - default (unnamed) SSE events `{"type":"a2ui","seq":N,"message":…}`
  *    — ordered A2UI protocol messages, resumable via `?after=N`;
  *  - named `progress` events — the §20.1 progressive-plane signals
- *    (goal | t1 | t2 | ready | a2ui_failed | goal_failed).
+ *    (goal | t1 | t2 | ready | a2ui_failed | goal_failed);
+ *  - named `governance` events — the A7 motion signals (frozen contract
+ *    with agentAPP.6: checkpoint_added | checkpoint_reached | rollback |
+ *    pause | resume | stop | node_verified | node_failed | final_pass |
+ *    final_fail).
  *
  * Reconnect discipline: on error the client CLOSES and re-opens with its
  * OWN cursor (EventSource's built-in retry would replay from the
@@ -15,6 +19,7 @@
  * morph hints (the small server ring replays them on reconnect).
  */
 import type { A2uiMessage } from './protocol';
+import { parseGovernanceSignal, type GovernanceSignal } from './governanceEvents';
 
 export type A2uiConnectionState = 'connecting' | 'open' | 'reconnecting';
 
@@ -34,6 +39,8 @@ export interface A2uiConnectionOptions {
   onMessages: (messages: A2uiMessage[]) => void;
   /** Transient progressive-plane signals. */
   onProgress: (event: ProgressSignal) => void;
+  /** Governance motion signals (A7). Malformed frames are dropped. */
+  onGovernance?: (event: GovernanceSignal) => void;
   onConnectionChange?: (state: A2uiConnectionState) => void;
 }
 
@@ -72,6 +79,18 @@ export function connectA2ui(opts: A2uiConnectionOptions): A2uiConnection {
         opts.onProgress(JSON.parse((ev as MessageEvent).data as string));
       } catch {
         // observability hint only — a bad frame is ignored
+      }
+    });
+    es.addEventListener('governance', (ev) => {
+      try {
+        const signal = parseGovernanceSignal(
+          JSON.parse((ev as MessageEvent).data as string),
+        );
+        // malformed frames (wrong type / unknown kind) are dropped —
+        // never a guessed governance verdict
+        if (signal !== null) opts.onGovernance?.(signal);
+      } catch {
+        // same discipline: a bad frame is ignored
       }
     });
     es.onerror = () => {
