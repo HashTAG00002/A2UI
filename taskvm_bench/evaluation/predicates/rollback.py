@@ -114,13 +114,37 @@ def checks(spec: TaskSpec, bundle: EvidenceBundle) -> list[CheckResult]:
             f"{rb.op_id}: no irreversible key moved in the rollback window"))
 
         # ── 4. real GUI compensation trajectory ─────────────────────────
-        gui_ok = (rb.gui_actions > 0) or not needs_undo
+        # The real-GUI evidence is the bracket's PUBLIC SSE vocabulary:
+        # the forward loop's per-gesture markers (``action.observed`` /
+        # ``action.landed`` — what ``gui_actions`` counts) OR the
+        # CompensationExecutor's per-entry trail (``compensation.entry``).
+        # GATE-G0 r11 postmortem (2026-08-20, eval_results/
+        # audit_gate_g0_r11_postmortem_20260820.json): the executor
+        # (runtime.md §7, FROZEN) is BY CONSTRUCTION the real-GUI path —
+        # its only world-write primitive is ``substrate.act`` — but it
+        # publishes one ``compensation.entry`` frame per plan entry
+        # (after that entry's gestures land), never the forward loop's
+        # per-gesture markers. r11 was the FIRST round ever with a
+        # non-empty compensation plan (the r10 kernel fix made
+        # icon-color-blind writes compensable): the executor's 4 real
+        # gestures (bridge /api/act 15:00:54-15:02:08, all 200) restored
+        # the world exactly, yet this check read gui_actions==0 and
+        # failed. A hidden write emits NEITHER marker kind, and the
+        # outcome side is independently pinned by the restored /
+        # hidden-write / disposition conjuncts — the entry trace is safe
+        # to accept.
+        comp_trace = sum(
+            1 for env in (rb.sse_window or [])
+            if isinstance(env, dict)
+            and env.get("sse_type") == "compensation.entry")
+        gui_ok = (rb.gui_actions > 0 or comp_trace > 0) or not needs_undo
         out.append(CheckResult(
             "ROLLBACK_NO_GUI_COMPENSATION", gui_ok,
             (f"{rb.op_id}: 0 GUI actions inside the rollback bracket "
              f"(restore did not go through the real GUI)")
             if not gui_ok else
-            f"{rb.op_id}: {rb.gui_actions} GUI action(s) in the bracket"
+            f"{rb.op_id}: {rb.gui_actions} GUI action(s) + "
+            f"{comp_trace} compensation-entry trace(s) in the bracket"
             + ("" if needs_undo else " (nothing to undo)")))
 
         # ── 5. no hidden world-write restore (eval plane stayed out) ─────

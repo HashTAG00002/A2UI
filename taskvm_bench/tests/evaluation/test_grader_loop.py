@@ -442,6 +442,28 @@ def test_rollback_without_gui_compensation_is_caught():
     assert verdict.failure_codes == ("ROLLBACK_NO_GUI_COMPENSATION",)
 
 
+def test_rollback_compensation_entry_trace_counts_as_real_gui():
+    """GATE-G0 r11 (2026-08-20): the CompensationExecutor (runtime.md
+    §7, FROZEN) publishes one ``compensation.entry`` frame per plan
+    entry and NEVER the forward loop's per-gesture markers — its only
+    world-write primitive is ``substrate.act``, so its public per-entry
+    trace IS the real-GUI trajectory. A rollback bracket carrying the
+    entry trace (and zero ``action.*`` markers, gui_actions==0) must
+    NOT fail ROLLBACK_NO_GUI_COMPENSATION — and nothing else may fail
+    either (the exact r11 shape: world restored, disposition complete,
+    no hidden write)."""
+    port = _port()
+    steps = [
+        (UserOp.checkpoint("cp"), {}),
+        (UserOp.local_patch({"status": "published", "audit_seq": "4"}), {}),
+        (UserOp.rollback("ckpt-1"),
+         {"gui_sse": ("compensation.entry", "compensation.entry")}),
+    ]
+    bundle, _ = run_program(SPEC, port, steps)
+    verdict = grade_task(SPEC, bundle)
+    assert verdict.failure_codes == ()
+
+
 def test_hidden_eval_restore_after_rollback_is_caught():
     """The eval plane itself re-wrote a value after the rollback request
     — only the system may move the world inside that window."""
