@@ -105,6 +105,186 @@
 %%\citestyle{acmauthoryear}
 
 
+%% ============================================================
+%% CONCEPT ANCHOR BANK --- TaskVM 概念锚点库（关键词/关键句堆叠版）
+%% ============================================================
+%% 来源（全部可回溯验证，无幻觉）：
+%%   * docs/A2UI_开工大纲_v0_心智模型对齐版.md         （五种性质/最终研究主张）
+%%   * docs/A2UI_开工大纲_v0_心智模型对齐版_老版本.md   （五锚点/VM类比/竞品逐篇核对）
+%%   * 学城 2768527655（核心构念）/ 2775060360（研究偏好）/ 2767073903（AI->HCI 术语转换）
+%%   * taskvm/ 与 taskvm_bench/ 真实实现（模块名逐一核对：
+%%     domain/contract.py, architect/{compiler,noleak}.py, genui/decoder.py,
+%%     runtime/{autonomy,compensation}.py, substrate/port.py,
+%%     governance/service.py, verifier/visible.py, projection/app.py,
+%%     taskvm_bench/benchmark/schema.py, evaluation/{funnel,predicates/*}.py）
+%% 写作规则：从这里取词，不另造同义词变体；每条锚点最终必须落到正文某一节。
+%% ============================================================
+%%
+%% -- 0. THESIS / 一句话主线 ----------------------------------
+%%    Humans govern tasks; agents operate applications.
+%%    （人治理任务，Agent 自治应用。）
+%%    From application-centric interaction to task-native governance.
+%%    Frozen RQ: Can an agent compile live, fragmented application state
+%%    into a task virtual machine that users can govern --- manipulating
+%%    a bidirectional projection to drive, roll back, and verify
+%%    cross-application effects across heterogeneous existing software?
+%%    Strongest single-sentence claim: the user governs a task virtual
+%%    machine projected from live cross-application state, while the
+%%    agent realizes and verifies that state in heterogeneous software
+%%    --- and the projection stays faithful, reversible, and
+%%    substrate-independent.
+%%
+%% -- 1. PARADIGM / 范式锚点（与旧范式的分水岭）---------------
+%%    task-native interaction; the task as the unit of interaction;
+%%    applications as replaceable execution substrate;
+%%    the "JVM moment" for human--agent interaction
+%%    (one task semantics across many software stacks;
+%%     write once, govern anywhere);
+%%    a compiler, not a generator (bottom-up compilation of live state,
+%%    NOT top-down generation from prompts);
+%%    interaction compression: N heterogeneous apps -> one unified,
+%%    low-cognitive-load task surface;
+%%    the first-class object is task state (VM-state), NOT agent trajectory
+%%    (users face "what the world is", not "what the agent intends");
+%%    you govern the world, not the agent's plan;
+%%    governance over autonomy (NOT human-in-the-loop approval);
+%%    supervision is delegated to an independent verifier, never to a human;
+%%    opposite in direction to agent-supervision paradigms
+%%    (AgentLens/ALLOY supervise the agent; TaskVM governs world state).
+%%
+%% -- 2. PROJECTION / 投影锚点 ---------------------------------
+%%    bottom-up live projection (compiled FROM the live state of real
+%%    running applications);
+%%    GUI agent as encoder, GenUI model as decoder
+%%    (two independent model roles, two calls, never shared context);
+%%    faithful projection (the surface is a projection of external apps,
+%%    NEVER the source of truth);
+%%    dynamic re-projection (SSE live deltas; the projection follows the
+%%    world, not the user's refresh button);
+%%    reconciliation (external concurrent edits surface as visible
+%%    conflicts, never silently overwritten);
+%%    two-zone interface: read-only faithful view of "what the world is"
+%%    + read-write governance console of "what I want it to become".
+%%
+%% -- 3. GUI-ONLY PURITY / GUI 纯洁性红线 ----------------------
+%%    the one-question test: "Could a real user see this string on the
+%%    rendered screen?";
+%%    zero internal IDs in model inputs (no entity ids, no operator
+%%    jargon, no DOM attributes, no deep links) --- architect/noleak.py;
+%%    every task variable carries verbatim visible evidence;
+%%    the anti-backdoor rule: a write that needs no rendered page and no
+%%    simulated click is a backdoor;
+%%    write paths go through real GUI gestures only;
+%%    hardcoding is the enemy of open-world generalization.
+%%
+%% -- 4. BIDIRECTIONAL EXECUTABILITY / 双向可执行与真实写回 ----
+%%    bidirectional executable binding: one VM variable <-> many
+%%    heterogeneous app objects + write-back operators;
+%%    fan-out: one semantic edit -> coordinated multi-app real changes;
+%%    real write-back verified against canonical ground truth;
+%%    the JavaVM analogy (users write VM variables; TaskVM translates
+%%    them into real app writes, as the JVM translates object writes
+%%    into memory writes);
+%%    substrate-neutral semantic ActionContract: WHAT must become true,
+%%    never HOW a platform performs it; locating = visible evidence
+%%    (domain/contract.py).
+%%
+%% -- 5. GOVERNANCE & TRANSACTIONS / 治理与事务 ----------------
+%%    checkpoints as transactional boundaries;
+%%    rollback = real compensation of real app changes (saga-style,
+%%    derived from the kernel's own committed action history),
+%%    NOT internal-model cheap rollback;
+%%    "Jelly rolls back a model; TaskVM rolls back reality.";
+%%    honest irreversibility: reversible / partially reversible /
+%%    irreversible, visibly locked in the UI, never faked
+%%    (domain/contract.py::Reversibility);
+%%    hot governance: pause / local patch / goal patch / rollback land
+%%    mid-execution; stale agent responses are discarded by the kernel
+%%    gate (runtime/autonomy.py);
+%%    goal patch keeps valid history, recomposes only the affected future;
+%%    NEVER "human approves each step to continue"
+%%    (the supervision paradigm this work replaces).
+%%
+%% -- 6. VERIFICATION / 独立验证 --------------------------------
+%%    round-trip loop: Observe -> Abstract -> Project -> Manipulate ->
+%%    Compile -> Execute -> Verify -> Reconcile (+ Rollback);
+%%    CUA done != verified (an independent verifier reads FRESH visible
+%%    observation --- verifier/visible.py);
+%%    the verifier never comes from the model that generated the binding;
+%%    non-interference as a hard gate (required changes happened AND
+%%    protected objects untouched);
+%%    witness predicates close the no-op loophole
+%%    (bench evaluation/predicates/world.py);
+%%    negative controls must fail (an instrument that cannot fail
+%%    proves nothing);
+%%    ground truth from hidden canonical state, never self-report.
+%%
+%% -- 7. SUBSTRATE INDEPENDENCE / 跨应用・跨平台・跨设备 -------
+%%    substrate independence / the JVM moment: same task intent across
+%%    different stacks --- stable surface, identical user operations,
+%%    consistent task semantics, completely different execution traces;
+%%    one runtime, three substrates (builtin web apps / OSWorld desktop /
+%%    MobileGym mobile --- substrate/);
+%%    strict permission isolation: SubstrateSession (human powers only:
+%%    observe + real GUI gestures) vs EvaluationEnvironment (exam-room
+%%    powers: reset/seed/oracle) --- never leaked into runtime capability
+%%    (substrate/port.py);
+%%    cross-device as the next frontier (the task layer outlives any
+%%    single app, platform, or device);
+%%    "Like the database freed data from disk sectors, TaskVM frees
+%%    tasks from applications."
+%%
+%% -- 8. EVALUATION PROTOCOL / bench 设计特性 -------------------
+%%    a measurement instrument, not a leaderboard;
+%%    12 structural task families = control-flow/governance structures,
+%%    NOT apps: SEQUENCE / FANOUT-FANIN / BOUNDED-LOOP / CROSS-APP /
+%%    GOAL-PATCH / LOCAL-PATCH / INTERRUPTION / CONFLICT / ROLLBACK /
+%%    UI-DRIFT / PARTIAL-FAILURE / IRREVERSIBLE (benchmark/schema.py);
+%%    5 open-world splits, reported separately, never merged:
+%%    ID / TASK-HOLDOUT / OPERATION-HOLDOUT / SURFACE-HOLDOUT /
+%%    CROSS-PRODUCT;
+%%    deterministic injections: external field change / goal patch /
+%%    local patch / rollback request / pause-resume / UI drift / lane
+%%    failure;
+%%    the exam room sets the scene, never hands answers (seed/success/
+%%    protected read only by the evaluation plane);
+%%    stage survival funnel (where trials die: requested -> materialized
+%%    -> bootstrap -> compiler -> architect -> CUA -> complete -> strict
+%%    pass --- evaluation/funnel.py);
+%%    human upper bound as a calibration anchor, not a baseline to beat
+%%    (baselines/human_upper_bound.py);
+%%    three-layer reporting: task-success non-inferiority + VM fidelity
+%%    (coverage/binding/round-trip/non-interference/reconciliation/
+%%    rollback/substrate-invariance/OOD) + human governance value.
+%%
+%% -- 9. ZINGERS / 审稿人一眼分清的锋利句 ---------------------
+%%    "Morae projects a choice. AgentLens projects a conversation. ALLOY
+%%    projects a procedure. Jelly projects an internal model. SaC
+%%    projects an app-as-state. Sidekick renders a dashboard. TaskVM
+%%    projects the live state of the software world --- and lets you
+%%    govern it.";
+%%    "SaC's future work is our contribution: write-back, transactional
+%%    consistency, frontend state synchronization --- they named the gap;
+%%    we closed it.";
+%%    "Jelly rolls back a model; TaskVM rolls back reality.";
+%%    teaser arc (four steps no prior system can reproduce): edit one
+%%    variable -> real multi-app write-back -> verifier non-interference
+%%    -> undo restores reality -> external edit reconciles -> same edit
+%%    across two stacks, surface unchanged;
+%%    "What the interface shows is the world as it is; what the user does
+%%    is decide what it becomes.";
+%%    the discriminative question: what does this interface project,
+%%    what does manipulating it change, can it be rolled back, is it
+%%    independently verified, does it transfer across substrates?
+%%
+%% -- 10. UX ANCHORS / 目标用户体验 ----------------------------
+%%    clarity (know which state is being realized, not watch a mouse
+%%    wander); control without micromanagement; verified progress, not
+%%    self-claimed completion; low cognitive load (govern one surface,
+%%    not supervise N apps); honest conflict / uncertainty /
+%%    irreversibility always visible; play that comes from moving a live
+%%    multi-app world, not from badges.
+%% ============================================================
 %%
 %% end of the preamble, start of the body of the document source.
 \begin{document}
@@ -112,7 +292,7 @@
 %%
 %% The "title" command has an optional parameter,
 %% allowing the author to define a "short title" to be used in page headers.
-\title{The Name of the Title Is Hope}
+\title[TaskVM: Humans Govern Tasks, Agents Operate Applications]{TaskVM: Humans Govern Tasks, Agents Operate Applications---Compiling Live Software into a Task Virtual Machine}
 
 %%
 %% The "author" command and its associated commands are used to define
@@ -243,8 +423,7 @@
 %%
 %% Keywords. The author(s) should pick words that accurately describe
 %% the work being presented. Separate the keywords with commas.
-\keywords{Do, Not, Use, This, Code, Put, the, Correct, Terms, for,
-  Your, Paper}
+\keywords{human--agent interaction, generative UI, GUI agents, computer-use agents, task virtual machine, bidirectional binding, faithful projection, governance, reversibility, verifiable agent behavior, cross-application interaction, substrate independence}
 %% A "teaser" image appears between the author and affiliation
 %% information and the body of the document, and typically spans the
 %% page.

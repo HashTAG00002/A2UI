@@ -206,6 +206,17 @@
 
 R2-R5 的各族工单都会追加 `tasks.py` 和 predicate 模板——**R1 落地时就把 predicate 按干预类型分文件**（`predicates/rollback.py`、`predicates/local_patch.py`…），各族只写自己的文件 + 自己的 TaskSpec，`tasks.py` 用 append-only 约定避免 merge 冲突。`bridge.py` 在 R3 期间对 APP 线只读。
 
+### 6.5 第一波四 agent 并行拆分（2026-08-19，owner 指令：无视排期，现在能做的全做）
+
+| agent | 任务包（milestone 卡编号） | 独占文件区 |
+|---|---|---|
+| **agentRM.1** | W0.2 + GATE-ARCH 重跑 + R1（fake-port 先行，真模型后置）+ 本区注释清零 | `taskvm/domain/`、`taskvm/architect/`、`taskvm_bench/**` |
+| **agentRM.2** | R3 + R4 + skills 目录骨架（R2.5 前置件）+ 冻结层注释清零（kernel/governance/runtime/projection）+ 本区注释清零 | `taskvm/substrate/**`、`taskvm/verifier/`、`taskvm/skills/**`（新） |
+| **agentAPP.1** | A1 + A3 + A5 island 骨架 + 渐进式任务面骨架（"新世界"构建者） | `docs/A2UI-protocol-spec/**`、`taskvm/genui/**`（新）、`taskvm/workspace_ui/a2ui_client/**` |
+| **agentAPP.2** | A9.0 延迟审计 + A2 删假开放入口 + A9.1 止血层 + §20.2 路由 scaffold + 本区注释清零（"旧世界"修缮者） | `taskvm/workspace_ui/**` 中 server.py / app_open.py / static/ / composition.py（a2ui_client 与 call_archive.py 除外，后者只读） |
+
+协调规则：① 真实模型调用错峰（RM.1 的 GATE-ARCH 重跑优先，APP.2 的 A9.0 实测随后短跑）；② RM.1 用独立端口跑自己的栈实例，与 APP.2 调试栈隔离；③ RM.1 判分只消费现有 oracle HTTP 契约，RM.2 负 legacy 路由兼容期可用；④ `server.py` 本波仅 APP.2 可改（APP.1 的 island transport 用 mock 消息驱动，真接线下一波）；⑤ 各 agent 交付时在本表追加一行完成状态。
+
 ---
 
 ## 7. 文件所有权矩阵（防冲突铁律）
