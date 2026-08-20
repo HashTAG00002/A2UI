@@ -47,6 +47,70 @@ _TRANSITIONS: dict[NodeStatus, frozenset[NodeStatus]] = {
     NodeStatus.INVALIDATED: frozenset(),
 }
 
+# statuses at which a container counts as SCHEDULED for the own-parent
+# dependency rule of ``schedulable_nodes`` (RFC-container-autocommit)
+_SCHEDULED = (NodeStatus.READY, NodeStatus.RUNNING, NodeStatus.COMMITTED)
+
+
+def schedulable_nodes(
+        graph: WorkflowGraph,
+        statuses: dict[str, NodeStatus]) -> tuple[WorkflowNode, ...]:
+    """Kernel readiness — the domain's ``ready_nodes`` rule plus ONE
+    relaxation (RFC-container-autocommit, GATE-G0 r13 postmortem /
+    owner ruling 2026-08-20): a ``depends_on`` entry naming the node's
+    OWN parent container (SEQUENCE / FAN_OUT) states
+    ordering-WITHIN-the-container — membership already implies it — so
+    the entry is satisfied once that container is SCHEDULED (READY /
+    RUNNING / COMMITTED), not only after the container has fully
+    committed.
+
+    Without the relaxation the prompt-sanctioned lane shape
+    ``after: ["<checkpoint>", "<its own fan-out container>"]`` deadlocks
+    (GATE-G0 r13): the lane waits for the container to COMMIT while the
+    container auto-commits only once every child — including that very
+    lane — has COMMITTED. That semantic cycle is invisible to the graph's
+    ``_check_acyclic`` (container membership is not a depends_on edge OF
+    the container), so the fix belongs in readiness semantics, not in
+    validation.
+
+    BOUNDED_LOOP is deliberately excluded: a loop body is schedulable
+    only while its loop is RUNNING (the kernel's loop protocol owns
+    iteration gating) and a loop commits only on a true termination
+    predicate — a body node naming its own loop keeps the strict
+    COMMITTED requirement.
+
+    Regression lock: for any graph where NO node lists its own parent
+    in ``depends_on``, the output is EXACTLY ``graph.ready_nodes
+    (statuses)`` — same nodes, same order — so flat chains and single
+    chains schedule byte-identically (the r11/r12 shapes).
+    """
+    kinds = {n.node_id: n.kind for n in graph.nodes}
+    out: list[WorkflowNode] = []
+    for n in graph.nodes:
+        st = statuses.get(n.node_id, NodeStatus.PENDING)
+        if st not in (NodeStatus.PENDING, NodeStatus.READY):
+            continue
+        if n.parent_id is not None:
+            pst = statuses.get(n.parent_id, NodeStatus.PENDING)
+            if kinds[n.parent_id] is NodeKind.BOUNDED_LOOP:
+                if pst is not NodeStatus.RUNNING:
+                    continue
+            elif pst not in _SCHEDULED:
+                continue
+        ok = True
+        for d in n.depends_on:
+            if (d == n.parent_id
+                    and kinds[d] in (NodeKind.SEQUENCE, NodeKind.FAN_OUT)
+                    and statuses.get(d, NodeStatus.PENDING) in _SCHEDULED):
+                continue    # own container: ordering-within-container,
+                            # satisfied at scheduling level
+            if statuses.get(d, NodeStatus.PENDING) is not NodeStatus.COMMITTED:
+                ok = False
+                break
+        if ok:
+            out.append(n)
+    return tuple(out)
+
 
 class WorkflowStore:
     """Holds the current WorkflowGraph + per-node status for one session."""
@@ -261,6 +325,12 @@ class WorkflowStore:
         containers whose children have ALL committed (a finished
         fan-out/sequence is itself complete).
 
+        Readiness uses ``schedulable_nodes`` — the domain rule plus the
+        own-parent-container relaxation (RFC-container-autocommit):
+        a lane naming its own container in depends_on is schedulable
+        once the container is scheduled, which is exactly what makes the
+        prompt-sanctioned r13 lane shape executable.
+
         BOUNDED_LOOP is deliberately EXCLUDED from auto-commit: a loop
         commits only when its termination predicate evaluates true via the
         kernel's loop protocol — one fully-committed body pass says
@@ -269,7 +339,7 @@ class WorkflowStore:
             return
         while True:
             changed = False
-            for n in self._graph.ready_nodes(self._statuses):
+            for n in schedulable_nodes(self._graph, self._statuses):
                 if self._statuses.get(n.node_id) is NodeStatus.PENDING:
                     self._statuses[n.node_id] = NodeStatus.READY
                     changed = True

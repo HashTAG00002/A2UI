@@ -164,9 +164,10 @@ Keep the topology FLAT and SIMPLE: prefer at most ONE top-level container \
 fan-out+barrier as a self-contained pair at one position in the main flow \
 rather than splitting the barrier into a different container. A barrier \
 should depend on its fan-out (or the fan-out's lanes) and be the fan-out's \
-direct successor — do NOT place a barrier inside a sequence while its \
-fan-out is a separate top-level node, as this creates cross-container \
-dependencies that can deadlock the scheduler.
+direct successor — both forms are fully supported: a container is \
+committed automatically once all its children have committed, so 'after' \
+may name the container itself or its lanes, and a lane may also wait \
+'after' its own container (that simply orders it within the fan-out).
 Output ONLY the JSON object."""
 
 

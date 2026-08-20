@@ -31,6 +31,7 @@ from taskvm.domain.results import VerificationResult
 from taskvm.domain.workflow import (
     NodeKind, NodeStatus, WorkflowNode,
 )
+from taskvm.kernel import schedulable_nodes
 from taskvm.substrate import IrreversibleAction
 
 from taskvm.runtime.compensation import CompensationExecutor
@@ -115,8 +116,13 @@ class AutonomyRuntime:
                               detail="forward autonomy blocked by the kernel "
                                      "at loop evaluation; safe stop")
                 return BLOCKED
-            # 2. pull ready actionable nodes
-            ready = [n for n in graph.ready_nodes(statuses)
+            # 2. pull ready actionable nodes — the SAME kernel readiness
+            # rule the store applies when marking READY
+            # (taskvm.kernel.schedulable_nodes: the domain rule + the
+            # own-parent-container relaxation, RFC-container-autocommit),
+            # so a lane naming its own container in depends_on is pulled
+            # exactly when the store marked it READY (GATE-G0 r13).
+            ready = [n for n in schedulable_nodes(graph, statuses)
                      if n.kind in (NodeKind.ACTION, NodeKind.VERIFY,
                                    NodeKind.CHECKPOINT, NodeKind.BARRIER,
                                    NodeKind.TERMINAL, NodeKind.BOUNDED_LOOP)]
