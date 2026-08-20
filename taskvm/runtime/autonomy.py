@@ -452,6 +452,9 @@ class AutonomyRuntime:
         invalid = 0
         acts: list[str] = []          # provenance for the repair context
         is_repair = bool(repair_note)
+        last_receipt = None           # the substrate's answer to the previous
+        #                              gesture — fed back to the adapter when
+        #                              it opts in (GATE-G0 r9 receipt loop)
         while actions < self._budgets.max_actions_per_contract:
             if self._paused or self._stopped:
                 return "stopped", ""
@@ -464,9 +467,10 @@ class AutonomyRuntime:
             # invalid JSON / unparseable) are model calls but NEVER GUI
             # actions and are bounded by a small per-contract ceiling (§5).
             try:
-                decision = self._cua.predict_action(
+                decision = self._predict_action(
                     goal=goal, observation=latest_obs, labels=labels,
-                    attempt=actions + invalid + 1, model=self._model)
+                    attempt=actions + invalid + 1, model=self._model,
+                    last_receipt=last_receipt)
             except Exception as e:            # provider/parse failure
                 invalid += 1
                 self._model_calls += 1
@@ -542,8 +546,8 @@ class AutonomyRuntime:
             elif self._kernel.epoch != request_epoch:
                 return "stopped", ""      # epoch bumped mid-contract — discard
             try:
-                self._substrate.act(surface, gesture,
-                                    epoch=str(self._kernel.epoch))
+                last_receipt = self._substrate.act(
+                    surface, gesture, epoch=str(self._kernel.epoch))
             except IrreversibleAction:
                 self._land_fail(node, action_id, started,
                                 "irreversible action unavailable on substrate")
@@ -564,6 +568,32 @@ class AutonomyRuntime:
         # action budget exhausted without DONE — safe stop, no blind rerun
         self._safe_pause(BUDGET_EXHAUSTED)
         return "stopped", ""
+
+    def _predict_action(self, *, goal: str, observation: Any,
+                        labels: Mapping[str, str], attempt: int,
+                        model: str | None, last_receipt: Any):
+        """One CUA prediction, optionally feeding the PREVIOUS gesture's
+        substrate receipt back to the adapter.
+
+        Receipt feedback is OPT-IN via the duck-typed
+        ``accepts_action_receipt`` attribute (same pattern as
+        ``records_own_ledger``): an adapter that declares it receives the
+        honest ``ActionReceipt`` of the last gesture (status/detail — the
+        rendered world's factual answer, e.g. 'failed — unknown app'); the
+        model otherwise never sees WHY its gesture had no effect and can
+        only guess at an unchanged screen (GATE-G0 r9 postmortem: the
+        "unknown app" receipt never reached the model, which burned its
+        whole budget re-guessing). Adapters WITHOUT the declaration keep
+        the frozen call surface — the kwarg is never passed, so test fakes
+        stay signature-compatible on every path."""
+        if (last_receipt is not None
+                and getattr(self._cua, "accepts_action_receipt", False)):
+            return self._cua.predict_action(
+                goal=goal, observation=observation, labels=labels,
+                attempt=attempt, model=model, last_receipt=last_receipt)
+        return self._cua.predict_action(
+            goal=goal, observation=observation, labels=labels,
+            attempt=attempt, model=model)
 
     def _observe_and_fold(self, node: WorkflowNode, surface: str,
                           *, gesture: "object | None" = None

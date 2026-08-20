@@ -106,12 +106,24 @@ class CUAModel(Protocol):
     exception). The runtime then never appends rows of its own for that
     adapter — it only ANNOTATES the adapter's row via ``request_id`` when
     the decision carries one. Adapters without the attribute (test fakes)
-    keep the default contract: the runtime records their calls."""
+    keep the default contract: the runtime records their calls.
+
+    Receipt feedback (GATE-G0 r9 postmortem): an adapter may declare
+    ``accepts_action_receipt = True`` (duck-typed, same pattern as
+    ``records_own_ledger``). The runtime then passes the substrate's
+    ``ActionReceipt`` of the PREVIOUS gesture as ``last_receipt`` so the
+    adapter can show the model the rendered world's factual answer to its
+    last gesture (e.g. ``failed — unknown app``) — the receipt is visible-
+    world feedback, GUI-only legal, never an internal id. Adapters without
+    the declaration keep the frozen call surface (the runtime never passes
+    the kwarg — fakes stay signature-compatible).
+    """
 
     def predict_action(self, *, goal: str, observation: Observation,
                        labels: Mapping[str, str] | None = None,
                        attempt: int = 1,
-                       model: str | None = None) -> CUADecision: ...
+                       model: str | None = None,
+                       last_receipt: Any = None) -> CUADecision: ...
 
 
 @runtime_checkable

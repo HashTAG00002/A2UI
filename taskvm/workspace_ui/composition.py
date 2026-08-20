@@ -146,6 +146,13 @@ class HttpCUAModel:
     #: Promise: this adapter owns its ledger rows (see class docstring)
     records_own_ledger = True
 
+    #: Promise: this adapter consumes the previous gesture's honest
+    #: substrate receipt (``ActionReceipt`` — the rendered world's factual
+    #: answer to the model's last gesture) and shows it in the user prompt
+    #: (GATE-G0 r9: the "unknown app" receipt never reached the model,
+    #: which could only guess at an unchanged screen).
+    accepts_action_receipt = True
+
     def __init__(self, port: ModelPort | None = None,
                  ledger: ModelCallLedger | None = None) -> None:
         self._port = port or HttpModelPort()
@@ -162,11 +169,14 @@ class HttpCUAModel:
     def predict_action(self, *, goal: str, observation: Observation,
                        labels: Mapping[str, str] | None = None,
                        attempt: int = 1, model: str | None = None,
+                       last_receipt: Any = None,
                        ) -> CUADecision:
         visible = getattr(observation, "visible_text", "") or ""
         retry = (f"\n（第 {attempt} 次重试：上一次操作没有完成任务，请确认修改"
                  "确实生效后再报告完成。）") if attempt > 1 else ""
-        user = (f"## 操作目标\n{goal}{retry}\n\n## 屏幕可见文本\n{visible}")
+        receipt_note = self._receipt_note(last_receipt)
+        user = (f"## 操作目标\n{goal}{retry}{receipt_note}"
+                f"\n\n## 屏幕可见文本\n{visible}")
         # Vision-capable path — a fresh screenshot travels as the
         # multimodal image part (HttpModelPort.complete_json's
         # ``image_data_url``), NEVER as prompt text. Only a real data URL
@@ -214,6 +224,29 @@ class HttpCUAModel:
         self._record(request_id, ok=decision.kind is not CUADecisionKind.FAIL,
                      model=model, reply=reply)
         return _replace(decision, request_id=request_id)
+
+    # ── receipt feedback (GATE-G0 r9) ─────────────────────────────────────
+    @staticmethod
+    def _receipt_note(last_receipt: Any) -> str:
+        """Render the PREVIOUS gesture's substrate receipt into the user
+        prompt — only when it says the gesture did NOT take effect. The
+        receipt is the rendered world's factual answer (status/detail of
+        the real GUI bridge, e.g. 'failed — unknown app'); GUI-only legal
+        feedback, never an internal id. A clean 'ok' receipt carries no
+        information the fresh screenshot doesn't and is omitted."""
+        if last_receipt is None:
+            return ""
+        status = str(getattr(last_receipt, "status", "") or "").strip()
+        if not status or status == "ok":
+            return ""
+        detail = str(getattr(last_receipt, "detail", "") or "").strip()
+        act = getattr(last_receipt, "action", None)
+        act_kind = str(getattr(act, "kind", "") or "").strip()
+        kind_note = f"（{act_kind}）" if act_kind else ""
+        detail_note = f" — {detail}" if detail else ""
+        return (f"\n\n## 上一次操作回执\n你上一个操作{kind_note}没有生效："
+                f"{status}{detail_note}。这是应用对上一个手势的真实回答，"
+                f"请据此调整本次操作，不要原样重试。")
 
     # ── ledger ───────────────────────────────────────────────────────────
     def _mint_request_id(self) -> str:

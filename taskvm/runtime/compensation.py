@@ -124,6 +124,8 @@ class CompensationExecutor:
         target = entry.to_observed
         final_observed: Any = entry.from_observed
         invalid = 0
+        last_receipt = None   # the substrate's answer to the previous
+        #                     compensation gesture (GATE-G0 r9 receipt loop)
         for attempt in range(1, self._budgets.max_actions_per_contract + 1):
             # stale plan: governance bumped the epoch mid-compensation → stop
             # acting; record_compensation_result will return "discarded".
@@ -141,9 +143,21 @@ class CompensationExecutor:
                     final_observed=final_observed, compensated=False)
             obs = self._sync.observe_active(surface_id)
             try:
-                decision = self._cua.predict_action(
-                    goal=goal, observation=obs, labels=labels,
-                    attempt=attempt, model=model)
+                # receipt feedback is OPT-IN (duck-typed
+                # ``accepts_action_receipt``): the adapter that declares it
+                # sees the previous gesture's honest substrate receipt —
+                # fakes keep the frozen call surface (GATE-G0 r9).
+                if (last_receipt is not None
+                        and getattr(self._cua, "accepts_action_receipt",
+                                    False)):
+                    decision = self._cua.predict_action(
+                        goal=goal, observation=obs, labels=labels,
+                        attempt=attempt, model=model,
+                        last_receipt=last_receipt)
+                else:
+                    decision = self._cua.predict_action(
+                        goal=goal, observation=obs, labels=labels,
+                        attempt=attempt, model=model)
             except Exception as e:          # provider / parse failure — same
                 # honest accounting as the forward loop (runtime.md §5):
                 # a model call that produced NO usable prediction, bounded
@@ -176,8 +190,9 @@ class CompensationExecutor:
                     node_id=entry.node_id, semantic_key=entry.semantic_key,
                     final_observed=final_observed, compensated=False)
             try:
-                self._substrate.act(surface_id, decision.action,
-                                    epoch=str(self._kernel.epoch))
+                last_receipt = self._substrate.act(
+                    surface_id, decision.action,
+                    epoch=str(self._kernel.epoch))
             except IrreversibleAction:
                 # honest: the substrate has no real-UI way to undo → not
                 # compensated, never a hidden DB write (runtime.md §7).
