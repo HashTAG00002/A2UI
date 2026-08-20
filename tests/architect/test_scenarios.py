@@ -38,8 +38,8 @@ from taskvm.architect import (
 )
 from taskvm.architect.noleak import assert_prompt_clean
 from taskvm.domain import (
-    ActionContract, NodeKind, Reversibility, SurfaceEvidence, SurfaceHandle,
-    TaskIntent, TaskVariable,
+    ActionContract, NodeKind, NodeStatus, Reversibility, SurfaceEvidence,
+    SurfaceHandle, TaskIntent, TaskVariable,
 )
 from taskvm.domain.patch import CompensationEntry
 
@@ -259,7 +259,7 @@ LOOP_JSON = {
          "reversibility": "reversible", "risk": "",
          "target_evidence": ["未分派任务"]},
         {"kind": "verify", "label": "核对分派", "container": "逐个分派",
-         "after": ["分派一个"], "condition": "当前任务负责人显示 Bob"},
+         "after": ["分派一个"], "condition": "batch_assignee == Bob"},
         {"kind": "terminal", "label": "完成", "after": ["逐个分派"]},
     ]},
 }
@@ -303,7 +303,7 @@ SEQUENCE_JSON = {
          "reversibility": "reversible", "risk": "",
          "target_evidence": ["发布会议"]},
         {"kind": "verify", "label": "核对新日期", "container": "排期推进",
-         "condition": "日历卡片显示 2026-08-18"},
+         "condition": "release_date == 2026-08-18"},
         {"kind": "action", "label": "同步文案截止", "container": "排期推进",
          "semantic_goal": "文案截止同步",
          "sets": {"copy_deadline": "2026-08-18"},
@@ -665,7 +665,7 @@ DEMO_GOAL3_JSON = {
          "reversibility": "partially_reversible", "risk": ""},
         {"kind": "verify", "label": "核验消息已发送",
          "container": "发送微信消息流程", "after": ["发送消息"],
-         "condition": "聊天页面顶部显示“黄勇”，且对话中可见已发送消息气泡"},
+         "condition": "message_recipient == 黄勇 and message_content ~= 明天上午十点开会"},
         {"kind": "terminal", "label": "消息发送完成"},
     ]},
     "projection": {"root": "微信消息任务卡", "components": [
@@ -805,7 +805,7 @@ def test_w02_contradictory_after_edge_rejected_with_specific_guidance():
              "completion": "日历卡片显示 2026-08-18",
              "reversibility": "reversible", "risk": ""},
             {"kind": "verify", "label": "核对新日期",
-             "container": "排期", "condition": "日历卡片显示 2026-08-18"},
+             "container": "排期", "condition": "release_date == 2026-08-18"},
             {"kind": "terminal", "label": "完成", "after": ["排期"]},
         ]},
     }
@@ -994,3 +994,72 @@ def test_r8_chain_fill_still_chains_unrelated_tops():
     # step1 and cp1 are both top-level and unrelated → auto-chained
     assert by_label["step1"].node_id in by_label["cp1"].depends_on, (
         "Unrelated top-level nodes should still be auto-chained")
+
+
+# ── r9: free-prose verify conditions are rejected at assembly ─────────────
+#
+# GATE-G0 r8 root cause: a Chinese free-text condition names no declared
+# variable, so VisibleVerifier._referenced_keys grounds NOTHING and the
+# check silently degrades to "every desired variable of the whole task" —
+# a mid-task verify node then fails until the ENTIRE task is finished and
+# the plan deadlocks downstream. The architect now rejects such a
+# condition at assembly (bounded repair round fixes it).
+
+FREE_PROSE_VERIFY_JSON = {
+    "variables": [
+        {"semantic_key": "bill_paid", "label": "账单支付状态",
+         "value_type": "boolean", "mutability": "editable",
+         "desired": True},
+    ],
+    "workflow": {"nodes": [
+        {"kind": "sequence", "label": "缴费流程"},
+        {"kind": "action", "label": "支付账单",
+         "container": "缴费流程",
+         "semantic_goal": "完成本月账单支付",
+         "sets": {"bill_paid": True},
+         "completion": "支付成功提示可见",
+         "reversibility": "reversible", "risk": "",
+         "target_evidence": ["支付按钮"]},
+        {"kind": "verify", "label": "确认支付",
+         "container": "缴费流程", "after": ["支付账单"],
+         "condition": "页面上显示支付成功的提示信息"},
+        {"kind": "terminal", "label": "完成", "after": ["缴费流程"]},
+    ]},
+    "projection": {"root": "总览", "components": [
+        {"label": "总览", "type": "card", "binds": None,
+         "children": ["账单"]},
+        {"label": "账单", "type": "field", "binds": "bill_paid",
+         "editable": False, "children": []},
+    ]},
+}
+
+
+def test_free_prose_verify_condition_is_rejected():
+    """A verify condition that names NO declared variable cannot be
+    grounded by the deterministic verifier (it degrades to checking the
+    whole task's desired state — the r8 deadlock). The architect rejects
+    it at assembly with a specific, repairable message."""
+    port = FakePort(*([FREE_PROSE_VERIFY_JSON] * 4))
+    with pytest.raises(ArchitectOutputError,
+                       match="names no declared variable"):
+        TaskArchitect(port).compose(
+            TaskIntent(goal="支付本月账单"),
+            (TaskVariable(semantic_key="bill_paid", label="账单支付状态",
+                          observed=False, value_type="boolean"),))
+
+
+def test_keyed_verify_condition_assembles():
+    """The SAME plan with the condition referencing the declared variable
+    ('bill_paid == true') assembles fine — the check is about grounding,
+    not about prose style."""
+    keyed = json.loads(json.dumps(FREE_PROSE_VERIFY_JSON,
+                                  ensure_ascii=False))
+    keyed["workflow"]["nodes"][2]["condition"] = "bill_paid == true"
+    port = FakePort(keyed)
+    arch = TaskArchitect(port).compose(
+        TaskIntent(goal="支付本月账单"),
+        (TaskVariable(semantic_key="bill_paid", label="账单支付状态",
+                      observed=False, value_type="boolean"),))
+    verify = next(n for n in arch.graph.nodes
+                  if n.kind is NodeKind.VERIFY)
+    assert verify.verification == "bill_paid == true"

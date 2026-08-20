@@ -104,21 +104,38 @@ termination predicate in words>", "max_iterations": 3},
     "completion": "<EXACTLY ONE clause 'semantic_key == value' (exact match) \
 or 'semantic_key ~= value' (substring/contains match) — the RFC-003 \
 deterministic form the runtime verifier machine-checks against the fresh \
-observation. Use '==' when the observed value must equal the target exactly \
-(e.g. 'post_liked == true'). Use '~=' when the target is a SUBSTRING of the \
-full observed text (e.g. 'target_post_text ~= 核心CPI意外下降' matches any \
-post whose text CONTAINS that phrase). Express boolean targets in \
-canonical form ('post_liked == true'): the deterministic verifier \
-compares GENERIC literals only — a rendering-vocabulary gap (e.g. a CJK \
-toggle label on screen) honestly fails the rule layer and escalates to \
-the model-based verifier, which judges the fresh screen as the final \
-arbiter. Free prose here FAILS the node \
-fail-closed: the verifier is not an NLP parser>",
+observation. NEVER reference a key from this node's own 'sets': that is \
+the desired_state check restated (tautology — merely typing the value into \
+an input would satisfy it, GATE-G0 r9); completion must be an INDEPENDENT \
+visible witness, i.e. a variable that is only observable once this step's \
+real effect is on screen (declare a result variable extracted from the \
+rendered content — e.g. a result/body-text variable — and reference THAT, \
+not the input field's own value). Use '==' when the observed value must \
+equal the target exactly (e.g. 'invoice_status == paid'). Use '~=' when \
+the target is a SUBSTRING of the full observed text (e.g. \
+'receipt_text ~= Payment received' matches any receipt whose text CONTAINS \
+that phrase). Express boolean targets in canonical form \
+('order_confirmed == true'): the deterministic verifier compares GENERIC \
+literals only — a rendering-vocabulary gap (e.g. a CJK toggle label on \
+screen) honestly fails the rule layer and escalates to the model-based \
+verifier, which judges the fresh screen as the final arbiter. Free prose \
+here FAILS the node fail-closed: the verifier is not an NLP parser>",
     "reversibility": "reversible|partially_reversible|irreversible",
     "risk": "<one short risk note, or empty>",
     "target_evidence": ["<a visible label a user could read on screen>"]},
    {"kind": "verify", "label": "...", "container": "...", "after": [],
-    "condition": "<semantic verification condition>"},
+    "condition": "<a check over DECLARED semantic_keys in the RFC-003 form: \
+one or more clauses 'semantic_key == value' / 'semantic_key ~= value' \
+joined by 'and', each clause referencing a declared variable. The \
+deterministic verifier machine-checks every variable your condition NAMES \
+at its desired value against the fresh screen. A condition that names NO \
+variable (free prose) cannot be grounded: it degrades to checking EVERY \
+desired variable of the WHOLE task, so a mid-task verify node then fails \
+until the entire task is finished — one free-prose condition deadlocked \
+the whole plan at its mid-point checkpoint (GATE-G0 r8: the plan's \
+like/bookmark lanes never became READY). Name exactly the variables THIS \
+verify node is about (e.g. a mid-task search-result check names the \
+result variable; the final task check names the outcome variables)>"},
    {"kind": "checkpoint", "label": "...", "after": []},
    {"kind": "barrier", "label": "...", "after": ["<the fan-out lanes, or the \
 fan-out container>"]},
@@ -568,6 +585,9 @@ class TaskArchitect:
             return tuple(out)
 
         new_nodes: list[WorkflowNode] = []
+        # the declared vocabulary — a verify condition MUST reference at
+        # least one of these (RFC-003 grounding, GATE-G0 r8/r9)
+        semantic_keys = {v.semantic_key for v in variables}
         for rn in parsed_nodes:
             nid = label_to_id[str(rn["label"])]
             kind = _NODE_KINDS[str(rn["kind"])]
@@ -631,6 +651,25 @@ class TaskArchitect:
                 if not verification:
                     raise ArchitectOutputError(
                         f"verify node {rn['label']!r} needs a 'condition'")
+                # GATE-G0 r8/r9: a condition that names NO declared
+                # variable is free prose — the deterministic verifier
+                # (VisibleVerifier._referenced_keys) cannot ground it and
+                # it silently degrades to checking EVERY desired variable
+                # of the whole task, so a mid-task verify node fails until
+                # the entire task is finished (the r8 plan deadlocked at
+                # its like/bookmark lanes exactly this way). Reject at
+                # assembly so the bounded repair round fixes the
+                # condition — fail-fast beats silent misgrounding.
+                referenced_keys = [tok for tok in re.findall(
+                    r"[A-Za-z_][A-Za-z0-9_]*", verification)
+                    if tok in semantic_keys]
+                if not referenced_keys:
+                    raise ArchitectOutputError(
+                        f"verify node {rn['label']!r} condition "
+                        f"{verification!r} names no declared variable "
+                        f"(RFC-003: reference the semantic_keys this "
+                        f"check is about, e.g. 'release_date == "
+                        f"2026-08-18')")
             elif kind is NodeKind.BOUNDED_LOOP:
                 termination = str(rn.get("termination") or "").strip()
                 if not termination:
@@ -754,21 +793,31 @@ class TaskArchitect:
 
             top_chain = [n.node_id for n in nodes
                          if n.node_id in top_new_ids]
-            # Check each consecutive pair; if any pair is already
-            # transitively linked, skip the entire auto-chain to
-            # avoid creating a partial chain that could still deadlock.
-            already_linked = False
+            # PER-PAIR cycle check (r9 fix of the r8 fix): the r8 version
+            # skipped the ENTIRE auto-chain whenever ANY consecutive pair
+            # was transitively linked — over-suppression: in the
+            # sequence + external-checkpoint + terminal shape the
+            # checkpoint reaches the sequence (it waits on a step inside
+            # it), so the whole chain was dropped and the terminal lost
+            # its path from the checkpoint ("every step must lead to the
+            # terminal" then rejected an otherwise valid architecture).
+            # Per pair instead: adding ``next → prev`` creates a cycle
+            # iff ``prev`` transitively depends on ``next`` (existence
+            # of a depends_on path prev→…→next, i.e. reachable from
+            # next over this fwd map, membership edges included — the
+            # r8 deadlock was exactly such a mixed explicit+membership
+            # cycle). Skip only THAT pair; chain the rest. The map is
+            # updated incrementally so later pairs see earlier chain
+            # edges too.
             for prev_nid, next_nid in zip(top_chain, top_chain[1:]):
+                node = by_id[next_nid]
+                if prev_nid in node.depends_on:
+                    continue
                 if _top_reaches(next_nid, prev_nid, fwd):
-                    already_linked = True
-                    break
-            if not already_linked:
-                for prev_nid, next_nid in zip(top_chain, top_chain[1:]):
-                    node = by_id[next_nid]
-                    if prev_nid not in node.depends_on:
-                        by_id[next_nid] = replace(
-                            node,
-                            depends_on=node.depends_on + (prev_nid,))
+                    continue
+                by_id[next_nid] = replace(
+                    node, depends_on=node.depends_on + (prev_nid,))
+                fwd.setdefault(prev_nid, set()).add(next_nid)
         # refresh to the CURRENT edge set before reachability
         nodes = [by_id[n.node_id] for n in nodes]
         # 2. stitch carried frontier to the terminal
