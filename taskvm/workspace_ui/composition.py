@@ -103,6 +103,24 @@ _NUMERIC_FIELDS = ("magnitude", "duration_ms")
 _SCROLL_DIRECTIONS = frozenset({"up", "down", "left", "right"})
 
 
+class CUAReplySchemaError(RuntimeError):
+    """The provider REPLIED but the reply violates the frozen CUA
+    decision schema (unparseable JSON, unknown decision kind, unknown
+    action kind, missing required fields, malformed values).
+
+    ``HttpCUAModel.predict_action`` lands its ledger row FIRST, then
+    raises this — the runtime's §5 invalid-prediction loops (forward
+    autonomy AND compensation alike) own the bounded re-ask. A schema
+    slip is a malformed REPLY, never a business FAIL decision: the
+    GATE-G0 2026-08-20 postmortem shows the old FAIL conversion
+    killing a whole trial on ONE slip (the model answered
+    ``{"kind":"tap",…}`` — a GUI action kind in the decision slot —
+    and the node died as ``cua reported fail: 未知决策类型 'tap'``
+    with zero retries, so the forward witnesses never landed). A
+    DELIBERATE ``{"kind":"fail","reason":…}`` from the model is a
+    business judgment and still lands as a FAIL decision."""
+
+
 class HttpCUAModel:
     """``CUAModel`` port over the architect ``HttpModelPort``.
 
@@ -118,9 +136,11 @@ class HttpCUAModel:
     count provider requests, not harness bugs).
 
     One ``predict_action`` = one provider request = one ledger record.
-    The outgoing prompt passes the no-leak gate; a
-    parse failure is an honest ``fail`` decision — the runtime's repair
-    loop owns any re-ask.
+    The outgoing prompt passes the no-leak gate; a reply that violates
+    the decision schema raises :class:`CUAReplySchemaError` AFTER the
+    row lands — the runtime's §5 invalid-prediction loop owns the
+    bounded re-ask (a DELIBERATE model ``fail`` decision still lands
+    as an honest FAIL decision).
     """
 
     #: Promise: this adapter owns its ledger rows (see class docstring)
@@ -181,10 +201,16 @@ class HttpCUAModel:
         if parsed is None:
             self._record(request_id, ok=False, error="unparseable CUA reply",
                          model=model, reply=reply)
-            return CUADecision(kind=CUADecisionKind.FAIL,
-                               reason="模型返回无法解析",
-                               raw=reply.raw[:200], request_id=request_id)
-        decision = _decision_from_json(parsed)
+            raise CUAReplySchemaError("模型返回无法解析（不是 JSON 对象）")
+        try:
+            decision = _decision_from_json(parsed)
+        except CUAReplySchemaError as e:
+            # the row lands BEFORE the raise: one provider request = one
+            # row on every path (same discipline as the transport
+            # exception path above)
+            self._record(request_id, ok=False, error=str(e),
+                         model=model, reply=reply)
+            raise
         self._record(request_id, ok=decision.kind is not CUADecisionKind.FAIL,
                      model=model, reply=reply)
         return _replace(decision, request_id=request_id)
@@ -214,8 +240,12 @@ def _decision_from_json(parsed: Mapping[str, Any]) -> CUADecision:
     Total over ``GUI_ACTION_KINDS`` (click|tap|type|key|scroll|wait|open)
     and every GuiAction field. Missing REQUIRED fields (click/tap without
     a coordinate; type without text; key without key; open without
-    target), unknown kinds, or non-numeric numeric fields are HONEST
-    FAILs — never a guess, never a silent field drop."""
+    target), unknown kinds, or non-numeric numeric fields RAISE
+    :class:`CUAReplySchemaError` — a malformed reply is an invalid
+    prediction the runtime re-asks within its small §5 ceiling, never
+    a business FAIL decision (and never a guess, never a silent field
+    drop). Only the model's DELIBERATE ``{"kind":"fail"}`` is a FAIL
+    decision."""
     kind = str(parsed.get("kind", "")).lower()
     if kind == "done":
         return CUADecision(kind=CUADecisionKind.DONE,
@@ -227,36 +257,25 @@ def _decision_from_json(parsed: Mapping[str, Any]) -> CUADecision:
     if kind == "act":
         act = parsed.get("action")
         if not isinstance(act, Mapping):
-            return CUADecision(kind=CUADecisionKind.FAIL,
-                               reason="act 决策缺少 action 对象",
-                               raw=str(parsed)[:200])
+            raise CUAReplySchemaError("act 决策缺少 action 对象")
         act_kind = str(act.get("kind", ""))
         if act_kind not in GUI_ACTION_KINDS:
-            return CUADecision(kind=CUADecisionKind.FAIL,
-                               reason=f"未知操作类型 {act_kind!r}",
-                               raw=str(parsed)[:200])
+            raise CUAReplySchemaError(f"未知操作类型 {act_kind!r}")
         # required-field discipline (honest fail, no guessing)
         coord = act.get("coordinate")
         if isinstance(coord, (list, tuple)) and len(coord) == 2:
             try:
                 coord = (float(coord[0]), float(coord[1]))
             except (TypeError, ValueError):
-                return CUADecision(kind=CUADecisionKind.FAIL,
-                                   reason="coordinate 不是数值对",
-                                   raw=str(parsed)[:200])
+                raise CUAReplySchemaError("coordinate 不是数值对")
         else:
             coord = None
         if act_kind in _COORD_REQUIRED and coord is None:
-            return CUADecision(
-                kind=CUADecisionKind.FAIL,
-                reason=f"{act_kind} 操作缺少 coordinate",
-                raw=str(parsed)[:200])
+            raise CUAReplySchemaError(f"{act_kind} 操作缺少 coordinate")
         req = _REQUIRED_FIELD_BY_KIND.get(act_kind)
         if req is not None and not str(act.get(req, "") or ""):
-            return CUADecision(
-                kind=CUADecisionKind.FAIL,
-                reason=f"{act_kind} 操作缺少必需字段 {req}",
-                raw=str(parsed)[:200])
+            raise CUAReplySchemaError(
+                f"{act_kind} 操作缺少必需字段 {req}")
         numeric: dict[str, int] = {}
         for field in _NUMERIC_FIELDS:
             raw_v = act.get(field)
@@ -265,18 +284,12 @@ def _decision_from_json(parsed: Mapping[str, Any]) -> CUADecision:
             try:
                 numeric[field] = int(raw_v)
             except (TypeError, ValueError):
-                return CUADecision(
-                    kind=CUADecisionKind.FAIL,
-                    reason=f"{field} 不是整数",
-                    raw=str(parsed)[:200])
+                raise CUAReplySchemaError(f"{field} 不是整数")
         direction = act.get("direction")
         if direction is not None:
             direction = str(direction)
             if act_kind == "scroll" and direction not in _SCROLL_DIRECTIONS:
-                return CUADecision(
-                    kind=CUADecisionKind.FAIL,
-                    reason=f"非法滚动方向 {direction!r}",
-                    raw=str(parsed)[:200])
+                raise CUAReplySchemaError(f"非法滚动方向 {direction!r}")
         action = GuiAction(
             kind=act_kind,
             coordinate=coord,
@@ -288,8 +301,7 @@ def _decision_from_json(parsed: Mapping[str, Any]) -> CUADecision:
             target=str(act.get("target", "") or "") or None)
         return CUADecision(kind=CUADecisionKind.ACT, action=action,
                            raw=str(parsed)[:200])
-    return CUADecision(kind=CUADecisionKind.FAIL,
-                       reason=f"未知决策类型 {kind!r}", raw=str(parsed)[:200])
+    raise CUAReplySchemaError(f"未知决策类型 {kind!r}")
 
 
 # ── the observation extractor (deterministic fast path) ───────────────────
@@ -395,6 +407,103 @@ class HandleCacheExtractor:
 
 
 # ── the production multi-surface binding resolver ───────────────────
+
+
+class AdaptiveExtractor:
+    """HandleCache fast path + runtime handle re-minting for variables the
+    INITIAL compile could not see (GATE-G0 2026-08-20 r6 postmortem).
+
+    The initial compile runs on the HOME SCREEN at bootstrap; variables
+    that only exist INSIDE an app (the X search phrase, per-post like/
+    bookmark toggles) carry ``evidence: []`` there — no handle, so the
+    frozen HandleCache fast path can NEVER observe them and every
+    contract referencing one fails-closed forever (r6: n002's
+    ``desired_state: post_search_phrase`` stayed 'unmet' on a screen
+    where the CUA had ALREADY typed the phrase into the search box —
+    the VALUE was visible, the HANDLE was missing). This adapter closes
+    that gap WITHOUT touching the frozen runtime/compiler: a wanted
+    variable with no cached handle triggers the architect's OWN
+    ``StateCompiler.compile`` over the fresh observation (incremental —
+    ``prior_state`` keeps the semantic key names), mints and caches the
+    handles; re-reads then use the deterministic
+    ``StateCompiler.extract_observed`` fast path. Cost: ONE compiler
+    call per NEW screen (fingerprint-keyed mint with a per-screen
+    failure cooldown). ``compiler=None`` degrades to the plain
+    HandleCache fast path.
+    """
+
+    def __init__(self, handles: Iterable[Any], compiler: Any = None,
+                 intent: Any = None, prior_variables: Any = ()) -> None:
+        self._fast = HandleCacheExtractor(handles)
+        self._by_key: dict[str, Any] = {
+            getattr(h, "semantic_key", ""): h for h in handles}
+        self._compiler = compiler
+        self._intent = intent
+        self._prior = tuple(prior_variables or ())
+        self._minted: dict[str, Any] = {}
+        self._mint_failed: set[tuple[str, str]] = set()
+        self.calls = 0
+
+    def extract(self, observation: Observation,
+                variables: Mapping[str, TaskVariable],
+                ) -> tuple[ObservedValue, ...]:
+        self.calls += 1
+        values = list(self._fast.extract(observation, variables))
+        seen = {v.semantic_key for v in values}
+        wanted = [k for k in variables
+                  if k not in seen and k not in self._by_key]
+        if not (wanted and self._compiler is not None
+                and self._intent is not None):
+            return tuple(values)
+        surface = getattr(observation, "surface", None)
+        label = (getattr(surface, "display_name", "") or ""
+                 or getattr(surface, "surface_id", "") or "surface")
+        text = getattr(observation, "visible_text", "") or ""
+        fp = str(getattr(observation, "fingerprint", "") or "")
+        region = VisibleRegion(surface_label=label, visible_text=text)
+        view = CompilerObservationView(
+            revision=int(getattr(observation, "revision", 0) or 0),
+            regions=(region,))
+        self._mint(view, fp, wanted)
+        for key in wanted:
+            h = self._minted.get(key)
+            if h is None:
+                continue
+            if getattr(h, "surface_label", "") and h.surface_label != label:
+                continue   # same surface-binding discipline as the fast path
+            ov = StateCompiler.extract_observed(view, h)
+            if ov is not None:
+                values.append(ov)
+        return tuple(values)
+
+    def _mint(self, view: Any, fingerprint: str,
+              missing_keys: list[str]) -> None:
+        """ONE incremental recompile mints handles for ALL missing keys on
+        this screen; the (key, fingerprint) cooldown keeps a screen that
+        yielded nothing from re-calling the model."""
+        pending = [k for k in missing_keys
+                   if k not in self._minted
+                   and (k, fingerprint) not in self._mint_failed]
+        if not pending:
+            return
+        try:
+            from taskvm.domain.state import TaskState
+            prior = (TaskState(intent=self._intent, variables=self._prior)
+                     if self._prior else None)
+            result = self._compiler.compile(
+                view, self._intent, prior_state=prior,
+                purpose="runtime_handle_remint")
+        except Exception:
+            for k in pending:
+                self._mint_failed.add((k, fingerprint))
+            return
+        for h in getattr(result, "handle_evidence", ()) or ():
+            k = getattr(h, "semantic_key", "")
+            if k in pending and getattr(h, "value_pattern", ""):
+                self._minted[k] = h
+        for k in pending:
+            if k not in self._minted:
+                self._mint_failed.add((k, fingerprint))
 
 
 class GovernanceServicePort:
@@ -697,7 +806,8 @@ def compose_task_runtime(kernel: Any, *, host: str = "localhost",
 
 # re-exported for composition consumers (view building is architect-free)
 __all__ = [
-    "HttpCUAModel", "VisibleLabelExtractor", "HandleCacheExtractor",
+    "HttpCUAModel", "CUAReplySchemaError", "VisibleLabelExtractor",
+    "HandleCacheExtractor", "AdaptiveExtractor",
     "EvidenceSurfaceResolver",
     "ScreenshotArchivingRuntime", "artifact_fingerprint",
     "DEFAULT_ROLE_MODELS", "parse_role_models", "resolve_role_models",
@@ -805,7 +915,8 @@ def bootstrap_real_full(*, goal: str, sid: str,
                          role_models: Mapping[str, str] | None = None,
                          screenshot_sink: Callable[
                              [str, str, bytes], None] | None = None,
-                         on_stage: Callable[[str, Any], None] | None = None
+                         on_stage: Callable[[str, Any], None] | None = None,
+                         budgets: Any = None
                          ) -> dict:
     """Natural-language goal → fresh observation → StateCompiler →
     TaskArchitect → Kernel → shared ledger → AutonomyRuntime → (optional)
@@ -925,8 +1036,18 @@ def bootstrap_real_full(*, goal: str, sid: str,
     # composition adapter that reuses ``StateCompiler.extract_observed``.
     # No handle evidence (or an explicit ``extractor``) falls back to the
     # label-token fast path — honest degradation, never a guess.
-    if extractor is None and compiler_result.handle_evidence:
-        extractor = HandleCacheExtractor(compiler_result.handle_evidence)
+    if extractor is None:
+        # AdaptiveExtractor: the HandleCache fast path PLUS runtime
+        # handle re-minting for variables the home-screen compile could
+        # not see (GATE-G0 r6: app-interior variables had evidence: []
+        # at bootstrap, so contracts referencing them failed-closed
+        # forever). prior_variables = the ARCHITECT's variables (what
+        # the kernel actually carries — kernel.init_task_state receives
+        # arch.variables below in the same flow), so the incremental
+        # recompile keeps the semantic key names the plan references.
+        extractor = AdaptiveExtractor(
+            compiler_result.handle_evidence, compiler=compiler,
+            intent=intent, prior_variables=arch.variables)
     # The production multi-surface resolver — compiler handle_id →
     # evidence surface_label → the bootstrap binding snapshot → the
     # session's surface ids, re-validated live (read-only) per resolve.
@@ -941,7 +1062,8 @@ def bootstrap_real_full(*, goal: str, sid: str,
                                 cua_model=cua_model, extractor=extractor)
     runtime = compose_task_runtime(kernel, substrate=substrate,
                                    ports=ports, model=model,
-                                   surface_resolver=surface_resolver)
+                                   surface_resolver=surface_resolver,
+                                   budgets=budgets)
 
     # (10) optional projection registration — the PUBLIC lifecycle takes
     # over from here (POST /governance/start → driver → runtime → GUI).

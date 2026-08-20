@@ -34,7 +34,7 @@ from taskvm.runtime import AutonomyRuntime
 from taskvm.runtime.ports import MODEL_ROLE_CUA
 from taskvm.substrate import Observation
 from taskvm.verifier.visible import VisibleVerifier
-from taskvm.workspace_ui.composition import HttpCUAModel
+from taskvm.workspace_ui.composition import CUAReplySchemaError, HttpCUAModel
 
 from tests.runtime.conftest import (
     FakeExtractor, FakeSerializer, FakeSubstrate, action_node, make_kernel,
@@ -113,19 +113,23 @@ def test_timeout_lands_one_row_and_propagates():
     assert row.ok is False and "timed out" in row.error
 
 
-# ── situation 3: illegal JSON — one row, honest fail decision ───────────────
-def test_illegal_json_reply_is_one_row_and_fail_decision():
+# ── situation 3: illegal JSON — one row, schema error propagates ──────────
+def test_illegal_json_reply_is_one_row_and_raises():
+    """An unparseable reply is an INVALID PREDICTION: the row lands
+    FIRST (one provider request = one row, on every path — same as the
+    transport exception), then ``CUAReplySchemaError`` propagates so
+    the runtime's §5 loop owns the bounded re-ask."""
     stub = StubModelPort(["模型说的不是 JSON <<<"])
     ledger = ModelCallLedger()
     cua = HttpCUAModel(port=stub, ledger=ledger)
 
-    decision = cua.predict_action(goal="set topic=new", observation=_obs())
+    with pytest.raises(CUAReplySchemaError):
+        cua.predict_action(goal="set topic=new", observation=_obs())
 
-    assert decision.kind.value == "fail"
-    assert decision.request_id                     # the row is still linkable
     assert stub.request_count == 1
     assert ledger.total() == 1
     assert ledger.records[0].ok is False
+    assert ledger.records[0].request_id     # the row is still linkable
 
 
 # ── situation 4: runtime repair loop — every re-ask is its own row ──────────

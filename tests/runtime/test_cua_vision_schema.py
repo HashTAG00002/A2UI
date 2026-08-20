@@ -16,8 +16,12 @@ Post-fix (B-01):
   * the outgoing protocol exposes the FULL frozen vocabulary and every
     ``GuiAction`` field;
   * missing REQUIRED fields, unknown kinds, illegal directions and
-    non-numeric numeric fields are HONEST FAILs (no guessing, no silent
-    field drops);
+    non-numeric numeric fields RAISE ``CUAReplySchemaError`` — a
+    malformed reply is an INVALID PREDICTION the runtime's §5 loop
+    re-asks within its small ceiling (GATE-G0 2026-08-20: the old
+    FAIL-decision conversion killed a whole real-model trial on one
+    schema slip); a DELIBERATE model ``fail`` decision still passes
+    through (no guessing, no silent field drops);
   * the no-leak gate covers initial / retry / vision message construction
     — and a rejected prompt issues ZERO provider requests.
 """
@@ -28,7 +32,8 @@ import pytest
 from taskvm.architect import ModelReply
 from taskvm.runtime.ports import CUADecisionKind
 from taskvm.substrate import GUI_ACTION_KINDS, Observation, SurfaceInfo
-from taskvm.workspace_ui.composition import HttpCUAModel, _CUA_SYSTEM_PROMPT
+from taskvm.workspace_ui.composition import (
+    CUAReplySchemaError, HttpCUAModel, _CUA_SYSTEM_PROMPT)
 
 DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=="
 
@@ -210,23 +215,25 @@ ILLEGAL = [
 
 
 @pytest.mark.parametrize("reply,why", ILLEGAL)
-def test_illegal_or_missing_fields_fail_honestly(reply, why):
+def test_illegal_or_missing_fields_raise_schema_error(reply, why):
+    """A reply that violates the frozen decision schema raises
+    ``CUAReplySchemaError`` (an INVALID PREDICTION — the runtime's §5
+    loop owns the bounded re-ask), never a business FAIL decision.
+
+    The adapter still consumed exactly ONE provider request (the reply
+    WAS delivered; the parse rejected it — no hidden re-ask here)."""
     port = CapturePort(reply=reply)
-    decision = HttpCUAModel(port=port).predict_action(
-        goal="g", observation=_obs())
-    assert decision.kind is CUADecisionKind.FAIL
-    assert why in decision.reason
-    # an honest fail still consumed exactly ONE provider request (the
-    # reply WAS delivered; the parse rejected it — no hidden re-ask)
+    with pytest.raises(CUAReplySchemaError, match=why):
+        HttpCUAModel(port=port).predict_action(
+            goal="g", observation=_obs())
     assert len(port.calls) == 1
 
 
-def test_unparseable_reply_is_honest_fail():
+def test_unparseable_reply_raises_schema_error():
     port = CapturePort(reply=None, raw="抱歉我不能……")
-    decision = HttpCUAModel(port=port).predict_action(
-        goal="g", observation=_obs())
-    assert decision.kind is CUADecisionKind.FAIL
-    assert "无法解析" in decision.reason
+    with pytest.raises(CUAReplySchemaError, match="无法解析"):
+        HttpCUAModel(port=port).predict_action(
+            goal="g", observation=_obs())
     assert len(port.calls) == 1                     # one request, no re-ask
 
 
