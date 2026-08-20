@@ -198,16 +198,22 @@ class WorkflowStore:
     def _retarget_completion(condition: str,
                              updates: dict) -> str:
         """Deterministically update the value side of a RFC-003
-        ``key == value`` completion_condition when ``key`` is in
-        ``updates``. Non-conforming conditions are returned unchanged."""
+        ``key == value`` or ``key ~= value`` completion_condition when
+        ``key`` is in ``updates``. Non-conforming conditions are returned
+        unchanged."""
         cond = (condition or "").strip()
-        if not cond or cond.count("==") != 1:
+        if not cond:
             return condition
-        key, sep, val = cond.partition("==")
-        key_s = key.strip()
-        if key_s in updates:
-            new_val = str(updates[key_s])
-            return f"{key_s} == {new_val}"
+        # RFC-003 supports both '==' (exact) and '~=' (contains).
+        # Try each operator; exactly one must be present (single-clause).
+        for op in ("~=", "=="):
+            if cond.count(op) == 1:
+                key, _, val = cond.partition(op)
+                key_s = key.strip()
+                if key_s in updates:
+                    new_val = str(updates[key_s])
+                    return f"{key_s} {op} {new_val}"
+                return condition
         return condition
 
     # ── status transitions ───────────────────────────────────────────────

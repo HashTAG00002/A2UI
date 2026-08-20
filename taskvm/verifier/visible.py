@@ -42,6 +42,48 @@ _STOPWORDS = frozenset({"value", "the", "a", "an", "is", "are", "to", "of",
                         "displays", "reads", "set", "when", "then", "true",
                         "false", "none", "empty", "done", "complete"})
 
+# ── Boolean value normalization (GENERIC literals only — owner order 2026-08-20) ──────────────────
+# Boolean ``True``/``False`` → ``"true"``/``"false"`` (the generic
+# Python literal form); everything else → ``str(v).strip()``.
+# DELIBERATELY NO per-app vocabulary lives in this module: when a
+# comparison cannot be resolved by generic literals (e.g. the contract
+# says ``true`` but the screen renders a CJK toggle label like
+# "已点赞"), the deterministic layer reports an HONEST mismatch and the
+# composition's escalating verifier (taskvm.workspace_ui.
+# verifier_escalation — the R4/PURETY-GEN §4.2 route) hands the final
+# judgment to the model-based verifier. A per-app label table here would
+# be open-scenario hardcoding — the exact enemy the repository contract
+# forbids (owner order 2026-08-20: "硬编码是开放场景泛化的最大敌人").
+
+
+def _normalize_value(v: Any) -> str:
+    """Generic literal normalization: bool → ``"true"``/``"false"``,
+    everything else → ``str(v).strip()``. No per-app vocabulary."""
+    if v is True:
+        return "true"
+    if v is False:
+        return "false"
+    return str(v).strip()
+
+
+def _values_match(observed: Any, target: Any, *, contains: bool = False) -> bool:
+    """Check whether an observed value satisfies a target, with optional
+    substring (contains) semantics.
+
+    - ``contains=True``: ``target`` is a substring of ``observed`` (after
+      normalization) — the search phrase "核心CPI意外下降" is a substring of
+      the full post text "扣除食物和能源的核心CPI意外下降 哈哈哈哈哈".
+    - ``contains=False``: exact equality after (generic literal)
+      normalization. Vocabulary-gap mismatches are NOT resolved here —
+      the honest mismatch escalates to the model-based verifier at the
+      composition layer (verifier_escalation, owner order 2026-08-20).
+    """
+    o = _normalize_value(observed)
+    t = _normalize_value(target)
+    if contains:
+        return t in o
+    return o == t
+
 
 class VisibleVerifier:
     """The runtime-visible verifier (deterministic, 0 model calls).
@@ -76,8 +118,13 @@ class VisibleVerifier:
         lie the module docstring once made)."""
         targets = node.contract.desired_state or {}
         reasons: list[str] = []
+        # Generic literal normalization on both sides (bool → "true").
+        # A vocabulary-gap mismatch (desired ``true`` vs the rendered
+        # "已点赞") honestly fails HERE and is escalated to the model-based
+        # verifier by the composition layer (R4 route, owner order
+        # 2026-08-20 — per-app label tables are forbidden).
         mismatched = [k for k in targets
-                     if after_observed.get(k) != targets[k]]
+                     if not _values_match(after_observed.get(k), targets[k])]
         if mismatched:
             reasons.append(f"unmet desired_state: {mismatched}")
         cc_ok, cc_detail = VisibleVerifier._completion_satisfied(
@@ -116,25 +163,34 @@ class VisibleVerifier:
         cond = (completion_condition or "").strip()
         if not cond:
             return True, None
-        # strict single-clause minimal form (RFC-003): exactly one '=='. A
-        # multi-'==' string (e.g. 'a==b==c') is non-conforming -> fail-closed
-        # (never silently satisfied by partitioning on the first '==').
-        if cond.count("==") == 1:
-            key, _, val = cond.partition("==")
-            key = key.strip()
-            val = val.strip().strip("'\"")
-            if not key:
-                return False, (f"completion_condition missing key "
-                               f"(RFC-003): {cond!r}")
-            got = after_observed.get(key)
-            if got is None:
-                return False, (f"completion_condition references unobserved "
-                               f"key {key!r} (RFC-003)")
-            ok = str(got).strip() == val
-            return (ok, None if ok
-                    else f"completion_condition unmet: {key}={got!r} != {val!r}")
+        # RFC-003 minimal forms (single clause, deterministic):
+        #   ``key == value``  — exact match (after normalization)
+        #   ``key ~= value``  — substring/contains match (after normalization)
+        # A multi-operator string (e.g. 'a==b==c') is non-conforming ->
+        # fail-closed (never silently satisfied by partitioning on the
+        # first operator). GATE-G0 r7 postmortem: the search phrase
+        # "核心CPI意外下降" is a SUBSTRING of the full post text on screen,
+        # so ``~=`` was added to let the architect express contains-semantics.
+        for op in ("~=", "=="):
+            if cond.count(op) == 1:
+                key, _, val = cond.partition(op)
+                key = key.strip()
+                val = val.strip().strip("'\"")
+                if not key:
+                    return False, (f"completion_condition missing key "
+                                   f"(RFC-003): {cond!r}")
+                got = after_observed.get(key)
+                if got is None:
+                    return False, (f"completion_condition references "
+                                   f"unobserved key {key!r} (RFC-003)")
+                contains = (op == "~=")
+                ok = _values_match(got, val, contains=contains)
+                return (ok, None if ok
+                        else f"completion_condition unmet: "
+                             f"{key}={got!r} {op} {val!r}")
         return False, (f"completion_condition not in the deterministic "
-                       f"single-clause 'key == value' form (RFC-003): {cond!r}")
+                       f"single-clause 'key == value' or 'key ~= value' "
+                       f"form (RFC-003): {cond!r}")
 
     # -- VERIFY: referenced variables must be at their desired values --------
     @staticmethod
@@ -145,10 +201,12 @@ class VisibleVerifier:
         referenced = VisibleVerifier._referenced_keys(pred, set(after_observed))
         if referenced:
             mismatched = [k for k in referenced
-                          if after_observed.get(k) != desired.get(k)]
+                          if not _values_match(after_observed.get(k),
+                                               desired.get(k))]
         else:
             mismatched = [k for k in desired
-                          if desired[k] != after_observed.get(k)]
+                          if not _values_match(after_observed.get(k),
+                                               desired[k])]
         passed = not mismatched
         return VerificationResult(
             node_id=node.node_id, epoch=epoch, passed=passed,
