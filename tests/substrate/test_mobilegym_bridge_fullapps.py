@@ -252,6 +252,39 @@ def test_os_state_returns_the_os_slice():
     assert out == {"sid": "s1", "os": env._os}
 
 
+def test_x_state_is_live_not_the_cached_seed():
+    """GATE-G0 r9 postmortem (2026-08-20): the forward task's 13 GUI acts
+    moved the page store (liked/bookmarked toggles landed) while the
+    ``_sid_live`` cache still held the seed state — every intervention
+    oracle snapshot then reported the seed and the grader hallucinated
+    WORLD_WITNESS_MISSING + STOP_AFTER_WRITE off the stale/fresh skew.
+    The oracle read MUST be live: whatever the store holds NOW is what
+    the judge sees."""
+    env = FakeEnv()
+    b = _activated(env)
+    before = asyncio.run(b.x_state("s1"))
+    assert before["likedPostIds"] == ["p_1"]
+    # the runtime plane (Playwright page gestures) moves the store WITHOUT
+    # telling the bridge — exactly the r9 topology (act ≠ eval cache)
+    env._apps["x"]["user"]["likedPostIds"] = ["p_1", "p_2"]
+    env._apps["x"]["user"]["bookmarkedPostIds"] = ["p_2"]
+    live = asyncio.run(b.x_state("s1"))
+    assert live["likedPostIds"] == ["p_1", "p_2"], (
+        "x_state served the stale _sid_live cache — an oracle that grades "
+        "a world that no longer exists")
+    assert live["bookmarkedPostIds"] == ["p_2"]
+
+
+def test_os_state_is_live_not_the_cached_seed():
+    """Same staleness rule for the OS slice (GATE-G0 r9): an oracle read
+    must never be served from a cache that predates the world's motion."""
+    env = FakeEnv()
+    b = _activated(env)
+    env._os["activeAppId"] = "x"
+    out = asyncio.run(b.os_state("s1"))
+    assert out["os"]["activeAppId"] == "x"
+
+
 # ── generic mutate: app-agnostic write path ─────────────────────────────────
 
 def test_mutate_source_has_zero_per_app_branch():

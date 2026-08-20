@@ -702,9 +702,19 @@ class MobileGymBridge:
         ``get_state``. This is a plain read (no mutation, no set_state), so
         it does not touch the non-invasive write/rollback boundary
         documented above. Legacy compat route: the generic oracle reads
-        are ``app_state`` / ``os_state``."""
+        are ``app_state`` / ``os_state``.
+
+        GATE-G0 r9 postmortem (2026-08-20): this read MUST be live, never
+        the ``_sid_live`` cache. The forward task's 13 GUI acts moved the
+        page store (liked/bookmarked toggles landed — screenshot-proven)
+        while the cache still held the 12:47:43 seed state, so EVERY
+        intervention-bracket oracle snapshot reported the seed and the
+        grader hallucinated WORLD_WITNESS_MISSING + STOP_AFTER_WRITE. A
+        judge that reads a stale cache is a judge that grades a world
+        that no longer exists."""
         await self._activate(sid)
-        state = self._sid_live.get(sid) or await self.env.get_state(required_apps=APPS)
+        state = await self.env.get_state(required_apps=APPS)
+        self._sid_live[sid] = state   # keep the live cache fresh too
         x_state = state.get("apps", {}).get("x", {}) or {}
         user = x_state.get("user", {}) or {}
         return {
@@ -723,7 +733,10 @@ class MobileGymBridge:
         balance) is retained as a compat alias for existing consumers
         during the compat window."""
         await self._activate(sid)
-        state = self._sid_live.get(sid) or await self.env.get_state(required_apps=APPS)
+        # live read (GATE-G0 r9 postmortem): a summary over a stale cache
+        # would describe the seed world, not the current one
+        state = await self.env.get_state(required_apps=APPS)
+        self._sid_live[sid] = state
         apps = state.get("apps", {})
         apps_summary: dict[str, dict[str, int]] = {}
         for app_id, app_state in apps.items():
@@ -759,7 +772,9 @@ class MobileGymBridge:
         except ValueError as e:
             raise web.HTTPNotFound(text=str(e))
         await self._activate(sid)
-        state = self._sid_live.get(sid) or await self.env.get_state(required_apps=APPS)
+        # live read (GATE-G0 r9 postmortem): same staleness rule as x_state
+        state = await self.env.get_state(required_apps=APPS)
+        self._sid_live[sid] = state
         apps = state.get("apps", {})
         return {"sid": sid, "app": app_id, "state": apps.get(app_id, {}) or {}}
 
@@ -768,7 +783,9 @@ class MobileGymBridge:
         home_screen) — the part of the phone world that belongs to no app.
         Evaluation/setup plane read, plain store projection."""
         await self._activate(sid)
-        state = self._sid_live.get(sid) or await self.env.get_state(required_apps=APPS)
+        # live read (GATE-G0 r9 postmortem): same staleness rule as x_state
+        state = await self.env.get_state(required_apps=APPS)
+        self._sid_live[sid] = state
         return {"sid": sid, "os": state.get("os", {}) or {}}
 
     # ── generic write path: model-driven, app-agnostic (no operator enum) ──

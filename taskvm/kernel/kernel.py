@@ -29,6 +29,7 @@ from typing import Any, Iterable
 from taskvm.domain.architecture import TaskArchitecture
 from taskvm.domain.contract import Reversibility
 from taskvm.domain.errors import PatchSemanticsError, ValidationError
+from taskvm.domain.state import MUTABILITY_READONLY
 from taskvm.domain.events import Event, EventKind
 from taskvm.domain.intent import TaskIntent
 from taskvm.domain.patch import (
@@ -410,6 +411,16 @@ class TaskVMKernel:
                     "event_index": len(self._events),
                     "before": dict(handle.get("before_observed") or {}),
                     "after": dict(handle.get("after_observed") or {}),
+                    # GATE-G0 r9 postmortem: the desired_state the ACTION's
+                    # own verification confirmed (deterministic check or
+                    # the R4 screenshot-grounded model verifier). When the
+                    # observed plane is blind to a write (a like toggle is
+                    # icon COLOR, not visible text — observed reads null
+                    # before AND after), this verified value is the only
+                    # honest record that the write happened, and the
+                    # compensation history needs it.
+                    "verified": dict(
+                        handle["contract"].desired_state or {}),
                     "reversibility": handle["contract"].reversibility})
             self._refresh_projection_data()
 
@@ -670,6 +681,7 @@ class TaskVMKernel:
                     if r["event_index"] > rec.event_index]
             entries: list[CompensationEntry] = []
             blocked: list[UncompensatableAction] = []
+            state = self._sessions.task_state()
             for r in reversed(post):   # LIFO: undo the latest write first
                 if r["reversibility"] is Reversibility.IRREVERSIBLE:
                     blocked.append(UncompensatableAction(
@@ -677,16 +689,33 @@ class TaskVMKernel:
                         reversibility=r["reversibility"],
                         reason="irreversible action: honest non-compensation"))
                     continue
+                verified = r.get("verified") or {}
                 for key, after_v in r["after"].items():
+                    # GATE-G0 r9 postmortem: a readonly variable's observed
+                    # change is observation deepening (the world became
+                    # VISIBLE — e.g. the post text was found and read),
+                    # never a system write; it must never spawn an entry
+                    # (r9 burned a whole compensation round telling the
+                    # CUA to "restore the post text to None").
+                    var = state.variable(key)
+                    if var is not None and var.mutability == MUTABILITY_READONLY:
+                        continue
                     before_v = r["before"].get(key)
                     if before_v == after_v:
-                        continue
+                        # GATE-G0 r9 postmortem: observed-plane blind spot.
+                        # The action's own verification confirmed the
+                        # desired value landed (screenshot-grounded when
+                        # the text plane cannot see it) — that verified
+                        # value IS the write the compensation must undo.
+                        verified_v = verified.get(key)
+                        if verified_v is None or before_v == verified_v:
+                            continue
+                        after_v = verified_v
                     entries.append(CompensationEntry(
                         node_id=r["node_id"], semantic_key=key,
                         from_observed=after_v, to_observed=before_v,
                         to_desired=rec.desired.get(key, before_v),
                         reversibility=r["reversibility"]))
-            state = self._sessions.task_state()
             requires_recompose = bool(
                 (rec.intent is not None
                  and not rec.intent.describes_same_terminal(state.intent))

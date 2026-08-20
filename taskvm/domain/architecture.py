@@ -40,6 +40,29 @@ from taskvm.domain.state import TaskVariable
 from taskvm.domain.workflow import NodeKind, WorkflowGraph
 
 
+def normalize_literal(v: Any) -> str:
+    """Generic literal normalization for coherence checks: bool →
+    ``"true"``/``"false"``, everything else → ``str(v).strip()``. No
+    per-app vocabulary.
+
+    Single source of truth — the verifier layer (taskvm.verifier.visible)
+    imports THIS (domain ← verifier is the legal dependency direction).
+    GATE-G0 r10 postmortem (2026-08-20): the split-brain guard compared
+    ``desired`` vs the writer target with a RAW ``!=``, so a plan whose
+    variable said ``desired: true`` (JSON bool) but whose action contract
+    said ``sets: {"post_liked": "true"}`` (JSON string — the model emits
+    both spellings across attempts) was rejected as "composition
+    incoherent" four times in a row. ``True`` and ``"true"`` are the
+    same literal in every layer that already normalizes (the verifier's
+    value matching); the coherence guard must not be the one place that
+    pretends they differ."""
+    if v is True:
+        return "true"
+    if v is False:
+        return "false"
+    return str(v).strip()
+
+
 @dataclass(frozen=True)
 class TaskArchitecture:
     """A statically coherent composition, validated at construction.
@@ -99,14 +122,18 @@ class TaskArchitecture:
                                  and other in self.graph.downstream(nid)
                                  for other, _ in ws)]
             targets: list[Any] = []
+            seen_norm: set[str] = set()
             for _, v in finals:
-                if v not in targets:
+                nv = normalize_literal(v)
+                if nv not in seen_norm:   # dedupe by LITERAL (r10: bool vs str)
+                    seen_norm.add(nv)
                     targets.append(v)
             if len(targets) > 1:
                 raise ValidationError(
                     f"composition incoherent: {key!r} has multiple final "
                     f"writers with different targets {targets}")
-            if targets and desired[key] != targets[0]:
+            if targets and (normalize_literal(desired[key])
+                            != normalize_literal(targets[0])):
                 raise ValidationError(
                     f"composition incoherent (split-brain guard): variable "
                     f"{key!r} desired={desired[key]!r} but the plan's "

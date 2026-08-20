@@ -32,6 +32,7 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
+from taskvm.domain.architecture import normalize_literal
 from taskvm.domain.results import VerificationResult
 from taskvm.domain.workflow import NodeKind, WorkflowNode
 
@@ -58,12 +59,14 @@ _STOPWORDS = frozenset({"value", "the", "a", "an", "is", "are", "to", "of",
 
 def _normalize_value(v: Any) -> str:
     """Generic literal normalization: bool → ``"true"``/``"false"``,
-    everything else → ``str(v).strip()``. No per-app vocabulary."""
-    if v is True:
-        return "true"
-    if v is False:
-        return "false"
-    return str(v).strip()
+    everything else → ``str(v).strip()``. No per-app vocabulary.
+
+    Delegates to the domain's ``normalize_literal`` (single source of
+    truth since the GATE-G0 r10 postmortem — the architecture layer's
+    split-brain guard normalizes with the exact same rule, so a plan
+    whose variable says ``desired: true`` and whose action contract
+    says ``sets: {"k": "true"}`` is coherent HERE and THERE alike)."""
+    return normalize_literal(v)
 
 
 def _values_match(observed: Any, target: Any, *, contains: bool = False) -> bool:

@@ -245,6 +245,35 @@ def test_goal_patch_recompose_kills_split_brain():
     assert k.task_state().variable("release_date").desired == "2026-08-18"
 
 
+def test_split_brain_guard_compares_literals_not_python_types():
+    """GATE-G0 r10 postmortem (2026-08-20): the architect model emits
+    ``desired: true`` (JSON bool) in the variable list and
+    ``sets: {"post_liked": "true"}`` (JSON string) in the action contract —
+    the SAME literal in two Python types. The guard compared raw and
+    rejected the coherent plan 4 attempts in a row (5 of 7 attempts
+    spelled the target as a string). Literal normalization makes bool ≡
+    its string spelling, exactly like the verifier's value matching."""
+    k = _kernel((_var("post_liked", None, True),),
+                WorkflowGraph(nodes=(
+                    _action_node("a1", "post_liked", "true"),   # str target
+                    _terminal("t", "a1"),
+                )))
+    # the composition VALIDATED (kernel construction proves it); the two
+    # planes carry the same literal
+    assert k.task_state().variable("post_liked").desired is True
+
+
+def test_split_brain_guard_still_rejects_real_divergence():
+    """The normalization is not a free pass: a writer targeting the
+    OPPOSITE boolean is still a genuine split brain."""
+    with pytest.raises(ValidationError, match="split-brain"):
+        _kernel((_var("post_liked", None, True),),
+                WorkflowGraph(nodes=(
+                    _action_node("a1", "post_liked", "false"),
+                    _terminal("t", "a1"),
+                )))
+
+
 def test_recompose_after_goal_patch_requires_new_graph():
     k = _kernel((_var("release_date", "2026-08-14", "2026-08-18"),),
                 _two_step_graph())
@@ -410,6 +439,56 @@ def test_multiple_writes_restore_through_history_lifo():
     assert k.record_compensation_result(
         plan.plan_id, _comp_success(plan, k.epoch)) == "complete"
     assert k.task_state().variable("x").observed == 1
+
+
+# ══ GATE-G0 r9 postmortem (2026-08-20) ═══════════════════════════════════
+def test_readonly_observation_deepening_never_compensates():
+    """GATE-G0 r9: ``target_post_text`` went null → full text after the
+    'find the post' action. That is the world becoming VISIBLE (observation
+    deepening), never a system write — spawning a compensation entry for
+    it burned a whole rollback round telling the CUA to "restore the post
+    text to None"."""
+    k = _kernel((_var("target_post_text", None, "核心CPI意外下降",
+                      mutability=MUTABILITY_READONLY),),
+                WorkflowGraph(nodes=(
+                    _action_node("a1", "target_post_text", "核心CPI意外下降"),
+                    _terminal("t", "a1"),
+                )))
+    k.commit_checkpoint("C0", "搜索前")
+    _run_action(k, "a1", "target_post_text",
+                "扣除食物和能源的核心CPI意外下降")
+    assert k.task_state().variable("target_post_text").observed == (
+        "扣除食物和能源的核心CPI意外下降")
+    plan = k.request_compensation(CompensationPatch(
+        patch_id="rb", target_checkpoint_id="ckpt:C0"))
+    assert plan.entries == ()          # observation deepening ≠ a write
+
+
+def test_verified_write_blind_to_observed_plane_still_compensates():
+    """GATE-G0 r9: a like toggle is icon COLOR, not visible text — the
+    observed plane reads null BEFORE and AFTER the action. The ACTION's
+    own verification (deterministic or the R4 screenshot-grounded model
+    verifier) confirmed the desired value landed; that verified value is
+    the write the compensation must undo (r9's rollback skipped the like
+    undo because before==after==None)."""
+    k = _kernel((_var("target_post_liked", None, True),),
+                WorkflowGraph(nodes=(
+                    _action_node("a1", "target_post_liked", True),
+                    _terminal("t", "a1"),
+                )))
+    k.commit_checkpoint("C0", "点赞前")
+    h = k.request_action("a1")
+    assert k.start_action(h["action_id"])
+    # the text plane is blind: NO observation folds — observed stays None
+    assert k.finish_action(h["action_id"], observations=())
+    _verify(k, "a1", True, h)          # the visual verifier confirmed it
+    assert k.task_state().variable("target_post_liked").observed is None
+    plan = k.request_compensation(CompensationPatch(
+        patch_id="rb", target_checkpoint_id="ckpt:C0"))
+    by_key = {e.semantic_key: e for e in plan.entries}
+    assert "target_post_liked" in by_key          # the like DOES undo now
+    assert by_key["target_post_liked"].from_observed is True
+    assert by_key["target_post_liked"].to_observed is None
 
 
 # ══ G6: deterministic workflow rewind after compensation ═════════════════
