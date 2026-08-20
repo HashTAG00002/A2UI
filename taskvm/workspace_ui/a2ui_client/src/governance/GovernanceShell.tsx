@@ -34,6 +34,10 @@ export interface GovernanceShellProps {
   status: TaskStatus;
   /** False while the task world is still compiling (T0–T2). */
   canStart: boolean;
+  /** Commands whose optimistic POST is still in flight (A9.1): the
+   *  button flips to its pending chip (label + "…") — a <100ms VISIBLE
+   *  receipt for every governance click. Optional + backward compatible. */
+  pendingActions?: readonly string[];
   onStart: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -48,6 +52,10 @@ export interface GovernanceShellProps {
   /** The A6 free-text intent console — FIXED shell chrome, never
    *  model-generated, rendered between the goal card and the controls. */
   intentConsole?: ReactNode;
+  /** True while the island renders the SWR snapshot and the first live
+   *  server signal has not landed yet (A9.1) — shows the "同步中"
+   *  badge. Optional + backward compatible. */
+  syncing?: boolean;
   /** The dynamic task region (model-generated A2UI surface / skeleton). */
   children: ReactNode;
 }
@@ -58,12 +66,14 @@ function GovButton({
   onClick,
   disabled,
   tone,
+  pending,
 }: {
   action: string;
   label: string;
   onClick: () => void;
   disabled?: boolean;
   tone?: 'primary' | 'danger';
+  pending?: boolean;
 }) {
   const cls = tone === 'primary' ? 'gov-btn gov-btn--primary' : tone === 'danger' ? 'gov-btn gov-btn--danger' : 'gov-btn';
   return (
@@ -73,8 +83,11 @@ function GovButton({
       data-governance-action={action}
       onClick={onClick}
       disabled={disabled}
+      aria-busy={pending ? 'true' : undefined}
+      data-pending={pending ? 'true' : 'false'}
     >
       {label}
+      {pending ? '…' : ''}
     </button>
   );
 }
@@ -83,6 +96,7 @@ export function GovernanceShell({
   goal,
   status,
   canStart,
+  pendingActions = [],
   onStart,
   onPause,
   onResume,
@@ -95,10 +109,12 @@ export function GovernanceShell({
   substrateLabel,
   onOpenSubstrate,
   intentConsole,
+  syncing = false,
   children,
 }: GovernanceShellProps) {
   const started = status === 'running' || status === 'paused';
   const finished = status === 'completed' || status === 'failed';
+  const isPending = (a: string) => pendingActions.includes(a);
 
   return (
     <div className="shell" data-testid="governance-shell">
@@ -116,6 +132,9 @@ export function GovernanceShell({
         >
           {substrateLabel}
         </button>
+        {syncing && (
+          <span className="sync-badge" data-testid="sync-badge">同步中…</span>
+        )}
       </header>
 
       <section className="shell__goal" data-testid="goal-card">
@@ -131,17 +150,21 @@ export function GovernanceShell({
 
       <section className="shell__controls" data-testid="governance-controls">
         <GovButton action="start" label="开始" onClick={onStart}
-                   disabled={!canStart || started || finished} tone="primary" />
+                   disabled={!canStart || started || finished}
+                   pending={isPending('start')} tone="primary" />
         <GovButton action="pause" label="暂停" onClick={onPause}
-                   disabled={status !== 'running'} />
+                   disabled={status !== 'running'} pending={isPending('pause')} />
         <GovButton action="resume" label="继续" onClick={onResume}
-                   disabled={status !== 'paused'} />
+                   disabled={status !== 'paused'} pending={isPending('resume')} />
         <GovButton action="stop" label="停止" onClick={onStop}
-                   disabled={!started || finished} tone="danger" />
+                   disabled={!started || finished} pending={isPending('stop')}
+                   tone="danger" />
         <GovButton action="checkpoint" label="打检查点" onClick={onCheckpoint}
-                   disabled={status !== 'running'} />
+                   disabled={status !== 'running'}
+                   pending={isPending('checkpoint')} />
         <GovButton action="rollback" label="回退" onClick={onRollback}
-                   disabled={checkpoints.length === 0} />
+                   disabled={checkpoints.length === 0}
+                   pending={isPending('rollback')} />
         <GovButton action="open-evidence" label={`证据 (${evidenceCount})`}
                    onClick={onOpenEvidence} />
       </section>

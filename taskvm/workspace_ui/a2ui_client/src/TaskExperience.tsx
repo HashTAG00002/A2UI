@@ -5,28 +5,29 @@
  *  - §20.1 progress events (goal / t1 / t2 / ready / …) drive the morph
  *    chain through the pure reducer (`a2ui/morph.ts`) — no local timers,
  *    no faked skeletons;
- *  - named `governance` SSE events (A7, frozen contract with agentAPP.6:
- *    GOVERNANCE_SSE_KINDS on the server, GOVERNANCE_KINDS here — the
- *    same closed 10-kind vocabulary) drive the motion layer through
- *    `a2ui/governanceEvents.ts`: the verified snake trajectory,
- *    checkpoint rewards, the final-PASS-only celebration, rollback
- *    reverse playback and pause honesty;
+ *  - named `governance` SSE events (A7, frozen contract with agentAPP.6)
+ *    drive the motion layer; the verified snake trajectory, checkpoint
+ *    rewards, the final-PASS-only celebration, rollback reverse
+ *    playback and pause honesty;
  *  - ordered A2UI messages feed the official MessageProcessor;
- *  - renderer actions cross the actionBridge: the edited value is read
- *    from the CLIENT-side data model (the GenericBinder's generated
- *    setValue → dataContext.set wrote it there on every keystroke) and
- *    POSTed to the ONLY write path (/api/app/a2ui/action → policy
- *    re-check → ONE governance local_patch). The zero-model-call
- *    updateDataModel frame from the server poller is how the new value
- *    lands back on screen — the A5 acceptance loop.
+ *  - renderer actions cross the actionBridge → the ONLY write path.
  *
- * The A6 IntentConsole (fixed chrome) POSTs free text to
- * /api/app/a2ui/intent and renders the structured answer — it never
- * writes anything itself.
+ * A9.1 (owner 2026-08-19: "点 start 没反应 / 太卡 / 图片丢失"):
+ *  - governance buttons now POST through the single-sid proxy
+ *    (`a2ui/governanceApi.ts`) with OPTIMISTIC receipts (<100ms, a
+ *    pending chip + aria-busy on the button) and honest ROLLBACK on
+ *    failure — "no reaction to Start" is a bug, not a state;
+ *  - a SWR snapshot (`a2ui/snapshotCache.ts`) hydrates the island from
+ *    the last rendered state + a "同步中" badge — never a blank page;
+ *  - the staged timeline (`progressive/StageTimeline.tsx`) shows the
+ *    compile chain with LIVE timers, stamped by real signals;
+ *  - the thumbnail pipeline (`a2ui/liveShot.ts`): ≤240px thumbs, hash
+ *    dedup (unchanged screen ⇒ zero bytes), 150ms burst coalescing,
+ *    adaptive slow-network cadence.
  *
- * Governance intents (start/pause/…) stay local-shell behavior this
- * wave (wiring them to the public governance routes is a separate
- * card); the shell chrome itself is untouched.
+ * Governance intents land on the SAME driver/kernel paths the frozen
+ * shell's routes run (the proxy is the composition seam; the SSE
+ * governance events remain the authoritative state source).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -37,6 +38,7 @@ import {
   ProgressiveTaskPlane,
   type WorkflowNodeChip,
 } from './progressive/ProgressiveTaskPlane';
+import { StageTimeline, type StageMark } from './progressive/StageTimeline';
 import { SnakeProgress } from './progressive/SnakeProgress';
 import { CelebrationLayer } from './motion/CelebrationLayer';
 import { IntentConsole } from './intent/IntentConsole';
@@ -51,6 +53,8 @@ import {
   postSurfaceAction,
   type A2uiConnectionState,
 } from './a2ui/transport';
+import { postGovernance, type GovCommand } from './a2ui/governanceApi';
+import { loadSnapshot, saveSnapshot } from './a2ui/snapshotCache';
 import {
   INITIAL_ISLAND_STATE,
   reduceProgress,
@@ -68,7 +72,25 @@ import { applyGovernanceToNodes } from './a2ui/snake';
 const WAITING_GOAL_TEXT = '等待第一条任务指令…';
 
 export function TaskExperience() {
-  const [state, setState] = useState<IslandState>(INITIAL_ISLAND_STATE);
+  // ── SWR snapshot hydration (A9.1): the last rendered state first,
+  //    a "同步中" badge until the first live server signal lands —
+  //    entering a session NEVER shows a blank loading page.
+  const [state, setState] = useState<IslandState>(() => {
+    const snap = loadSnapshot();
+    if (snap) {
+      return {
+        phase: snap.phase,
+        status: snap.status,
+        goal: snap.goal,
+        skeletons: snap.skeletons,
+        nodes: snap.nodes,
+        streamError: null,
+      };
+    }
+    return INITIAL_ISLAND_STATE;
+  });
+  const hydratedFromCache = useRef(loadSnapshot() !== null);
+  const [syncing, setSyncing] = useState(hydratedFromCache.current);
   const [lastAction, setLastAction] = useState<string | null>(null);
   const [connState, setConnState] =
     useState<A2uiConnectionState>('connecting');
@@ -76,6 +98,8 @@ export function TaskExperience() {
     [],
   );
   const [evidenceCount] = useState(2);
+  const [stageMarks, setStageMarks] = useState<StageMark[]>([]);
+  const [govPending, setGovPending] = useState<readonly GovCommand[]>([]);
 
   // ── the A7 motion layer (governance SSE events → pure reducer) ───────
   const [motion, setMotion] = useState<GovernanceMotionState>(
@@ -94,6 +118,9 @@ export function TaskExperience() {
     typeof useA2uiStream
   >['processor'] | null>(null);
 
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
   const onSurfaceAction = useCallback((action: A2uiClientAction) => {
     const event = translateAction(action);
     if (event.kind === 'rejected') {
@@ -106,8 +133,7 @@ export function TaskExperience() {
     // literal (policy-side: ticket A5-IFACE-01, adjudicated 2026-08-20).
     // Trees that omit the value (semanticKey-only, the baseline form)
     // read the CURRENT edited value from the client-side data model
-    // instead — the GenericBinder's setValue wrote it there on every
-    // keystroke. Equivalent, honest paths; never a guessed value.
+    // instead. Equivalent, honest paths; never a guessed value.
     const surface = processorRef.current?.model.surfacesMap.get(
       action.surfaceId,
     );
@@ -147,13 +173,26 @@ export function TaskExperience() {
     goal?: string;
     nodes?: { label: string; kind: string; status: string }[];
   }) => {
+    // the first LIVE signal retires the SWR "syncing" badge
+    setSyncing(false);
+    // stamp the staged timeline (A9.1) — real signal arrivals only
+    setStageMarks((marks) => {
+      const key = ev.stage as StageMark['key'];
+      if (key === 'goal') return [{ key: 'goal', at: Date.now(), label: '接收任务' }];
+      if (key === 't1' || key === 't2' || key === 'ready' || key === 'failed') {
+        if (marks.some((m) => m.key === key)) return marks;
+        return [...marks, { key, at: Date.now(), label: '' }];
+      }
+      return marks;
+    });
     setState((s) => reduceProgress(s, ev as Parameters<
       typeof reduceProgress
     >[1]));
-    if (ev.stage === 'goal') {
-      // a new instruction resets the motion layer honestly too
+    if (ev.stage === 'goal' || ev.stage === 'goal_failed') {
+      // a new instruction (or its failure) resets the motion layer too
       setMotion(INITIAL_GOVERNANCE_MOTION);
       setSnakeNodes([]);
+      if (ev.stage === 'goal') setLocalCheckpoints([]);
       return;
     }
     if (ev.stage === 't2' && Array.isArray(ev.nodes)) {
@@ -166,6 +205,8 @@ export function TaskExperience() {
     kind: string;
     label?: string;
   }) => {
+    // server governance truth retires the syncing badge too
+    setSyncing(false);
     setMotion((m) => reduceGovernance(m, ev as Parameters<
       typeof reduceGovernance
     >[1]));
@@ -176,14 +217,16 @@ export function TaskExperience() {
         >[1]),
       );
     }
-    // terminal / lifecycle verdicts map onto the shell status pill —
-    // the server's governance truth wins over local optimism
+    // lifecycle verdicts map onto the shell status pill — the server's
+    // governance truth is AUTHORITATIVE: it wins over local optimism
+    // AND over its rollback (a locally refused start does not make a
+    // later server-side pause a lie — the world paused anyway)
     setState((s) => {
       switch (ev.kind) {
         case 'pause':
-          return s.status === 'running' ? { ...s, status: 'paused' } : s;
+          return { ...s, status: 'paused' };
         case 'resume':
-          return s.status === 'paused' ? { ...s, status: 'running' } : s;
+          return { ...s, status: 'running' };
         case 'stop':
           return { ...s, status: 'failed' };
         case 'final_pass':
@@ -200,7 +243,10 @@ export function TaskExperience() {
   const processMessages = stream.processMessages;
   useEffect(() => {
     const conn = connectA2ui({
-      onMessages: (messages) => processMessages(messages),
+      onMessages: (messages) => {
+        setSyncing(false);   // ordered protocol truth arrived
+        processMessages(messages);
+      },
       onProgress: handleProgress,
       onGovernance: handleGovernance,
       onConnectionChange: setConnState,
@@ -211,8 +257,9 @@ export function TaskExperience() {
     fetchAppStatus().then((st) => {
       const goals = st?.goals ?? [];
       const last = goals[goals.length - 1];
-      if (!last) return;
-      setState((s) => (s.goal ? s : { ...s, goal: last.goal }));
+      if (last) {
+        setState((s) => (s.goal ? s : { ...s, goal: last.goal }));
+      }
     });
     return () => conn.close();
   }, [processMessages, handleProgress, handleGovernance]);
@@ -224,41 +271,104 @@ export function TaskExperience() {
     if (hasSurfaces) setState((s) => withSurfacesLive(s));
   }, [hasSurfaces]);
 
-  // ── governance shell intents (local this wave — separate card) ─────
-  const canStart = state.phase === 'live' && state.status === 'ready';
+  // ── persist the SWR snapshot (debounced; visible fields only) ──────
+  useEffect(() => {
+    const id = setTimeout(() => {
+      saveSnapshot({
+        goal: state.goal,
+        phase: state.phase,
+        status: state.status,
+        skeletons: state.skeletons,
+        nodes: state.nodes,
+        checkpoints: [],
+      });
+    }, 500);
+    return () => clearTimeout(id);
+  }, [state.goal, state.phase, state.status, state.skeletons, state.nodes]);
 
+  // ── governance commands (A9.1: optimistic receipt + honest rollback).
+  //    The optimistic status flips IMMEDIATELY (same render cycle as
+  //    the click — the <100ms receipt); a `{ok:false}` answer rolls
+  //    back to the pre-click status and surfaces the reason verbatim.
+  const runGovernance = useCallback(
+    (command: GovCommand, label?: string) => {
+      const optimistic: Partial<Record<GovCommand, IslandState['status']>> = {
+        start: 'running',
+        pause: 'paused',
+        resume: 'running',
+        stop: 'failed',
+      };
+      const t0 = performance.now();
+      if (typeof performance.mark === 'function') {
+        performance.mark(`gov-${command}-click`);
+      }
+      setGovPending((p) => (p.includes(command) ? p : [...p, command]));
+      const prevStatus = stateRef.current.status;
+      const next = optimistic[command];
+      if (next) setState((s) => ({ ...s, status: next }));
+      postGovernance(command, label).then((res) => {
+        if (typeof performance.mark === 'function') {
+          performance.mark(`gov-${command}-ack`);
+          try {
+            performance.measure(
+              `gov-${command}`,
+              `gov-${command}-click`,
+              `gov-${command}-ack`,
+            );
+          } catch {
+            // marks are best-effort observability
+          }
+        }
+        setGovPending((p) => p.filter((c) => c !== command));
+        if (res.ok) {
+          setLastAction(
+            `${command} ✓${res.state ? ` (${res.state})` : ''}`
+              + (label ? ` · ${label}` : ''),
+          );
+        } else {
+          // honest rollback: restore the pre-click status, show why
+          setState((s) =>
+            s.status === next && prevStatus !== next
+              ? { ...s, status: prevStatus }
+              : s,
+          );
+          setLastAction(`${command} ✗ ${res.error ?? '失败（已回滚）'}`);
+        }
+        void t0;
+      });
+    },
+    [],
+  );
+
+  const canStart = state.phase === 'live' && state.status === 'ready';
   const onStart = useCallback(() => {
     if (!canStart) return;
-    setState((s) => ({ ...s, status: 'running' }));
-    setLastAction('start');
-  }, [canStart]);
-
+    runGovernance('start');
+  }, [canStart, runGovernance]);
   const onPause = useCallback(
-    () =>
-      setState((s) => ({ ...s, status: s.status === 'running' ? 'paused' : s.status })),
-    [],
+    () => runGovernance('pause'),
+    [runGovernance],
   );
   const onResume = useCallback(
-    () =>
-      setState((s) => ({ ...s, status: s.status === 'paused' ? 'running' : s.status })),
-    [],
+    () => runGovernance('resume'),
+    [runGovernance],
   );
-  const onStop = useCallback(() => {
-    setState((s) => ({
-      ...s,
-      status: s.status === 'running' || s.status === 'paused' ? 'failed' : s.status,
-    }));
-    setLastAction('stop');
-  }, []);
+  const onStop = useCallback(() => runGovernance('stop'), [runGovernance]);
 
   const onCheckpoint = useCallback(() => {
-    setLocalCheckpoints((cps) => [...cps, { label: `检查点 ${cps.length + 1}` }]);
-  }, []);
+    // the label is user-visible by construction (the server mints the
+    // same naming scheme when the body omits one)
+    const n = localCheckpoints.length + motion.checkpoints.length + 1;
+    const label = `检查点 ${n}`;
+    setLocalCheckpoints((cps) => [...cps, { label }]);
+    runGovernance('checkpoint', label);
+  }, [localCheckpoints.length, motion.checkpoints.length, runGovernance]);
 
   const onRollback = useCallback(() => {
-    setLocalCheckpoints((cps) => cps.slice(0, -1));
-    setLastAction('rollback');
-  }, []);
+    const all = [...localCheckpoints, ...motion.checkpoints];
+    const last = all[all.length - 1];
+    if (last) runGovernance('rollback', last.label);
+  }, [localCheckpoints, motion.checkpoints, runGovernance]);
 
   const onOpenEvidence = useCallback(() => setLastAction('open-evidence'), []);
   const onOpenSubstrate = useCallback(() => setLastAction('open-substrate'), []);
@@ -296,12 +406,14 @@ export function TaskExperience() {
   }, [localCheckpoints, motion.checkpoints]);
 
   const showSnake = state.phase === 'live' && snakeNodes.length > 0;
+  const verifiedCount = snakeNodes.filter((n) => n.status === 'verified').length;
 
   return (
     <GovernanceShell
       goal={state.goal || WAITING_GOAL_TEXT}
       status={state.status}
       canStart={canStart}
+      pendingActions={govPending}
       onStart={onStart}
       onPause={onPause}
       onResume={onResume}
@@ -314,7 +426,14 @@ export function TaskExperience() {
       substrateLabel="MobileGym"
       onOpenSubstrate={onOpenSubstrate}
       intentConsole={<IntentConsole onSubmit={onIntentSubmit} />}
+      syncing={syncing}
     >
+      <StageTimeline
+        marks={stageMarks}
+        verifiedCount={verifiedCount}
+        totalCount={snakeNodes.length}
+        executing={state.status === 'running'}
+      />
       <ProgressiveTaskPlane
         phase={state.phase}
         variableSkeletons={state.skeletons}
@@ -343,7 +462,7 @@ export function TaskExperience() {
               </p>
             )}
             {lastAction && (
-              <p className="last-action" data-testid="last-action">
+              <p className="last-action" data-testid="last-action" role="status">
                 {lastAction}
               </p>
             )}

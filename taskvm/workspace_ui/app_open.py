@@ -69,6 +69,8 @@ from typing import Any
 from taskvm.architect import ModelCallLedger
 from taskvm.architect.http_port import HttpModelPort
 from taskvm.projection.store import ProjectionSessionStore
+from taskvm.domain.errors import TaskVMError
+from taskvm.projection.view_models import snapshot_view
 from taskvm.substrate import substrate_registry
 from taskvm.workspace_ui import serve
 from taskvm.workspace_ui.call_archive import maybe_recording_port
@@ -78,6 +80,9 @@ from taskvm.workspace_ui.composition import (
 from taskvm.workspace_ui.a2ui_transport import (
     A2uiTransport, A2uiTransportError, compiler_stage_payload,
     kernel_stage_payload, register_a2ui_routes,
+)
+from taskvm.workspace_ui.a2ui_transport import (
+    _taskvm_error_status,
 )
 from taskvm.workspace_ui.demo_open import (
     _ensure_mobilegym_bridge,          # closed-whitelist bridge glue
@@ -421,8 +426,31 @@ def _shot_response(data: bytes, mime: str, *, fp: str,
     return Response(data, mimetype=mime, headers=headers)
 
 
+#: The CLOSED command vocabulary of the island's governance proxy route
+#: (A9.1: optimistic first-response). These map 1:1 onto the FROZEN
+#: projection routes' driver/governance semantics — this proxy is the
+#: single-sid composition seam so the React island never has to know the
+#: session id (GUI-only, repo contract §3).
+_APP_GOV_COMMANDS = frozenset({
+    "start", "pause", "resume", "stop", "checkpoint", "rollback",
+})
+
+
+def _lazy_driver(sess):
+    """The frozen app's lazy ThreadedRuntimeDriver construction, reused
+    verbatim by the island's governance proxy (one driver per session,
+    single-owner path). ``None`` when the session registered no runtime."""
+    if getattr(sess, "driver", None) is not None:
+        return sess.driver
+    if getattr(sess, "runtime", None) is None:
+        return None
+    from taskvm.projection.services.driver import ThreadedRuntimeDriver
+    sess.driver = ThreadedRuntimeDriver(sess.runtime, kernel=sess.kernel)
+    return sess.driver
+
+
 def register_app_routes(app, store: ProjectionSessionStore,
-                        state: AppState) -> None:
+                         state: AppState) -> None:
     """Add the APP-shell routes to the stock projection Flask app.
 
     These are composition-seam routes (session creation + screenshot
@@ -531,6 +559,83 @@ def register_app_routes(app, store: ProjectionSessionStore,
             if thumb is not None:
                 data, mime = thumb, "image/jpeg"
         return _shot_response(data, mime, fp=fp, cacheable=False)
+
+    # ── POST /api/app/governance/<command> — the island's optimistic ───
+    #     first-response proxy (A9.1). Zero model calls by construction;
+    #     the command set + statuses mirror the FROZEN projection routes
+    #     (single-owner driver path), so the island's Start button is no
+    #     longer local-only theater. "No reaction to Start" is now a
+    #     real HTTP round trip measured in single-digit ms.
+    @app.route("/api/app/governance/<command>", methods=["POST"])
+    def app_governance(command: str):
+        from flask import jsonify, request
+        if command not in _APP_GOV_COMMANDS:
+            return jsonify({"ok": False, "action": command,
+                            "error": f"unknown governance command "
+                                     f"{command!r}"}), 400
+        sess = store.get(state.sid)
+        if sess is None:
+            return jsonify({"ok": False, "action": command,
+                            "error": "任务世界尚未就绪（还没有会话）"}), 409
+        body = request.get_json(silent=True) or {}
+        label = str(body.get("label", "") or "").strip()
+        driver = _lazy_driver(sess)
+        try:
+            if command in ("start", "pause", "resume", "stop"):
+                if command == "start":
+                    if getattr(sess.kernel, "pending_recompose",
+                               None) is not None:
+                        return jsonify({
+                            "ok": False, "action": "start",
+                            "error": "任务目标已变更，等待重新编排后才能继续"
+                                     "执行"}), 409
+                if driver is None:
+                    return jsonify({
+                        "ok": False, "action": command,
+                        "error": "本会话未注册运行时，无法执行"}), 409
+                driver_state = {
+                    "start": driver.start, "pause": driver.pause,
+                    "resume": driver.resume,
+                    "stop": driver.stop}[command]()
+                if driver_state == "stopped" and command in (
+                        "start", "resume"):
+                    return jsonify({
+                        "ok": False, "action": command,
+                        "state": driver_state,
+                        "error": "会话已停止（stop 是持久状态），需要新的"
+                                 "任务"}), 409
+                return jsonify({"ok": True, "action": command,
+                                "state": driver_state})
+            if command == "checkpoint":
+                if not label:
+                    _n = len(sess.kernel.checkpoints() or ()) + 1
+                    label = f"检查点 {_n}"
+                result = sess.governance_port().checkpoint(label)
+                return jsonify({"ok": True, "action": "checkpoint",
+                                "result": result}), 201
+            # rollback: the user-visible checkpoint LABEL (the island
+            # never sees checkpoint ids — repo contract §3)
+            if not label:
+                return jsonify({"ok": False, "action": "rollback",
+                                "error": "缺少检查点标签"}), 400
+            latest = None
+            for c in (snapshot_view(sess).get("checkpoints") or []):
+                if c.get("label") == label:
+                    latest = c.get("checkpoint_id")
+            if not latest:
+                return jsonify({"ok": False, "action": "rollback",
+                                "error": f"没有名为 {label!r} 的检查点"}), 404
+            result = sess.governance_port().rollback(
+                latest, rationale=str(body.get("rationale", "") or ""))
+            plan = result.pop("plan", None)
+            if plan is not None and driver is not None:
+                result["disposition"] = driver.execute_compensation(plan)
+            return jsonify({"ok": True, "action": "rollback",
+                            "result": result})
+        except TaskVMError as e:
+            return jsonify({"ok": False, "action": command,
+                            "error": f"{type(e).__name__}: {e}"}), \
+                _taskvm_error_status(e)
 
 
 def _discover_surfaces(session: Any) -> tuple[dict[str, str], ...]:

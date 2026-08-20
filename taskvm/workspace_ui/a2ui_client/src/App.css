@@ -177,8 +177,87 @@
     left: 0;
     border-left-color: var(--border);
   }
+
   &::after {
     right: 0;
     border-right-color: var(--border);
   }
+}
+
+/* ── A9.1: staged timeline + sync badge + pending receipts ───────── */
+
+.sync-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--fg-muted, #888);
+  background: color-mix(in srgb, var(--border, #ccc) 30%, transparent);
+}
+
+.sync-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent, #4a7dff);
+  animation: sync-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes sync-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+.gov-btn[aria-busy='true'] {
+  opacity: 0.75;
+  cursor: progress;
+}
+
+.stage-timeline {
+  margin: 0 0 14px;
+}
+
+.stage-timeline__list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 0;
+  padding: 0;
+}
+
+.stage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  background: color-mix(in srgb, var(--border, #ccc) 18%, transparent);
+  color: var(--fg-muted, #777);
+}
+
+.stage-chip__mark {
+  font-size: 11px;
+}
+
+.stage-chip__dur {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.stage-chip--live {
+  color: var(--fg, inherit);
+  background: color-mix(in srgb, var(--accent, #4a7dff) 12%, transparent);
+}
+
+.stage-chip--live .stage-chip__mark {
+  animation: sync-pulse 1.2s ease-in-out infinite;
+}
+
+.stage-chip--exec {
+  color: var(--fg, inherit);
 }
