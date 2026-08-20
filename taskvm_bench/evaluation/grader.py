@@ -189,16 +189,51 @@ def _projection_observed(iv) -> dict[str, Any]:
     return out
 
 
-def _projection_group(bundle: EvidenceBundle) -> dict:
+def _projection_group(bundle: EvidenceBundle,
+                      spec: TaskSpec | None = None) -> dict:
     """Check every bracketed projection snapshot against the oracle state
     of the same moment. Rule (same semantics as the runner's round-trip
     projection metric): a variable entry is consistent when
     (a) its key matches a world key (directly or as a flattened
     ``<entity>.<field>`` suffix) with an equal value, or
     (b) its value appears somewhere in the world; a mismatch means the
-    projection believes a value the world nowhere holds — a lie."""
+    projection believes a value the world nowhere holds — a lie.
+
+    GATE-G0 r8 postmortem: architect-created intermediate variables (e.g.
+    ``post_search_phrase`` — a visible-text search term, not a store-backed
+    toggle) have NO oracle counterpart. The projection check must not flag
+    them as lies. When ``spec`` is provided, only variables whose keys
+    appear in the spec's tracked vocabulary (seed/success/protected/witness)
+    are checked; architect-created intermediates are skipped. When
+    ``spec`` is None (legacy callers), all variables are checked."""
     checked = 0
     mismatches: list[dict] = []
+    # GATE-G0 r8: build the set of spec-tracked variable keys so
+    # architect-created intermediates (post_search_phrase, etc.) are
+    # skipped — they have no oracle counterpart.
+    tracked_keys: set[str] | None = None
+    if spec is not None:
+        tracked_keys = set()
+        # Collect keys from ALL surfaces (not just "x") — the spec may
+        # use "notes", "desktop", "x", etc. We store the full key and
+        # the suffix (last segment after ".") so that both direct and
+        # flattened matches work in the checking loop below.
+        for surface in spec.surfaces:
+            for surface_kv in (spec.seed.get(surface) or {}).keys():
+                tracked_keys.add(surface_kv)
+                tracked_keys.add(surface_kv.split(".", 1)[-1])
+            for surface_kv in (spec.success.get(surface) or {}).keys():
+                tracked_keys.add(surface_kv)
+                tracked_keys.add(surface_kv.split(".", 1)[-1])
+        # Also include protected and witness keys, and the platform key
+        # (a world fact the oracle legitimately projects).
+        for _surf, key in spec.protected:
+            tracked_keys.add(key)
+            tracked_keys.add(key.split(".", 1)[-1])
+        for _surf, key, _val in spec.witness:
+            tracked_keys.add(key)
+            tracked_keys.add(key.split(".", 1)[-1])
+        tracked_keys.add("platform")
     brackets = [iv for iv in bundle.interventions
                 if iv.projection_after
                 and iv.projection_after.get("available") is not False]
@@ -206,6 +241,9 @@ def _projection_group(bundle: EvidenceBundle) -> dict:
         observed = _projection_observed(iv)
         if not observed:
             continue
+        if tracked_keys is not None:
+            observed = {k: v for k, v in observed.items()
+                        if k in tracked_keys}
         world = _norm_state(iv.oracle_after)
         entries = [(s, k, kv[k]) for s, kv in world.items() for k in kv]
         for key, val in observed.items():
@@ -275,7 +313,7 @@ def grade_task(task_spec: TaskSpec,
     results = run_predicates(task_spec, evidence_bundle)
     world = _group(results, "world_contract")
     governance = _governance_group(results, evidence_bundle)
-    projection = _projection_group(evidence_bundle)
+    projection = _projection_group(evidence_bundle, task_spec)
     progress = _progress_group(evidence_bundle, task_spec)
 
     codes: list[str] = []
